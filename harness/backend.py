@@ -216,6 +216,11 @@ class ResearchMockBackend(Backend):
             "imprecise_wording": not d.get("require_rigorous_wording"),  # 定义但不入评分(真实杠杆)
             "buzzword": bool(d.get("buzzword_emphasis")),
         }
+        # L2(few-shot)解耦钩子: 被标记的 case, 表达维只由 style_exemplar 范例驱动(见 judge/clustering)。
+        # 与 charts/length/bushi 解耦, 避免残留缺陷掩盖 L1 表达 directive(贪心卡死)。
+        style_case = "needs_style_exemplar" in tags
+        sig["style_case"] = style_case
+        sig["style_unpolished"] = style_case and not skill.has_fewshot("style_exemplar")
         # bool 归一(& 运算可能产出 set)
         sig = {k: bool(v) for k, v in sig.items()}
 

@@ -1,0 +1,377 @@
+// app.js — OpenHarness 单页前端逻辑 (owner: M4)
+// 由 index.html 抽出;改后必须 node --check app.js。DIMS/ZH 随后端 STATE.dims/dim_zh 刷新。
+
+// 维度随产品变化(算数字型4维 / 调研洞察6维), 由后端 STATE.dims / STATE.dim_zh 提供;
+// 会话未加载前用算数字型作默认。render() 里按 STATE 刷新。
+let DIMS=["data_accuracy","completeness","insight","conciseness"];
+let ZH={data_accuracy:"数据准确性",completeness:"完整性",insight:"洞察质量",conciseness:"简洁性"};
+let SID=null, STATE=null;
+
+function toast(m,ms=2600){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';
+  clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',ms);}
+async function api(path,method,body){
+  const opt={method,headers:{'Content-Type':'application/json'}};
+  if(body)opt.body=JSON.stringify(body);
+  const r=await fetch(path,opt);
+  if(r.status===401){authWall();throw new Error('未登录');}
+  const j=await r.json();
+  if(!r.ok){toast(j.error||('错误 '+r.status));throw new Error(j.error||r.status);}
+  return j;
+}
+// iOA 未登录/身份校验失败: 整页拦截提示(而非吞成普通 toast)
+function authWall(){
+  if(document.getElementById('authWall'))return;
+  const d=document.createElement('div');
+  d.id='authWall';
+  d.style.cssText='position:fixed;inset:0;z-index:99;background:rgba(15,18,22,.96);'
+    +'display:flex;align-items:center;justify-content:center;text-align:center;padding:24px';
+  d.innerHTML='<div style="max-width:460px"><h2 style="color:var(--acc);margin:0 0 12px">需经 iOA 登录访问</h2>'
+    +'<p class="mut">未检测到有效的 iOA 身份，或身份校验失败。<br>请通过公司 iOA 网关（内网域名）访问本平台，不要直连端口。</p></div>';
+  document.body.appendChild(d);
+}
+function fmt(x,d=2){return x==null?'-':Number(x).toFixed(d);}
+function bar(v,max=5){return `<div class="barwrap"><div class="bar" style="width:${(v/max*100)||0}%"></div></div>`;}
+
+// ---- 1. 生成 V0 ----
+document.getElementById('genBtn').onclick=async()=>{
+  const req=document.getElementById('reqInput').value.trim();
+  if(!req){toast('请先填写需求描述');return;}
+  const pid=document.getElementById('pidInput').value.trim();
+  const j=await api('/api/session','POST',{requirement:req,product_id:pid});
+  SID=j.session_id; STATE=j; render();
+  toast('已生成 V0：'+j.product_id);
+};
+
+// ---- 2. 导入数据 ----
+document.getElementById('sampleBtn').onclick=async()=>{
+  if(!SID){toast('请先生成 V0');return;}
+  const j=await api('/api/data','POST',{id:SID,use_sample:true});
+  STATE=j; render(); toast('已导入内置样例：'+j.n_cases+' 条');
+};
+document.getElementById('importBtn').onclick=async()=>{
+  if(!SID){toast('请先生成 V0');return;}
+  const raw=document.getElementById('dataInput').value.trim();
+  if(!raw){toast('请粘贴数据或用样例');return;}
+  let rows;
+  try{ rows = raw[0]==='[' ? JSON.parse(raw) : raw.split('\n').filter(x=>x.trim()).map(x=>JSON.parse(x)); }
+  catch(e){toast('解析失败：'+e.message);return;}
+  const j=await api('/api/data','POST',{id:SID,rows}); STATE=j; render(); toast('已导入 '+j.n_cases+' 条');
+};
+
+// ---- 3. 提交标注 ----
+document.getElementById('labelSaveBtn').onclick=async()=>{
+  const labels={};
+  document.querySelectorAll('#labelTable input.score-in').forEach(inp=>{
+    const v=inp.value.trim(); if(v==='')return;
+    const [cid,dim]=inp.dataset.k.split('|');
+    (labels[cid]=labels[cid]||{})[dim]=parseInt(v);
+  });
+  if(!Object.keys(labels).length){toast('未填写任何分数');return;}
+  const j=await api('/api/labels','POST',{id:SID,version:STATE.current_version,labels});
+  STATE=j; render(); toast('已提交标注，校准已重算');
+};
+
+// ---- 4. 导入报告文本 ----
+document.getElementById('importOutBtn').onclick=async()=>{
+  if(!SID){toast('请先生成 V0 并导入数据');return;}
+  const cid=document.getElementById('outCaseSel').value;
+  const txt=document.getElementById('outText').value.trim();
+  if(!cid){toast('请选择 case');return;}
+  if(!txt){toast('请粘贴报告正文');return;}
+  const j=await api('/api/import_output','POST',{id:SID,version:STATE.current_version,case_id:cid,report_text:txt});
+  STATE=j; document.getElementById('outText').value=''; render();
+  toast('已导入 '+cid+' 的报告（'+txt.length+' 字）');
+};
+
+// ---- 4a. 上传报告文件 ----
+document.getElementById('uploadBtn').onclick=async()=>{
+  if(!SID){toast('请先生成 V0 并导入数据');return;}
+  const cid=document.getElementById('outCaseSel').value;
+  if(!cid){toast('请选择 case');return;}
+  const f=document.getElementById('outFile').files[0];
+  if(!f){toast('请选文件');return;}
+  const name=f.name.toLowerCase();
+  try{
+    if(name.endsWith('.md')||name.endsWith('.txt')){
+      const txt=await f.text();
+      const j=await api('/api/import_output','POST',{id:SID,version:STATE.current_version,case_id:cid,report_text:txt});
+      STATE=j; render(); toast('已上传 '+f.name);
+    }else{
+      const b64=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result.split(',')[1]);fr.onerror=rej;fr.readAsDataURL(f);});
+      const j=await api('/api/upload_report','POST',{id:SID,version:STATE.current_version,case_id:cid,filename:f.name,content_b64:b64});
+      STATE=j; render(); toast('已上传并解析 '+f.name);
+    }
+  }catch(e){/* api() 已 toast 错误 */}
+};
+
+// ---- 4b. 提交人工逐 check 标注 ----
+document.getElementById('submitCheckBtn').onclick=async()=>{
+  if(!SID){toast('请先生成 V0 并导入数据');return;}
+  const cid=document.getElementById('outCaseSel').value;
+  if(!cid){toast('请选择 case');return;}
+  const checks={};
+  document.querySelectorAll('#checkPanel select.chk').forEach(s=>{if(s.value)checks[s.dataset.cid]=s.value;});
+  if(!Object.keys(checks).length){toast('至少标一条 check');return;}
+  const j=await api('/api/submit_check_labels','POST',{id:SID,version:STATE.current_version,case_id:cid,checks});
+  STATE=j; render(); toast('已提交 '+Object.keys(checks).length+' 条 check 标注');
+};
+
+// ---- 4c. 一键跑 Opus judge ----
+document.getElementById('runJudgeBtn').onclick=async()=>{
+  if(!SID){toast('请先生成 V0 并导入数据');return;}
+  const cid=document.getElementById('outCaseSel').value;
+  if(!cid){toast('请选择 case');return;}
+  toast('调用 Opus 4.8 判分中…（约十几秒）',9000);
+  try{
+    const j=await api('/api/run_judge','POST',{id:SID,version:STATE.current_version,case_id:cid});
+    STATE=j; render(); toast('judge 完成');
+  }catch(e){/* api() 已 toast 错误(如无 key) */}
+};
+document.getElementById('rubricSaveBtn').onclick=async()=>{
+  if(!STATE){return;}
+  const weights={},target={};
+  document.querySelectorAll('#rubricEditor input.w').forEach(i=>weights[i.dataset.dim]=parseFloat(i.value)||0);
+  const ov=document.querySelector('#rubricEditor input.tgt-overall'); if(ov)target.overall=parseFloat(ov.value)||0;
+  const j=await api('/api/rubric','POST',{id:SID,weights,target}); STATE=j; render(); toast('rubric 已更新为 '+j.rubric.version);
+};
+
+// ---- 推进下一版 ----
+document.getElementById('advanceBtn').onclick=async()=>{
+  const j=await api('/api/advance','POST',{id:SID}); STATE=j; render();
+  const r=j.advance_result;
+  if(r){ toast(r.message, 4200);
+    document.getElementById('advanceMsg').innerHTML =
+      (r.status==='adopted'?'<span class="ok-txt">✅ 采纳</span> ':
+       r.status==='rejected'?'<span class="warn-txt">❌ 被 gate 拒绝</span> ':
+       '<span class="mut">■ 收敛</span> ')+r.message;
+  }
+};
+
+// ---------------- 渲染 ----------------
+function render(){
+  if(!STATE)return;
+  if(STATE.dims)DIMS=STATE.dims;
+  if(STATE.dim_zh)ZH=STATE.dim_zh;
+  // 调研洞察产品:隐藏旧的第3步(六维直接打分),只用第4步逐check标注(维度分由check派生)
+  const isResearch = STATE.rubric && STATE.rubric.product==='research_insight';
+  document.getElementById('labelCard').style.display = isResearch ? 'none' : '';
+  document.getElementById('backendBadge').textContent='backend: '+STATE.backend;
+  document.getElementById('sessBadge').textContent='会话 '+STATE.session_id+' · '+STATE.product_id;
+  document.getElementById('genRationale').innerHTML='<b>生成依据：</b><br>'+(STATE.gen_rationale||'').replace(/\n/g,'<br>');
+  ['dataCard','rubricCard','skillCard','labelCard','outputCard'].forEach(id=>document.getElementById(id).classList.add('active'));
+
+  // 版本 pills
+  const pills=STATE.versions.map((v,i)=>{
+    const cur=v.version===STATE.current_version?'cur':'';
+    const rej=v.adopted?'':'rej';
+    return `<span class="ver-pill ${cur} ${rej}" title="${(v.changelog||'').replace(/"/g,'')}">${v.version}${v.adopted?'':' (拒)'}</span>`;
+  }).join('');
+  document.getElementById('versionPills').innerHTML = pills +
+    `<div class="small mut" style="margin-top:6px">数据 ${STATE.n_cases} 条 ${JSON.stringify(STATE.splits)}</div>`;
+  document.getElementById('advanceBtn').disabled=!STATE.can_advance;
+
+  // 当前 skill
+  const cv=STATE.versions.find(v=>v.version===STATE.current_version);
+  const onDir=cv.directives_on.length?cv.directives_on.map(d=>`<span class="chip on">${d}</span>`).join(''):'<span class="mut">（全部关闭，等待优化打开）</span>';
+  document.getElementById('skillView').innerHTML=`
+    <div class="kv"><span>版本</span><b>${cv.version}</b></div>
+    <div class="kv"><span>父版本</span><span>${cv.parent||'—'}</span></div>
+    <div class="small mut" style="margin:6px 0">${cv.changelog||''}</div>
+    <div class="mut small">已打开的 directive（优化动作 L1）：</div><div>${onDir}</div>
+    ${cv.proposal?`<details><summary>本版来自的优化提议</summary><pre>${JSON.stringify(cv.proposal,null,2)}</pre></details>`:''}
+    <details><summary>查看结构（flow / subagents，冻结）</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
+
+  renderLabels(); renderCalib(); renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard();
+}
+
+function renderOutputCard(){
+  const sel=document.getElementById('outCaseSel');
+  if(!STATE.current_eval){sel.innerHTML='<option value="">导入数据后可选</option>';
+    document.getElementById('checkPanel').innerHTML='';document.getElementById('reportPreview').textContent='';return;}
+  const prev=sel.value;
+  sel.innerHTML=STATE.current_eval.map(r=>{
+    const has=r.report_text?' ✓报告':'';
+    const hh=(r.check_human&&Object.keys(r.check_human).length)?' ✓标注':'';
+    const hj=(r.check_judge&&Object.keys(r.check_judge).length)?' ✓judge':'';
+    return `<option value="${r.case_id}">${r.case_id} (${r.split})${has}${hh}${hj}</option>`;
+  }).join('');
+  if(prev)sel.value=prev;
+  sel.onchange=renderCheckPanel;
+  renderCheckPanel();
+}
+
+const CHK_NUM={met:1,partial:0.5,miss:0}, CHK_ZH={1:'满足',0.5:'部分',0:'不满足'};
+function renderCheckPanel(){
+  const cid=document.getElementById('outCaseSel').value;
+  const el=document.getElementById('checkPanel'), pv=document.getElementById('reportPreview');
+  if(!STATE.current_eval||!cid){el.innerHTML='';pv.textContent='';return;}
+  const r=STATE.current_eval.find(x=>x.case_id===cid); if(!r){el.innerHTML='';return;}
+  pv.innerHTML = r.report_text ? ('📄 报告已导入('+r.report_text.length+'字)') : '<span class="warn-txt">尚未导入报告</span>';
+  const rb=STATE.rubric, hc=r.check_human||{}, jc=r.check_judge||{}, jr=r.check_judge_reason||{};
+  const opts=(val)=>'<option value="">-</option>'+['met','partial','miss'].map(o=>
+    `<option value="${o}" ${val===CHK_NUM[o]?'selected':''}>${CHK_ZH[CHK_NUM[o]]}</option>`).join('');
+  let h='';
+  rb.dimensions.forEach(d=>{
+    const dh=(r.dims_human||{})[d.name], dj=(r.dims_judge||{})[d.name];
+    h+=`<div style="margin:8px 0 2px"><b>${d.name_zh}</b> <span class="mut">人工 ${dh!=null?dh:'-'} / judge ${dj!=null?dj:'-'}</span></div>`;
+    (d.checks||[]).forEach(c=>{
+      const jv=jc[c.id], jvt=(jv==null?'—':CHK_ZH[jv]);
+      h+=`<div class="kv" title="${(c.desc||'').replace(/"/g,'&quot;')}"><span>· ${c.label}${c.redline?' <span class="flag">红线</span>':''}</span>`+
+         `<span><select class="chk score-in" data-cid="${c.id}" style="width:64px">${opts(hc[c.id])}</select> `+
+         `<span class="mut" title="${(jr[c.id]||'').replace(/"/g,'&quot;')}">judge:${jvt}</span></span></div>`;
+    });
+  });
+  el.innerHTML=h;
+}
+function cv_structure(){ // 结构从 rubric 无关, 取 v0 的展示(结构冻结, 各版一致)
+  return {flow:["Intake","DataAnalyst→findings","Insight→insights","Writer→draft","Verifier(独立)","Format"],
+          subagents:["DataAnalyst","Insight","Writer","Verifier(独立对抗)"],memory:["config","facts","learned_rules"]};
+}
+
+function renderLabels(){
+  const el=document.getElementById('labelTable');
+  if(!STATE.current_eval){el.innerHTML='<span class="mut">导入数据后显示</span>';document.getElementById('labelSaveBtn').disabled=true;return;}
+  document.getElementById('labelSaveBtn').disabled=false;
+  let h='<table><tr><th>case</th><th>split</th><th>judge</th><th>报告</th><th>问题/flag</th>'+DIMS.map(d=>`<th>${ZH[d]}</th>`).join('')+'</tr>';
+  STATE.current_eval.forEach(r=>{
+    const src=r.score_source==='recorded'?'<span class="ok-txt" title="平台 LLM-judge 真实评分">真</span>':'<span class="mut" title="mock 占位分">mock</span>';
+    const js=DIMS.map(d=>r.scores[d]).join('/')+' <span class="small">'+src+'</span>';
+    const flags=(r.red_line?'<span class="redline">红线</span> ':'')+(r.flagged||[]).filter(f=>!f.startsWith('RED_LINE')).map(f=>`<span class="flag">${f}</span>`).join(' ');
+    const rep=r.report_text?`<span class="ok-txt" title="${r.report_text.slice(0,400).replace(/"/g,'&quot;')}">📄已导入</span>`:'<span class="mut">—</span>';
+    const hl=r.human_label||{};
+    let tds='';DIMS.forEach(d=>{tds+=`<td><input class="score-in" data-k="${r.case_id}|${d}" value="${hl[d]!=null?hl[d]:''}" placeholder="${r.scores[d]}"></td>`;});
+    h+=`<tr><td title="${JSON.stringify(r.output_summary).replace(/"/g,'&quot;')}">${r.case_id}</td><td class="mut">${r.split}</td><td>${js}</td><td>${rep}</td><td>${flags||'<span class="mut">—</span>'}</td>${tds}</tr>`;
+  });
+  h+='</table><div class="small mut" style="margin-top:6px">灰色为 judge 分（placeholder），填入你的人工分即可覆盖。悬停 case 看输出摘要。</div>';
+  el.innerHTML=h;
+}
+
+function renderCalib(){
+  const c=STATE.calib; const el=document.getElementById('calibView');
+  if(!c){el.innerHTML='<span class="mut">导入数据后显示</span>';return;}
+  const pass=c.passes_gate;
+  el.innerHTML=`
+    <div class="kv"><span>整体一致率</span><b class="${pass?'ok-txt':'warn-txt'}">${fmt(c.overall,3)}</b></div>
+    <div class="kv"><span>门槛</span><span>${c.gate}</span></div>
+    <div class="kv"><span>状态</span><b class="${pass?'ok-txt':'warn-txt'}">${pass?'PASS ✅ 可开优化':'FAIL ❌ 先校准 judge'}</b></div>
+    <div class="kv"><span>已标注</span><span>${c.n_labeled} 条</span></div>
+    <div class="small mut" style="margin-top:6px">分维度：${DIMS.map(d=>`${ZH[d]} ${fmt(c.per_dim[d],2)}`).join(' · ')}</div>
+    ${c.worst_rate<1?`<div class="small mut">最弱：${ZH[c.worst_dim]||c.worst_dim} (${fmt(c.worst_rate,2)}) — 该补锚点/反例</div>`:''}`;
+  // 逐 check 校准(真实标注线:人工 check vs Opus judge check)
+  const cc=STATE.check_calib;
+  if(cc && cc.overall!=null){
+    el.innerHTML += `<hr style="border-color:var(--line);margin:8px 0"><div class="kv"><span><b>逐 check 一致率</b>(人工 vs Opus)</span><b class="${cc.overall>=0.85?'ok-txt':'warn-txt'}">${fmt(cc.overall,3)}</b></div>`+
+      `<div class="small mut">对比 ${cc.n_case_pairs} 个 case、${cc.n_checks_compared} 条 check</div>`+
+      (cc.worst&&cc.worst.length?`<div class="small mut">最不一致：${cc.worst.filter(w=>w[1]<1).map(w=>w[0]+' '+fmt(w[1],2)).join(' · ')||'（都一致）'}</div>`:'');
+  } else {
+    el.innerHTML += `<hr style="border-color:var(--line);margin:8px 0"><div class="small mut">逐 check 校准：待同一 case 上「人工 check 标注」和「跑 judge」都完成后显示。</div>`;
+  }
+}
+
+function renderCurve(){
+  const el=document.getElementById('curveView');
+  if(!STATE.curve||!STATE.curve.length||!STATE.curve[0].dev){el.innerHTML='<span class="mut">导入数据后显示</span>';return;}
+  let h='<table><tr><th>版本</th>'+DIMS.map(d=>`<th>${ZH[d]}</th>`).join('')+'<th>overall</th><th>红线</th></tr>';
+  STATE.curve.forEach(pt=>{
+    const dev=pt.dev,test=pt.test;
+    let tds='';DIMS.forEach(d=>{const dv=dev[d],tv=test?test[d]:null;tds+=`<td>${fmt(dv,1)}${tv!=null?'<span class="mut">/'+fmt(tv,1)+'</span>':''}</td>`;});
+    h+=`<tr><td><b>${pt.version}</b></td>${tds}<td><b>${fmt(dev.overall,2)}</b>${test?'<span class="mut">/'+fmt(test.overall,2)+'</span>':''}</td><td>${dev.red_line_fails||0}</td></tr>`;
+  });
+  h+='</table><div class="small mut" style="margin-top:4px">D=dev / <span class="mut">T=test(held-out)</span></div>';
+  // 目标行
+  const t=STATE.target;
+  h+=`<div class="small" style="margin-top:8px">目标：${DIMS.map(d=>`${ZH[d]}≥${t[d]}`).join(' · ')} · overall≥${t.overall}</div>`;
+  el.innerHTML=h;
+}
+
+function renderFail(){
+  const el=document.getElementById('failView'); const f=STATE.current_failures;
+  if(!f){el.innerHTML='<span class="mut">导入数据后显示</span>';return;}
+  if(!f.length){el.innerHTML='<span class="ok-txt">当前无失败聚类 🎉</span>';return;}
+  el.innerHTML=f.map(p=>`<div style="margin-bottom:8px">
+    <div><b class="${p.severity==='high'?'warn-txt':''}">${p.pattern}</b> <span class="chip">${p.hit_count}命中</span> <span class="chip">${p.severity}</span></div>
+    <div class="small mut">影响：${p.affected_dims.map(d=>ZH[d]||d).join('/')} ${p.directive_hint?'· 可修：'+p.directive_hint:'· <span class="warn-txt">无指令级修法(结构性)</span>'}</div>
+  </div>`).join('');
+}
+
+function rubricDimsHtml(rb){
+  // 六维展开(判据 + 目标 + 检查点), 左/中/右三处复用
+  return rb.dimensions.map(d=>`<div style="margin:6px 0">
+      <div class="kv"><span>${d.name_zh} ${d.is_reverse?'<span class="chip">反向</span>':''}</span><span>权重 ${d.weight}${d.hard_floor?' · 红线<'+d.hard_floor:''}${rb.target&&rb.target[d.name]!=null?' · <b class="ok-txt">目标≥'+rb.target[d.name]+'</b>':''}</span></div>
+      <div class="small mut" title="${(d.criteria||'').replace(/"/g,'')}">${d.criteria}</div>
+      ${d.checks?'<div class="small" style="margin:4px 0 2px 8px">'+d.checks.map(c=>`<div class="kv" title="${(c.desc||'').replace(/"/g,'')}"><span>· ${c.label}${c.redline?' <span class="flag">红线</span>':''}</span><span class="mut">${c.effect||''}</span></div>`).join('')+'</div>':''}
+    </div>`).join('');
+}
+
+function renderRubric(){
+  const rb=STATE.rubric; const el=document.getElementById('rubricView');
+  el.innerHTML=`<div class="kv"><span>rubric 版本</span><b>${rb.version}</b></div>`+
+    rubricDimsHtml(rb)+
+    `<div class="kv" style="margin-top:6px"><span>overall 目标</span><b class="ok-txt">≥${(rb.target&&rb.target.overall)||'-'}</b></div>`+
+    `<div class="kv"><span>校准门槛</span><b>${(rb.target&&rb.target.judge_human_agreement)||0.85}</b></div>`+
+    `<details><summary>gates</summary><pre>${JSON.stringify(rb.gates,null,1)}</pre></details>`;
+}
+
+function renderRubricEditor(){
+  const rb=STATE.rubric; const el=document.getElementById('rubricEditor');
+  el.innerHTML=rb.dimensions.map(d=>`<div class="row"><span style="flex:1">${d.name_zh}</span>
+     <input class="w" data-dim="${d.name}" value="${d.weight}" style="width:70px" type="number" step="0.05" min="0" max="1"></div>`).join('')+
+     `<div class="row" style="margin-top:6px"><span style="flex:1">overall 目标</span>
+     <input class="tgt-overall" value="${rb.target.overall}" style="width:70px" type="number" step="0.1"></div>`;
+  document.getElementById('rubricVer').textContent='当前：'+rb.version;
+  const erb=document.getElementById('editorRubricBody'); if(erb)erb.innerHTML=rubricDimsHtml(rb);
+}
+
+const EV_ZH={created:"生成 V0",import_data:"导入数据",submit_labels:"人工标注",
+  edit_rubric:"编辑 rubric",version_adopted:"采纳新版",version_rejected:"版本被拒",
+  converged:"收敛/平台期",import_output:"导入报告文本",import_judgment:"导入LLM评分"};
+// ---- 打开已有会话 ----
+async function loadSessions(){
+  try{
+    const j=await api('/api/sessions','GET');
+    const sel=document.getElementById('sessSel');
+    const list=j.sessions||[];
+    sel.innerHTML='<option value="">（选择会话）</option>'+list.map(s=>
+      `<option value="${s.id}">${s.id} · ${s.product_id} · ${s.n_cases}案 · ${s.current_version}</option>`).join('');
+    document.getElementById('sessListInfo').textContent='共 '+list.length+' 个已落盘会话';
+  }catch(e){}
+}
+async function openSession(id){
+  if(!id)return;
+  const j=await api('/api/session?id='+encodeURIComponent(id),'GET');
+  SID=id; STATE=j; render(); toast('已打开会话 '+id);
+}
+document.getElementById('openSessBtn').onclick=()=>openSession(document.getElementById('sessSel').value);
+document.getElementById('refreshSessBtn').onclick=loadSessions;
+
+// 初始化: 载入会话列表; URL 带 ?id= 时自动打开
+(async()=>{
+  try{
+    const me=await api('/api/me','GET');
+    document.getElementById('userBadge').textContent='👤 '+(me.display_name||me.login_name);
+  }catch(e){return;}   // 401 已由 authWall 拦截整页
+  await loadSessions();
+  const qid=new URLSearchParams(location.search).get('id');
+  if(qid){ document.getElementById('sessSel').value=qid; openSession(qid); }
+})();
+
+function renderHistory(){
+  const el=document.getElementById('historyView');
+  const h=STATE.history||[];
+  if(!h.length){el.innerHTML='<span class="mut">尚无记录</span>';return;}
+  el.innerHTML='<div class="small mut" style="margin-bottom:6px">共 '+h.length+' 条 · 每次变更即追加落盘</div>'+
+    h.slice().reverse().map(e=>{
+      const t=new Date(e.ts*1000);const hh=('0'+t.getHours()).slice(-2)+':'+('0'+t.getMinutes()).slice(-2)+':'+('0'+t.getSeconds()).slice(-2);
+      let detail='';const p=e.payload||{};
+      if(e.type==='import_data')detail=p.n_cases+' 条 '+JSON.stringify(p.splits);
+      else if(e.type==='submit_labels')detail=p.version+' · '+p.n_cases_labeled+' case';
+      else if(e.type==='edit_rubric')detail='→ '+p.new_version;
+      else if(e.type==='version_adopted')detail=p.version+' ('+(p.directives_on||[]).slice(-1)+')';
+      else if(e.type==='version_rejected')detail=p.version+' · '+p.reason;
+      else if(e.type==='created')detail=p.product_id;
+      else if(e.type==='converged')detail=p.at_version;
+      else if(e.type==='import_output')detail=p.case_id+' ('+p.n_chars+'字)';
+      else if(e.type==='import_judgment')detail=p.case_id+' '+JSON.stringify(p.scores);
+      return `<div class="kv"><span><span class="mut">${hh}</span> ${EV_ZH[e.type]||e.type}</span><span class="mut">${detail}</span></div>`;
+    }).join('');
+}

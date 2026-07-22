@@ -51,6 +51,19 @@ class SkillArtifact:
         c.changelog = note
         return c
 
+    def has_fewshot(self, kind: str) -> bool:
+        """few_shots 里是否已注入某类范例(按 kind 判)。"""
+        return any(isinstance(f, dict) and f.get("kind") == kind for f in self.few_shots)
+
+    def clone_with_fewshot(self, kind: str, new_version: str, note: str) -> "SkillArtifact":
+        """产出一个只多注入了一条 few-shot 范例的候选版本(L2 动作)。"""
+        c = copy.deepcopy(self)
+        c.few_shots = list(c.few_shots) + [{"kind": kind}]
+        c.parent_version = self.version
+        c.version = new_version
+        c.changelog = note
+        return c
+
 
 @dataclass
 class EvalRecord:

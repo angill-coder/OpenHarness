@@ -1,10 +1,6 @@
 # OpenHarness 交接文档（HANDOFF）
 
-<<<<<<< HEAD
-> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-07-13。
-=======
 > 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-07-21（见文末 §9 增量）。
->>>>>>> origin/main
 > 用户要求：**一律用简体中文交流**（曾误用日语被纠正）。
 
 ---
@@ -29,11 +25,7 @@
 - `report-assistant`（**算数字型**经营月报，旧，`data/report_assistant/`）——4 维：data_accuracy/completeness/insight/conciseness。
 - `research_insight`（**调研洞察汇报助手**，当前重点）——6 维（见 §3）。
 
-<<<<<<< HEAD
-环境事实：本机**无 ANTHROPIC_API_KEY、无 anthropic SDK、无 claude CLI**；Python 3.9.6（**只用 stdlib**，无 openpyxl/pandas）、Node 22。机器可读文件用 JSON 非 YAML。读 pdf 用 `pypdf`（可用），读 docx 用 stdlib `zipfile`+`xml`（无 python-docx），xlsx 读不了。
-=======
 环境事实（**部分已在 2026-07 变化，以 §9 为准**）：本机机器可读文件用 JSON 非 YAML；读 pdf 用 `pypdf`（可用），读 docx 用 stdlib `zipfile`+`xml`（无 python-docx），xlsx 读不了。⚠️ 已过时：现在是**新机器（Linux，`/data/home/angillwang/OpenHarness`）、Python 3.11.6、装了 `cryptography`**；判分 LLM key 已配（bianxie 中转，见 §9），非"无 key"。
->>>>>>> origin/main
 
 ---
 
@@ -152,8 +144,6 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 - **真实标注/校准(2026-07-17 加)**：app 支持 ①上传报告文件(md/txt/pdf/docx,`/api/upload_report`) ②逐 check 人工标注(满足/部分/不满足=1/.5/0,`/api/submit_check_labels`,落 `check_labels.jsonl`) ③页面按钮直调 **Opus 4.8** 判分(`/api/run_judge`,stdlib urllib,**需 `ANTHROPIC_API_KEY`+网络**,落 `check_judgments.jsonl`) ④逐 check 校准(人工 vs judge,`view.check_calib`)。维度分由 check 汇总:`judge.dim_from_checks`(1+4·mean,红线 check miss→封顶2)。**只动真实线,mock 优化器仍六维不变。** 会话 `real-eval`=干净标注会话(3案)。
 - 数据：`data/research_assistant/`（dataset.jsonl / make_bad_variants.py / bad_variants.*.jsonl / README.md）、`data/<三案>/`（原始素材+正文）。
 - 记忆：`~/.tclaude/projects/-Users-angill-Documents-New-project-OpenHarness/memory/`（openharness-project / backend-six-dim-refactor / user-prefers-simplified-chinese）。
-<<<<<<< HEAD
-=======
 
 ---
 
@@ -180,4 +170,3 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 **⑤ 报告生成 skill 母本微调**（`skills/research-report/`，本机路径，未装到 `~/.claude/skills`）：正文不印行内 `[S-xxx]`（改自检时核对可回溯）；禁止把"结论先行/归因"等写作原则字样当小标题写进正文。
 
 **⑥ 打印**：`index.html` 加 `@media print`——专家人工标注表打印时白底黑字、字体放大、隐藏左右列。
->>>>>>> origin/main
