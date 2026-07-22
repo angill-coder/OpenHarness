@@ -22,11 +22,12 @@ FORBIDDEN = {"keyword_emphasis", "buzzword_emphasis"}
 
 def propose(skill, failure_report: List[Dict[str, Any]], history: List[Dict[str, Any]]
             ) -> Optional[Dict[str, Any]]:
-    """看失败报告, 提出下一个最该做、最便宜的改动。无可提议则返回 None(收敛)。"""
-    tried = {(h["target"], h["directive"]) for h in history}
+    """看失败报告, 提出下一个最该做、最便宜的改动。无可提议则返回 None(收敛)。
+    代价分层: 先 L1(翻 directive), L1 空间探尽再 L2(注入 few-shot 范例)。"""
+    tried = {(h["target"], h.get("directive") or h.get("fewshot")) for h in history}
     directives = skill.directives()
 
-    # 遍历失败模式(已按 severity/命中数排序), 找第一个"有对应 directive、当前是关闭、且没试过"的
+    # ---- L1: 遍历失败模式(已按 severity/命中数排序), 找第一个"有对应 directive、当前关闭、没试过"的 ----
     for pattern in failure_report:
         hint = pattern.get("directive_hint")
         if not hint or hint in FORBIDDEN:
@@ -47,10 +48,34 @@ def propose(skill, failure_report: List[Dict[str, Any]], history: List[Dict[str,
             "from_pattern": pattern["pattern_id"],
             "hit_count": pattern["hit_count"],
         }
-    return None  # 没有可提议的改动 => 撞平台期/收敛
+
+    # ---- L2: L1 无更多可提议 -> 找第一个"有 few-shot 修法、尚未注入、没试过"的失败(风格类) ----
+    for pattern in failure_report:
+        fs = pattern.get("fewshot_hint")
+        if not fs:
+            continue
+        if skill.has_fewshot(fs):        # 已注入, 跳过
+            continue
+        if ("few_shots", fs) in tried:   # 试过且被否决, 不重复
+            continue
+        return {
+            "target": "few_shots",       # L2
+            "level": "L2",
+            "fewshot": fs,
+            "change": "注入 few-shot 范例: %s" % fs,
+            "addresses": pattern["pattern"],
+            "affected_dims": pattern["affected_dims"],
+            "hypothesis": "预计提升 %s(风格类, 靠范例而非指令)" % "/".join(pattern["affected_dims"]),
+            "from_pattern": pattern["pattern_id"],
+            "hit_count": pattern["hit_count"],
+        }
+    return None  # L1/L2 均无可提议的改动 => 撞平台期/收敛
 
 
 def apply_proposal(skill, proposal: Dict[str, Any], new_version: str):
-    """把 proposal 应用成一个候选 skill 版本(L1: 翻 directive)。"""
+    """把 proposal 应用成一个候选 skill 版本(L1: 翻 directive; L2: 注入 few-shot)。"""
+    if proposal.get("target") == "few_shots":
+        note = "相对 %s: %s (针对'%s')" % (skill.version, proposal["change"], proposal["addresses"])
+        return skill.clone_with_fewshot(proposal["fewshot"], new_version, note)
     note = "相对 %s: %s (针对'%s')" % (skill.version, proposal["change"], proposal["addresses"])
     return skill.clone_with_directive(proposal["directive"], proposal["value"], new_version, note)

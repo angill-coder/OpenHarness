@@ -34,10 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import session as session_mod  # noqa: E402
 import persistence as persist  # noqa: E402
-<<<<<<< HEAD
-=======
-import auth as auth_mod  # noqa: E402
->>>>>>> origin/main
+# import auth as auth_mod  # [鉴权已临时关闭·本地测试] 恢复时取消注释
 
 ROOT = os.path.dirname(HERE)
 DATA_DIRS = {
@@ -189,19 +186,20 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return s
 
-<<<<<<< HEAD
-=======
     def _account(self):
-        """取当前 iOA 登录账号(LoginName)。无有效身份 -> 回 401 并返回 None(调用方 return)。"""
-        ident = auth_mod.current_user(self.headers)
-        acct = auth_mod.account_of(ident)
-        if not acct:
-            self._send(401, {"error": "未登录或身份校验失败，请经 iOA 网关访问", "need_auth": True})
-            return None
-        self._identity = ident
-        return acct
+        """[鉴权已临时关闭·本地测试] 跳过 iOA 校验, 统一用本地账号。
+        恢复 iOA 鉴权: 取消下方注释块 + 顶部 `import auth as auth_mod` + 删掉本地兜底两行。"""
+        # --- iOA 鉴权(临时注释, 本地测试用) ---
+        # ident = auth_mod.current_user(self.headers)
+        # acct = auth_mod.account_of(ident)
+        # if not acct:
+        #     self._send(401, {"error": "未登录或身份校验失败，请经 iOA 网关访问", "need_auth": True})
+        #     return None
+        # self._identity = ident
+        # return acct
+        self._identity = {"LoginName": "local", "DisplayName": "本地测试", "Email": ""}
+        return "local"
 
->>>>>>> origin/main
     # ---------------- GET ----------------
     def do_GET(self):
         u = urlparse(self.path)
@@ -209,8 +207,10 @@ class Handler(BaseHTTPRequestHandler):
             path = os.path.join(HERE, "index.html")
             with open(path, encoding="utf-8") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
-<<<<<<< HEAD
-=======
+        if u.path == "/app.js":          # 前端逻辑(公开静态, 与 index.html 一致不鉴权)
+            path = os.path.join(HERE, "app.js")
+            with open(path, encoding="utf-8") as f:
+                return self._send(200, f.read(), "text/javascript; charset=utf-8")
         # 其余 /api/* 一律需要 iOA 身份
         acct = self._account()
         if not acct:
@@ -220,17 +220,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"login_name": acct,
                                     "display_name": ident.get("DisplayName", acct),
                                     "email": ident.get("Email", "")})
->>>>>>> origin/main
         if u.path == "/api/session":
             q = parse_qs(u.query)
             sid = (q.get("id") or [None])[0]
             s = self._sess(sid)
             if s:
-<<<<<<< HEAD
-                self._send(200, s.view())
-=======
                 self._send(200, s.view(acct))
->>>>>>> origin/main
             return
         if u.path == "/api/sample_data":
             q = parse_qs(u.query)
@@ -257,14 +252,11 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         b = self._body()
 
-<<<<<<< HEAD
-=======
         # 所有写接口一律需要 iOA 身份
         acct = self._account()
         if not acct:
             return
 
->>>>>>> origin/main
         if u.path == "/api/session":
             req = (b.get("requirement") or "").strip()
             if not req:
@@ -275,11 +267,7 @@ class Handler(BaseHTTPRequestHandler):
                 SESSIONS[sid] = session_mod.Session(sid, req, pid, prefer_real=PREFER_REAL)
             except Exception as e:
                 return self._send(500, {"error": "生成 v0 失败: %s" % e})
-<<<<<<< HEAD
-            return self._send(200, SESSIONS[sid].view())
-=======
             return self._send(200, SESSIONS[sid].view(acct))
->>>>>>> origin/main
 
         if u.path == "/api/data":
             s = self._sess(b.get("id"))
@@ -291,11 +279,7 @@ class Handler(BaseHTTPRequestHandler):
                 rows, labels = _load_sample(s.rubric.get("product"))
             if not rows:
                 return self._send(400, {"error": "无数据行; 传 rows 或 use_sample=true"})
-<<<<<<< HEAD
-            return self._send(200, s.import_data(rows, labels))
-=======
             return self._send(200, s.import_data(rows, labels, account=acct))
->>>>>>> origin/main
 
         if u.path == "/api/labels":
             s = self._sess(b.get("id"))
@@ -303,31 +287,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             ver = b.get("version") or s._current()["version"]
             labels = b.get("labels") or {}
-<<<<<<< HEAD
-            return self._send(200, s.submit_labels(ver, labels))
-=======
             return self._send(200, s.submit_labels(ver, labels, account=acct))
->>>>>>> origin/main
 
         if u.path == "/api/rubric":
             s = self._sess(b.get("id"))
             if not s:
                 return
-<<<<<<< HEAD
-            return self._send(200, s.edit_rubric({k: b[k] for k in ("weights", "target") if k in b}))
-=======
             return self._send(200, s.edit_rubric({k: b[k] for k in ("weights", "target") if k in b}, account=acct))
->>>>>>> origin/main
 
         if u.path == "/api/advance":
             s = self._sess(b.get("id"))
             if not s:
                 return
-<<<<<<< HEAD
-            return self._send(200, s.advance())
-=======
             return self._send(200, s.advance(account=acct))
->>>>>>> origin/main
 
         if u.path == "/api/import_output":
             s = self._sess(b.get("id"))
@@ -336,11 +308,7 @@ class Handler(BaseHTTPRequestHandler):
             case_id = b.get("case_id")
             report_text = b.get("report_text") or ""
             version = b.get("version")   # 缺省用当前版本
-<<<<<<< HEAD
-            r = s.import_output(case_id, report_text, version)
-=======
             r = s.import_output(case_id, report_text, version, account=acct)
->>>>>>> origin/main
             if "error" in r:
                 return self._send(400, r)
             return self._send(200, r)
@@ -350,11 +318,7 @@ class Handler(BaseHTTPRequestHandler):
             if not s:
                 return
             r = s.import_judgment(b.get("case_id"), b.get("scores") or {},
-<<<<<<< HEAD
-                                  b.get("reasoning"), b.get("version"))
-=======
                                   b.get("reasoning"), b.get("version"), account=acct)
->>>>>>> origin/main
             if "error" in r:
                 return self._send(400, r)
             return self._send(200, r)
@@ -373,21 +337,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "解析文件失败: %s" % e})
             if not (text or "").strip():
                 return self._send(400, {"error": "未解析出文本(可能是扫描件/加密/空文件)"})
-<<<<<<< HEAD
-            return self._send(200, s.import_output(b.get("case_id"), text, b.get("version")))
-=======
             return self._send(200, s.import_output(b.get("case_id"), text, b.get("version"), account=acct))
->>>>>>> origin/main
 
         if u.path == "/api/submit_check_labels":
             s = self._sess(b.get("id"))
             if not s:
                 return
-<<<<<<< HEAD
-            r = s.submit_check_labels(b.get("case_id"), b.get("checks") or {}, b.get("version"))
-=======
             r = s.submit_check_labels(b.get("case_id"), b.get("checks") or {}, b.get("version"), account=acct)
->>>>>>> origin/main
             return self._send(400 if "error" in r else 200, r)
 
         if u.path == "/api/run_judge":
@@ -408,11 +364,7 @@ class Handler(BaseHTTPRequestHandler):
             parsed = _extract_json(text)
             if not parsed or "checks" not in parsed:
                 return self._send(400, {"error": "judge 输出解析失败", "raw": (text or "")[:500]})
-<<<<<<< HEAD
-            r = s.set_judge_checks(cid, parsed["checks"], parsed.get("reasoning"), ver)
-=======
             r = s.set_judge_checks(cid, parsed["checks"], parsed.get("reasoning"), ver, account=acct)
->>>>>>> origin/main
             return self._send(400 if "error" in r else 200, r)
 
         return self._send(404, {"error": "not found"})
@@ -421,11 +373,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     global PREFER_REAL
     ap = argparse.ArgumentParser()
-<<<<<<< HEAD
-    ap.add_argument("--port", type=int, default=8765)
-=======
     ap.add_argument("--port", type=int, default=8080)
->>>>>>> origin/main
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--real", action="store_true", help="有 API key 时用真实 Claude 生成/执行")
     args = ap.parse_args()

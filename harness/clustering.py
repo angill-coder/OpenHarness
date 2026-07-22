@@ -51,8 +51,12 @@ RESEARCH_PATTERN_RULES = [
     ("expr_bushi", "'不是,而是'句式/术语注水", ["expression"], "ban_bushi_ershi"),
     ("expr_nochart", "关键数据未结构化呈现(表/图)", ["expression"], "require_charts"),
     ("expr_length", "长度不匹配高管受众", ["expression"], "match_exec_length"),
+    ("expr_style_exemplar", "措辞/风格待打磨,需注入风格范例(L2, 无指令级修法)", ["expression"], None),
     ("reward_hacking_suspected", "术语堆砌,疑似讨好裁判", ["expression"], None),
 ]
+
+# 失败特征 -> few-shot 类型(L2 修法)。仅"无指令级修法"的风格类失败走 few-shot。
+_RESEARCH_FEWSHOT_HINT = {"expr_style_exemplar": "style_exemplar"}
 
 # signals 键 -> failure 特征键(调研洞察)。多数同名, 个别映射。
 _RESEARCH_SIG_TO_FEAT = {
@@ -149,8 +153,10 @@ def _research_features(rec) -> List[str]:
     # coverage: 关键claim/可答问题未覆盖(独立于 struct_mece)
     if sig.get("key_claims_missed"):
         feats.append("cover_key_missed")
-    # expression: 违禁句式/注水 > 未图表化 > 长度
-    if sig.get("buzzword") or sig.get("bushi_ershi"):
+    # expression: 风格范例待注入(L2, 解耦) > 违禁句式/注水 > 未图表化 > 长度
+    if sig.get("style_unpolished"):
+        feats.append("expr_style_exemplar")
+    elif sig.get("buzzword") or sig.get("bushi_ershi"):
         feats.append("reward_hacking_suspected" if sig.get("buzzword") else "expr_bushi")
     elif sig.get("no_charts"):
         feats.append("expr_nochart")
@@ -181,7 +187,8 @@ def cluster(records, low_score_threshold=4, product: str = None) -> List[Dict[st
         sev = "high" if high_dim in dims else ("medium" if len(cases) >= 3 else "low")
         report.append({
             "pattern_id": feat, "pattern": desc, "hit_count": len(cases),
-            "affected_dims": dims, "directive_hint": hint, "severity": sev,
+            "affected_dims": dims, "directive_hint": hint,
+            "fewshot_hint": _RESEARCH_FEWSHOT_HINT.get(feat), "severity": sev,
             "exemplars": cases[:2],
         })
     # 红线类失败(会封顶并掩盖低层修法)先修, 再修被掩盖的低层缺陷。

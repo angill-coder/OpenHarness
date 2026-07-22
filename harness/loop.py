@@ -138,7 +138,7 @@ def run_loop(skill0, cases, rubric, backend, human_labels, store, calib,
 
 
 def _hkey(p):
-    return {"target": p["target"], "directive": p["directive"]}
+    return {"target": p["target"], "directive": p.get("directive"), "fewshot": p.get("fewshot")}
 
 
 def _plateau_diagnosis(say, failures):

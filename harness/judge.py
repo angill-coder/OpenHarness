@@ -182,7 +182,13 @@ def score_report_research(report, case, rubric):
     scores["coverage"] = cv
 
     # ---------- ⑥ 表达与受众契合 expression (0.15, 反向 + 风格红线) ----------
-    if sig.get("buzzword") or sig.get("bushi_ershi"):
+    if sig.get("style_case"):
+        # L2 解耦: 被标记 case 的表达维只由 style_exemplar 范例决定, 不看 charts/length/bushi。
+        ex = 3 if sig.get("style_unpolished") else 5
+        reasoning["expression"] = ("措辞待打磨, 需风格范例(L2 few-shot)才能达标 -> 3分(锚点3)"
+                                   if sig.get("style_unpolished") else
+                                   "风格范例已注入, 表达契合受众 -> 5分")
+    elif sig.get("buzzword") or sig.get("bushi_ershi"):
         ex = 2
         reasoning["expression"] = "出现'不是,而是'句式 / 术语堆砌注水 -> 2分封顶(风格红线)"
         if sig.get("buzzword"):

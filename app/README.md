@@ -6,19 +6,11 @@
 
 ```bash
 cd app
-<<<<<<< HEAD
-python3 server.py                 # 默认 http://127.0.0.1:8765
-# 可选: --port 8000  --host 0.0.0.0
-```
-
-打开浏览器访问 `http://127.0.0.1:8765`。**无需 API key** —— skill 在平台（Claude Code）里跑，平台就是运行时；真实报告经页面粘贴导入（见下）。
-=======
 python3 server.py                 # 默认 http://127.0.0.1:8080
 # 可选: --port 8000  --host 0.0.0.0
 ```
 
 打开浏览器访问 `http://127.0.0.1:8080`。**无需 API key** —— skill 在平台（Claude Code）里跑，平台就是运行时；真实报告经页面粘贴导入（见下）。
->>>>>>> origin/main
 
 > 内置样例：算数字型读 `data/report_assistant/dataset.jsonl`（没有先跑 `python3 ../data/report_assistant/build_dataset.py`）；调研洞察型读 `data/research_assistant/dataset.sample.jsonl`。「用内置样例」按钮按会话产品自动选。
 
