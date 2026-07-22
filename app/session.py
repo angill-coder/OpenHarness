@@ -45,6 +45,24 @@ def _dims_from_rubric(rubric):
     return dims, zh
 
 
+<<<<<<< HEAD
+=======
+def _migrate_human_labels(hl):
+    """把旧结构 {version:{case:{dim:score}}} 迁移成按账号 {version:{account:{case:{dim}}}}。
+    旧记录归入哨兵账号 '_legacy'。已是新结构(内层值为 dict)的原样返回。"""
+    out = {}
+    for ver, vmap in (hl or {}).items():
+        if not isinstance(vmap, dict) or not vmap:
+            out[ver] = vmap if isinstance(vmap, dict) else {}
+            continue
+        # 判断: 新结构里 vmap 的值是 {case:{dim}}(dict of dict); 旧结构里是 {dim:score}(dict of num)
+        sample = next(iter(vmap.values()))
+        is_new = isinstance(sample, dict) and all(isinstance(v, dict) for v in sample.values()) if sample else True
+        out[ver] = vmap if is_new else {"_legacy": vmap}
+    return out
+
+
+>>>>>>> origin/main
 class Session:
     def __init__(self, sid: str, requirement: str, product_id: str, prefer_real=False,
                  _restoring=False):
@@ -98,8 +116,20 @@ class Session:
     def _current(self):
         return self.versions[self.current_idx]
 
+<<<<<<< HEAD
     def _human_for(self, version: str) -> Dict[str, Dict[str, int]]:
         return self.human_labels.setdefault(version, {})
+=======
+    def _human_for(self, version: str, account: str) -> Dict[str, Dict[str, int]]:
+        """某账号在某版本的维度级人工标注 {case_id: {dim: score}}(可变, 供写入)。"""
+        return self.human_labels.setdefault(version, {}).setdefault(account or "_legacy", {})
+
+    def _human_checks_for(self, version: str, account) -> Dict[str, Dict[str, float]]:
+        """某账号在某版本的逐 check 人工标注 {case_id: {check_id: val}}。account 为空则返回空(不叠加)。"""
+        if not account:
+            return {}
+        return self.human_checks.get(version, {}).get(account, {})
+>>>>>>> origin/main
 
     # ---------- 落盘 / 恢复 ----------
     def _save(self):
@@ -137,7 +167,11 @@ class Session:
         self.backend = backend_mod.get_backend(product_id=self.rubric.get("product"))
         self.opt_history = snap.get("opt_history", [])
         self.cases = snap.get("cases", [])
+<<<<<<< HEAD
         self.human_labels = snap.get("human_labels", {})
+=======
+        self.human_labels = _migrate_human_labels(snap.get("human_labels", {}))
+>>>>>>> origin/main
         self.report_outputs = persist.load_outputs(self.id)   # 真实报告文本由 outputs.jsonl 恢复
         self.report_judgments = persist.load_judgments(self.id)  # 真实报告的 LLM-judge 评分由 judgments.jsonl 恢复
         self.human_checks = persist.load_check_labels(self.id)   # 逐check人工标注由 check_labels.jsonl 恢复
@@ -168,7 +202,11 @@ class Session:
         return self
 
     # ---------- 数据导入 ----------
+<<<<<<< HEAD
     def import_data(self, rows: List[Dict[str, Any]], labels: Optional[List[Dict]] = None):
+=======
+    def import_data(self, rows: List[Dict[str, Any]], labels: Optional[List[Dict]] = None, account=None):
+>>>>>>> origin/main
         # 校验最小字段(算数字型认 ground_truth_findings; 调研洞察认 ground_truth)
         is_research = self.rubric.get("product") == "research_insight"
         clean = []
@@ -189,7 +227,11 @@ class Session:
         # 可选: 导入初始人工标注(作用于 v0)
         if labels:
             v0 = self.versions[0]["version"]
+<<<<<<< HEAD
             store = self._human_for(v0)
+=======
+            store = self._human_for(v0, account)
+>>>>>>> origin/main
             for l in labels:
                 if "case_id" in l and "human_scores" in l:
                     store[l["case_id"]] = l["human_scores"]
@@ -198,12 +240,22 @@ class Session:
             "with_initial_labels": bool(labels),
         })
         # 重新评估当前版本
+<<<<<<< HEAD
         r = self.evaluate()
+=======
+        r = self.evaluate(account)
+>>>>>>> origin/main
         self._save()
         return r
 
     # ---------- 评估当前版本 ----------
+<<<<<<< HEAD
     def evaluate(self):
+=======
+    def evaluate(self, account=None):
+        """计算与账号无关的基础量(judge/mock 分、失败聚类、dev/test 均分)并暂存基础记录;
+        人工标注叠加与校准是按账号的, 放到 view(account) 时再算(线程安全: 不把账号数据写进共享缓存)。"""
+>>>>>>> origin/main
         if not self.cases:
             return {"error": "尚未导入数据"}
         cur = self._current()
@@ -214,10 +266,15 @@ class Session:
         dev = [c for c in self.cases if c["split"] == "dev"]
         test = [c for c in self.cases if c["split"] == "test"]
 
+<<<<<<< HEAD
         # 人工标注(该版本已提交的) 注入 EvalRecord.human_label
         human = self._merge_human_labels(ver)
 
         recs_all = runner_mod.run_split(skill, self.cases, self.rubric, self.backend, ver, human)
+=======
+        # 基础评估与账号无关: 不注入人工分(人工 overlay 在 view 时按账号叠加)
+        recs_all = runner_mod.run_split(skill, self.cases, self.rubric, self.backend, ver, {})
+>>>>>>> origin/main
         # 用平台真实报告 + LLM-judge 评分覆盖 mock(有则真实, 无则保留 mock 作占位)
         self._apply_recorded(recs_all, ver)
         dev_recs = [r for r in recs_all if r.dataset_split == "dev"]
@@ -228,30 +285,45 @@ class Session:
         cur["failures"] = clustering_mod.cluster(
             [r for r in recs_all if r.dataset_split in ("train", "dev")] or recs_all,
             product=self.rubric.get("product"))
+<<<<<<< HEAD
         cur["calib"] = calibration_mod.agreement(recs_all, self.rubric)
         cur["eval"] = [self._rec_view(r) for r in recs_all]
+=======
+        cur["_recs"] = recs_all         # 暂存基础记录(账号无关), 供 view(account) 叠加人工分
+>>>>>>> origin/main
 
         # 记录失败历史(用于看板消长)
         if len(self.failure_history) <= self.current_idx:
             self.failure_history.append(cur["failures"])
         else:
             self.failure_history[self.current_idx] = cur["failures"]
+<<<<<<< HEAD
         return self.view()
 
     def _merge_human_labels(self, version) -> Dict[str, Dict[str, int]]:
         """当前版本已提交的人工标注 -> case_id: scores。未标注的 case 不给 human_label
         (校准只用被标注的)。"""
         return dict(self._human_for(version))
+=======
+        return self.view(account)
+>>>>>>> origin/main
 
     def _apply_recorded(self, recs, version):
         """把平台真实产物叠加到 mock 记录上:
           · report_outputs -> 记录的 output 换成真实报告文本(标 recorded)
           · judge 分(优先逐 check 派生, 其次旧 import_judgment) -> 覆盖 mock 六维分并重算红线
+<<<<<<< HEAD
           · 人工分优先由逐 check 标注派生(dim_from_checks) -> 喂维度级校准(一处 check 标注两处受益)
         无真实评分的 case 保留 mock 分(占位/自测), 由 score_source 区分。"""
         outs = self.report_outputs.get(version, {})
         juds = self.report_judgments.get(version, {})
         hchecks = self.human_checks.get(version, {})
+=======
+        无真实评分的 case 保留 mock 分(占位/自测), 由 score_source 区分。
+        人工分(逐 check 派生的 human_label)与账号相关, 不在此叠加, 由 view(account) 时按账号算。"""
+        outs = self.report_outputs.get(version, {})
+        juds = self.report_judgments.get(version, {})
+>>>>>>> origin/main
         jchecks = self.judge_checks.get(version, {})
         floor = judge_mod._hard_floor(self.rubric, "traceability")
         for r in recs:
@@ -259,10 +331,13 @@ class Session:
             if rt is not None:
                 r.output = {"report_text": rt, "signals": {}, "recorded": True,
                             "audience": r.output.get("audience", "exec")}
+<<<<<<< HEAD
             # 人工分:有逐 check 标注则派生成维度分(供维度级校准)
             hc = hchecks.get(r.case_id)
             if hc:
                 r.human_label = judge_mod.dim_from_checks(hc, self.rubric)
+=======
+>>>>>>> origin/main
             # judge 分:逐 check 派生 > 旧 import_judgment > mock
             jc = (jchecks.get(r.case_id) or {}).get("checks")
             jv = juds.get(r.case_id)
@@ -283,6 +358,7 @@ class Session:
                 if r.case_failed_gate and not any(str(f).startswith("RED_LINE") for f in r.flagged):
                     r.flagged.append("RED_LINE:traceability<%d" % floor)
 
+<<<<<<< HEAD
     def _rec_view(self, r: EvalRecord) -> Dict[str, Any]:
         # 平台真实报告文本(当前版本已粘贴的), 供人工按 rubric 逐维标注时对照阅读
         ver = self._current()["version"]
@@ -290,16 +366,35 @@ class Session:
         hc = self.human_checks.get(ver, {}).get(r.case_id, {})
         jc = (self.judge_checks.get(ver, {}).get(r.case_id) or {}).get("checks", {})
         jr = (self.judge_checks.get(ver, {}).get(r.case_id) or {}).get("reasoning", {})
+=======
+    def _rec_view(self, r: EvalRecord, account=None) -> Dict[str, Any]:
+        # 平台真实报告文本(当前版本已粘贴的), 供人工按 rubric 逐维标注时对照阅读
+        ver = self._current()["version"]
+        real_report = self.report_outputs.get(ver, {}).get(r.case_id)
+        hc = self._human_checks_for(ver, account).get(r.case_id, {})      # 当前账号的逐 check 标注
+        jc = (self.judge_checks.get(ver, {}).get(r.case_id) or {}).get("checks", {})
+        jr = (self.judge_checks.get(ver, {}).get(r.case_id) or {}).get("reasoning", {})
+        human_label = judge_mod.dim_from_checks(hc, self.rubric) if hc \
+            else self._human_for(ver, account).get(r.case_id)
+>>>>>>> origin/main
         return {
             "case_id": r.case_id, "split": r.dataset_split,
             "scores": r.scores, "judge_reasoning": r.judge_reasoning,
             "flagged": r.flagged, "red_line": r.case_failed_gate,
+<<<<<<< HEAD
             "human_label": r.human_label,
+=======
+            "human_label": human_label,
+>>>>>>> origin/main
             "output_summary": self._output_summary(r.output),
             "report_text": real_report,          # None 表示该 case 尚未导入真实报告
             "score_source": getattr(r, "score_source", "mock"),  # recorded=平台LLM-judge真实分 / mock=占位
             # 逐 check 层(真实标注/校准线)
+<<<<<<< HEAD
             "check_human": hc,                    # {check_id: 1/0.5/0} 专家
+=======
+            "check_human": hc,                    # {check_id: 1/0.5/0} 当前账号
+>>>>>>> origin/main
             "check_judge": jc,                    # {check_id: 1/0.5/0} Opus judge
             "check_judge_reason": jr,
             "dims_human": judge_mod.dim_from_checks(hc, self.rubric) if hc else {},
@@ -327,7 +422,11 @@ class Session:
         }
 
     # ---------- 导入平台真实报告文本(app 粘贴) ----------
+<<<<<<< HEAD
     def import_output(self, case_id: str, report_text: str, version: str = None):
+=======
+    def import_output(self, case_id: str, report_text: str, version: str = None, account=None):
+>>>>>>> origin/main
         """存一条平台跑出的真实报告文本, 关联到 (version, case_id)。默认当前版本。"""
         version = version or self._current()["version"]
         report_text = (report_text or "").strip()
@@ -338,6 +437,7 @@ class Session:
         persist.append_event(self.id, "import_output", {
             "version": version, "case_id": case_id, "n_chars": len(report_text)})
         # 重新组装视图(把真实报告文本带进 eval 行, 供标注对照)
+<<<<<<< HEAD
         self.evaluate()
         self._save()
         return self.view()
@@ -345,6 +445,15 @@ class Session:
     # ---------- 导入平台 LLM-judge 的六维评分(RecordedJudge) ----------
     def import_judgment(self, case_id: str, scores: Dict[str, int],
                         reasoning: Dict[str, str] = None, version: str = None):
+=======
+        self.evaluate(account)
+        self._save()
+        return self.view(account)
+
+    # ---------- 导入平台 LLM-judge 的六维评分(RecordedJudge) ----------
+    def import_judgment(self, case_id: str, scores: Dict[str, int],
+                        reasoning: Dict[str, str] = None, version: str = None, account=None):
+>>>>>>> origin/main
         """存一条平台 LLM-as-judge 对真实报告的六维评分, 关联到 (version, case_id)。
         它会覆盖该 case 的 mock 分, 参与分数曲线/校准/红线判定。默认当前版本。"""
         version = version or self._current()["version"]
@@ -357,9 +466,15 @@ class Session:
         persist.append_judgment(self.id, version, case_id, clean, reasoning)
         persist.append_event(self.id, "import_judgment", {
             "version": version, "case_id": case_id, "scores": clean})
+<<<<<<< HEAD
         self.evaluate()
         self._save()
         return self.view()
+=======
+        self.evaluate(account)
+        self._save()
+        return self.view(account)
+>>>>>>> origin/main
 
     # ---------- 逐 check 层:人工标注 & judge ----------
     _CHECK_MAP = {"met": 1.0, "partial": 0.5, "miss": 0.0}
@@ -375,6 +490,7 @@ class Session:
                 out[k] = num
         return out
 
+<<<<<<< HEAD
     def submit_check_labels(self, case_id, checks, version=None):
         """专家逐 check 标注(满足/部分/不满足)。存 + 落盘 + 重评。"""
         version = version or self._current()["version"]
@@ -391,6 +507,26 @@ class Session:
 
     def set_judge_checks(self, case_id, checks, reasoning=None, version=None):
         """存 LLM-judge 的逐 check 判分(供 /api/run_judge 调用)。"""
+=======
+    def submit_check_labels(self, case_id, checks, version=None, account=None):
+        """专家逐 check 标注(满足/部分/不满足)。按账号存 + 落盘 + 重评。"""
+        version = version or self._current()["version"]
+        acct = account or "_legacy"
+        clean = self._norm_checks(checks)
+        if not case_id or not clean:
+            return {"error": "缺少 case_id 或有效 check 评分"}
+        store = self.human_checks.setdefault(version, {}).setdefault(acct, {}).setdefault(case_id, {})
+        store.update(clean)
+        persist.append_check_label(self.id, version, case_id, store, acct)
+        persist.append_event(self.id, "submit_check_labels",
+                             {"version": version, "case_id": case_id, "account": acct, "n_checks": len(clean)})
+        self.evaluate(account)
+        self._save()
+        return self.view(account)
+
+    def set_judge_checks(self, case_id, checks, reasoning=None, version=None, account=None):
+        """存 LLM-judge 的逐 check 判分(供 /api/run_judge 调用)。judge 是机器分, 不分账号。"""
+>>>>>>> origin/main
         version = version or self._current()["version"]
         clean = self._norm_checks(checks)
         if not case_id or not clean:
@@ -399,6 +535,7 @@ class Session:
         persist.append_check_judgment(self.id, version, case_id, clean, reasoning)
         persist.append_event(self.id, "run_judge",
                              {"version": version, "case_id": case_id, "n_checks": len(clean)})
+<<<<<<< HEAD
         self.evaluate()
         self._save()
         return self.view()
@@ -406,6 +543,15 @@ class Session:
     def _check_calibration(self, version):
         """逐 check 一致率:同 case 上 人工 vs judge 每条 check 桶匹配(完全一致=agree)。"""
         hc_all = self.human_checks.get(version, {})
+=======
+        self.evaluate(account)
+        self._save()
+        return self.view(account)
+
+    def _check_calibration(self, version, account=None):
+        """逐 check 一致率:同 case 上 当前账号人工 vs judge 每条 check 桶匹配(完全一致=agree)。"""
+        hc_all = self._human_checks_for(version, account)
+>>>>>>> origin/main
         jc_all = self.judge_checks.get(version, {})
         per_check = {}
         pairs = 0
@@ -426,9 +572,15 @@ class Session:
                 "per_check": rates,
                 "worst": sorted(rates.items(), key=lambda kv: kv[1])[:5]}
 
+<<<<<<< HEAD
     def submit_labels(self, version: str, labels: Dict[str, Dict[str, int]]):
         """labels: {case_id: {dim: score,...}}。合并进该版本的人工标注, 重新评估。"""
         store = self._human_for(version)
+=======
+    def submit_labels(self, version: str, labels: Dict[str, Dict[str, int]], account=None):
+        """labels: {case_id: {dim: score,...}}。按账号合并进该版本的人工标注, 重新评估。"""
+        store = self._human_for(version, account)
+>>>>>>> origin/main
         applied = {}
         for cid, scores in labels.items():
             clean = {d: int(s) for d, s in scores.items() if d in self.dims and s is not None}
@@ -436,15 +588,27 @@ class Session:
                 store.setdefault(cid, {}).update(clean)
                 applied[cid] = clean
         persist.append_event(self.id, "submit_labels", {
+<<<<<<< HEAD
             "version": version, "labels": applied, "n_cases_labeled": len(applied),
         })
         # 若标注的是当前版本, 重新评估以更新校准
         r = self.evaluate()
+=======
+            "version": version, "account": account or "_legacy",
+            "labels": applied, "n_cases_labeled": len(applied),
+        })
+        # 若标注的是当前版本, 重新评估以更新校准
+        r = self.evaluate(account)
+>>>>>>> origin/main
         self._save()
         return r
 
     # ---------- 编辑 rubric ----------
+<<<<<<< HEAD
     def edit_rubric(self, updates: Dict[str, Any]):
+=======
+    def edit_rubric(self, updates: Dict[str, Any], account=None):
+>>>>>>> origin/main
         """updates 可含: weights{dim:val}, target{key:val}, gates 覆盖。存为新 rubric 版本号。"""
         rb = copy.deepcopy(self.rubric)
         if "weights" in updates:
@@ -471,18 +635,30 @@ class Session:
             "weights": {d["name"]: d["weight"] for d in rb["dimensions"]},
             "target": rb["target"],
         })
+<<<<<<< HEAD
         r = self.evaluate()
+=======
+        r = self.evaluate(account)
+>>>>>>> origin/main
         self._save()
         return r
 
     # ---------- 推进到下一版 ----------
+<<<<<<< HEAD
     def advance(self):
+=======
+    def advance(self, account=None):
+>>>>>>> origin/main
         """optimizer 读当前失败 -> 提候选 -> dev gate -> 采纳成为新版本。"""
         if not self.cases:
             return {"error": "尚未导入数据"}
         cur = self._current()
         if cur["failures"] is None:
+<<<<<<< HEAD
             self.evaluate()
+=======
+            self.evaluate(account)
+>>>>>>> origin/main
             cur = self._current()
 
         skill = cur["skill"]
@@ -492,7 +668,11 @@ class Session:
             persist.append_event(self.id, "converged", {
                 "at_version": skill.version, "note": note})
             self._save()
+<<<<<<< HEAD
             return {**self.view(), "advance_result": {
+=======
+            return {**self.view(account), "advance_result": {
+>>>>>>> origin/main
                 "status": "converged",
                 "message": "优化器无更多可提议改动 => 平台期/收敛。" + note}}
 
@@ -500,9 +680,15 @@ class Session:
         cand_ver = "v%d" % vnum
         candidate = optimizer_mod.apply_proposal(skill, proposal, cand_ver)
 
+<<<<<<< HEAD
         # dev gate
         dev = [c for c in self.cases if c["split"] == "dev"] or self.cases
         human = self._merge_human_labels(skill.version)
+=======
+        # dev gate(与账号无关: gate 用 judge/mock 分, 不用人工分)
+        dev = [c for c in self.cases if c["split"] == "dev"] or self.cases
+        human = {}
+>>>>>>> origin/main
         cand_recs = runner_mod.run_split(candidate, dev, self.rubric, self.backend, cand_ver, human)
         cand_dev = runner_mod.mean_scores(cand_recs, self.rubric)
 
@@ -528,7 +714,11 @@ class Session:
             self.opt_history.append({"target": proposal["target"], "directive": proposal["directive"],
                                      "result": "adopted",
                                      "delta": round(cand_dev["overall"] - cur_dev["overall"], 3)})
+<<<<<<< HEAD
             self.evaluate()
+=======
+            self.evaluate(account)
+>>>>>>> origin/main
             result = {"status": "adopted", "version": cand_ver, "proposal": proposal,
                       "message": "采纳 %s: %s，dev overall %.2f -> %.2f" % (
                           cand_ver, proposal["change"], cur_dev["overall"], cand_dev["overall"])}
@@ -553,7 +743,11 @@ class Session:
                 "reason": reason, "dev": cand_dev,
             })
         self._save()
+<<<<<<< HEAD
         v = self.view()
+=======
+        v = self.view(account)
+>>>>>>> origin/main
         v["advance_result"] = result
         return v
 
@@ -566,13 +760,32 @@ class Session:
         return " 剩余失败仍是指令/内容级, 未到动结构的时候。"
 
     # ---------- 视图 ----------
+<<<<<<< HEAD
     def view(self):
         adopted = [v for v in self.versions if v["adopted"]]
         cur = self._current()
+=======
+    def view(self, account=None):
+        adopted = [v for v in self.versions if v["adopted"]]
+        cur = self._current()
+        recs = cur.get("_recs") or []
+        # 按当前账号叠加人工分, 现算 eval 行与校准(不写共享缓存, 线程安全)
+        current_eval = [self._rec_view(r, account) for r in recs]
+        acc_recs = []
+        for r in recs:
+            rr = copy.copy(r)
+            rr.human_label = self._rec_view(r, account).get("human_label")
+            acc_recs.append(rr)
+        calib = calibration_mod.agreement(acc_recs, self.rubric) if recs else None
+>>>>>>> origin/main
         return {
             "session_id": self.id,
             "requirement": self.requirement,
             "product_id": self.product_id,
+<<<<<<< HEAD
+=======
+            "account": account,
+>>>>>>> origin/main
             "backend": self.backend.name,
             "detected": self.detected,
             "gen_rationale": self.gen_rationale,
@@ -583,10 +796,17 @@ class Session:
             "versions": [self._version_view(v) for v in self.versions],
             "curve": [{"version": v["version"], "dev": v["dev"], "test": v["test"]}
                       for v in adopted],
+<<<<<<< HEAD
             "current_eval": cur["eval"],
             "current_failures": cur["failures"],
             "calib": cur["calib"],
             "check_calib": self._check_calibration(cur["version"]),
+=======
+            "current_eval": current_eval,
+            "current_failures": cur["failures"],
+            "calib": calib,
+            "check_calib": self._check_calibration(cur["version"], account),
+>>>>>>> origin/main
             "dims": self.dims, "dim_zh": self.dim_zh,
             "target": self.rubric["target"],
             "can_advance": bool(self.cases),

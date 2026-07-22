@@ -1,6 +1,10 @@
 # OpenHarness 交接文档（HANDOFF）
 
+<<<<<<< HEAD
 > 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-07-13。
+=======
+> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-07-21（见文末 §9 增量）。
+>>>>>>> origin/main
 > 用户要求：**一律用简体中文交流**（曾误用日语被纠正）。
 
 ---
@@ -25,7 +29,11 @@
 - `report-assistant`（**算数字型**经营月报，旧，`data/report_assistant/`）——4 维：data_accuracy/completeness/insight/conciseness。
 - `research_insight`（**调研洞察汇报助手**，当前重点）——6 维（见 §3）。
 
+<<<<<<< HEAD
 环境事实：本机**无 ANTHROPIC_API_KEY、无 anthropic SDK、无 claude CLI**；Python 3.9.6（**只用 stdlib**，无 openpyxl/pandas）、Node 22。机器可读文件用 JSON 非 YAML。读 pdf 用 `pypdf`（可用），读 docx 用 stdlib `zipfile`+`xml`（无 python-docx），xlsx 读不了。
+=======
+环境事实（**部分已在 2026-07 变化，以 §9 为准**）：本机机器可读文件用 JSON 非 YAML；读 pdf 用 `pypdf`（可用），读 docx 用 stdlib `zipfile`+`xml`（无 python-docx），xlsx 读不了。⚠️ 已过时：现在是**新机器（Linux，`/data/home/angillwang/OpenHarness`）、Python 3.11.6、装了 `cryptography`**；判分 LLM key 已配（bianxie 中转，见 §9），非"无 key"。
+>>>>>>> origin/main
 
 ---
 
@@ -144,3 +152,32 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 - **真实标注/校准(2026-07-17 加)**：app 支持 ①上传报告文件(md/txt/pdf/docx,`/api/upload_report`) ②逐 check 人工标注(满足/部分/不满足=1/.5/0,`/api/submit_check_labels`,落 `check_labels.jsonl`) ③页面按钮直调 **Opus 4.8** 判分(`/api/run_judge`,stdlib urllib,**需 `ANTHROPIC_API_KEY`+网络**,落 `check_judgments.jsonl`) ④逐 check 校准(人工 vs judge,`view.check_calib`)。维度分由 check 汇总:`judge.dim_from_checks`(1+4·mean,红线 check miss→封顶2)。**只动真实线,mock 优化器仍六维不变。** 会话 `real-eval`=干净标注会话(3案)。
 - 数据：`data/research_assistant/`（dataset.jsonl / make_bad_variants.py / bad_variants.*.jsonl / README.md）、`data/<三案>/`（原始素材+正文）。
 - 记忆：`~/.tclaude/projects/-Users-angill-Documents-New-project-OpenHarness/memory/`（openharness-project / backend-six-dim-refactor / user-prefers-simplified-chinese）。
+<<<<<<< HEAD
+=======
+
+---
+
+## 9. 2026-07-20/21 增量（新机器 + iOA 鉴权 + 若干调整）
+
+**机器/环境变了**：现在在 **Linux 新机 `/data/home/angillwang/OpenHarness`**（HANDOFF 早期写的 `/Users/angill/...` 是旧 Mac）。**Python 3.11.6，装了 `cryptography`**。同机还有**另一个独立项目 `/data/home/angillwang/ai-strategy-hub`**（FastAPI+Vite），它才是 nginx(443, `www.strhub.woa.com`)→`127.0.0.1:8000` 经公司 iOA 网关暴露的应用；**OpenHarness 与它无关**，但其 `backend/app/middleware/tai_auth.py` 是本次 iOA 接入的参考母本。
+
+**① 端口**：`app/server.py` 默认端口 8765→**8080**。
+
+**② 判分 LLM key 已配**：`app/start_real.sh`（**gitignored，含真实密钥，勿提交**）导出 `ANTHROPIC_API_KEY`(bianxie 中转 sk-…)、`ANTHROPIC_BASE_URL=https://api.bianxie.ai`、`LLM_API_STYLE=openai`、`ANTHROPIC_JUDGE_MODEL=claude-opus-4-8`（bianxie 若不认此 id 需改）。`_call_opus` 已支持第三方中转。
+
+**③ iOA(TAI) 登录鉴权 + 按账号隔离标注历史**（本次大改，参照 ai-strategy-hub）：
+- 新增 `app/auth.py`：解 `X-Tai-Identity`（JWE, alg=dir/enc=A256GCM，AppToken 前 32 字节作 AES-256 密钥），取 `LoginName` 作账号。token 走环境变量 `TAI_APP_TOKEN`/`TAI_APP_ID`（在 start_real.sh 里，值 `CRI7…`）。
+- `server.py`：**所有 `/api/*` 严格鉴权，无有效身份一律 401**（`index.html` 公开）；新增 `GET /api/me`；登录账号透传进所有写接口与 `view(account)`。
+- `session.py`：`human_checks/human_labels` **按账号命名空间**；`evaluate()` 只算账号无关基础分并暂存 `cur["_recs"]`，**人工分叠加+校准在 `view(account)` 现算**（线程安全，专家互不覆盖）；旧快照经 `_migrate_human_labels` 归 `_legacy`。
+- `persistence.py`：`check_labels.jsonl` 每条带 `account`；`load_check_labels` 恢复为 `{version:{account:{case:{check}}}}`。judge 记录仍单份不分账号。
+- `index.html`：401→整页"请经 iOA 网关访问"；启动 `GET /api/me` 显示登录人。
+- **致命坑**：现在**直连 `:8080` 一律 401**（严格模式，用户拍板），本地自测也得经 iOA 或用离线脚本 `/tmp/oh_auth_test.py`（用测试 token 验证解密/隔离，不连服务器）。**未加角色限制**：任何 iOA 登录用户都能标注、各自留痕。
+- **待用户/运维做的基建**：iOA 控制台把 OpenHarness 登记为独立应用（确认 Token=`CRI7…`）；加 nginx server 块反代其域名→`:8080` 并 `proxy_set_header X-Tai-Identity $http_x_tai_identity;`(+`X-Tai-Identity-Mode`)。
+- **重启**：`bash app/start_real.sh --host 0.0.0.0`（Claude 的权限分类器会拦含密钥的启动脚本，须用户自己跑）。
+
+**④ rubric T1 口径调整**：应用户要求"正文不写引用出处、但论断仍须有据可回溯"。改了生成 skill（`skills/research-report/`）与 T1 判据（`harness/artifacts/rubric_research.json`、`app/sessions/real-eval/state.json`、judge 提示词、落地文档）——T1 从"论断挂出处"改为"论断可回溯(有据)，正文不印出处不扣分"。
+
+**⑤ 报告生成 skill 母本微调**（`skills/research-report/`，本机路径，未装到 `~/.claude/skills`）：正文不印行内 `[S-xxx]`（改自检时核对可回溯）；禁止把"结论先行/归因"等写作原则字样当小标题写进正文。
+
+**⑥ 打印**：`index.html` 加 `@media print`——专家人工标注表打印时白底黑字、字体放大、隐藏左右列。
+>>>>>>> origin/main

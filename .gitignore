@@ -1,0 +1,14 @@
+# 含真实 API key 的启动脚本，切勿提交
+app/start_real.sh
+app/run_local.sh
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统
+.DS_Store
+.env
+data/
+data/
+.env

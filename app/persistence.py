@@ -88,10 +88,18 @@ def append_judgment(sid: str, version: str, case_id: str, scores: Dict[str, int]
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+<<<<<<< HEAD
 def append_check_label(sid: str, version: str, case_id: str, checks: Dict[str, float]):
     """逐 check 的人工标注(满足/部分/不满足 = 1/0.5/0)。落在 check_labels.jsonl。"""
     d = _ensure(sid)
     rec = {"ts": _now(), "version": version, "case_id": case_id, "checks": checks}
+=======
+def append_check_label(sid: str, version: str, case_id: str, checks: Dict[str, float], account: str = "_legacy"):
+    """逐 check 的人工标注(满足/部分/不满足 = 1/0.5/0)。落在 check_labels.jsonl, 带标注账号。"""
+    d = _ensure(sid)
+    rec = {"ts": _now(), "version": version, "case_id": case_id,
+           "account": account or "_legacy", "checks": checks}
+>>>>>>> origin/main
     with open(os.path.join(d, "check_labels.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
@@ -181,18 +189,33 @@ def _load_check_jsonl(sid: str, fname: str) -> Dict[str, Dict[str, Dict[str, Any
     return out
 
 
+<<<<<<< HEAD
 def load_check_labels(sid: str) -> Dict[str, Dict[str, Dict[str, float]]]:
     """恢复逐 check 人工标注 {version:{case_id:{check_id: 1/0.5/0}}}(不带 reasoning,与内存态一致)。"""
     p = os.path.join(_BASE, sid, "check_labels.jsonl")
     if not os.path.exists(p):
         return {}
     out: Dict[str, Dict[str, Dict[str, float]]] = {}
+=======
+def load_check_labels(sid: str) -> Dict[str, Dict[str, Dict[str, Dict[str, float]]]]:
+    """恢复逐 check 人工标注, 按账号隔离 {version:{account:{case_id:{check_id: 1/0.5/0}}}}
+    (同 (version,account,case) 后写覆盖; 无 account 字段的旧记录归入 '_legacy')。"""
+    p = os.path.join(_BASE, sid, "check_labels.jsonl")
+    if not os.path.exists(p):
+        return {}
+    out: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
+>>>>>>> origin/main
     with open(p, encoding="utf-8") as f:
         for l in f:
             if not l.strip():
                 continue
             rec = json.loads(l)
+<<<<<<< HEAD
             out.setdefault(rec["version"], {})[rec["case_id"]] = rec.get("checks", {})
+=======
+            acct = rec.get("account") or "_legacy"
+            out.setdefault(rec["version"], {}).setdefault(acct, {})[rec["case_id"]] = rec.get("checks", {})
+>>>>>>> origin/main
     return out
 
 
