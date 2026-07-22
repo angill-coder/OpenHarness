@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+server.py — OpenHarness 标注/迭代平台 Web 服务 (stdlib http.server, 无依赖)
+
+启动:  python3 server.py            # 默认 http://127.0.0.1:8底口 见下
+       python3 server.py --port 8000 --real
+
+API:
+  GET  /                      -> index.html
+  POST /api/session           {requirement, product_id?}  -> 建会话, 生成 v0 skill+rubric
+  GET  /api/session?id=       -> 当前会话完整状态
+  POST /api/data              {id, rows?, use_sample?, labels?}  -> 导入数据(或用内置样例)
+  POST /api/labels            {id, version, labels:{case_id:{dim:score}}}  -> 提交人工标注
+  POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
+  POST /api/advance           {id}  -> 生成下一版 skill(optimizer+gate)
+  POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
+  POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
+  GET  /api/sample_data       -> 返回内置样例数据集(供页面一键导入)
+"""
+import argparse
+import base64
+import io
+import json
+import os
+import re
+import sys
+import urllib.request
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import session as session_mod  # noqa: E402
+import persistence as persist  # noqa: E402
+import auth as auth_mod  # noqa: E402
+
+ROOT = os.path.dirname(HERE)
+DATA_DIRS = {
+    "report-assistant": os.path.join(ROOT, "data", "report_assistant"),
+    "research_insight": os.path.join(ROOT, "data", "research_assistant"),
+}
+
+SESSIONS = {}          # sid -> Session
+PREFER_REAL = False
+
+
+def _load_sample(product="report-assistant"):
+    """按产品载入内置样例数据集。优先 dataset.jsonl, 回退 *.sample.jsonl。"""
+    d = DATA_DIRS.get(product, DATA_DIRS["report-assistant"])
+    def _pick(base):
+        for name in (base + ".jsonl", base + ".sample.jsonl"):
+            p = os.path.join(d, name)
+            if os.path.exists(p):
+                with open(p, encoding="utf-8") as f:
+                    return [json.loads(l) for l in f if l.strip()]
+        return []
+    return _pick("dataset"), _pick("human_labels")
+
+
+# ---------------- 文件解析 / LLM-judge 调用 ----------------
+def _parse_report(filename: str, raw: bytes) -> str:
+    """按扩展名把上传的报告文件解析成文本。md/txt 直读;pdf 用 pypdf;docx 用 zipfile+xml。"""
+    name = (filename or "").lower()
+    if name.endswith(".pdf"):
+        import pypdf
+        r = pypdf.PdfReader(io.BytesIO(raw))
+        return "\n".join((p.extract_text() or "") for p in r.pages)
+    if name.endswith(".docx"):
+        import zipfile
+        import xml.etree.ElementTree as ET
+        z = zipfile.ZipFile(io.BytesIO(raw))
+        ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        root = ET.fromstring(z.read("word/document.xml").decode("utf-8", "ignore"))
+        return "\n".join("".join(t.text or "" for t in p.iter(ns + "t"))
+                         for p in root.iter(ns + "p"))
+    return raw.decode("utf-8", "ignore")   # md / txt / 其它当纯文本
+
+
+def _build_judge_prompt(rubric, report_text, ground_truth) -> str:
+    """组装逐 check 判分提示词:列出所有 check,要求对每条判 met/partial/miss + 理由。"""
+    L = ["你是严格的调研报告评审。给定【报告正文】+【答案键 ground_truth】+ 下面逐条 check,",
+         "对**每一条 check** 判 met(满足)/partial(部分)/miss(不满足)。",
+         "**凡涉及有没有编造/漏答/引噪音/口径,一律拿答案键核对——报告说的 ≠ 事实,以答案键为准。**",
+         "", "## 逐条 check(每条都要打分)"]
+    for d in rubric["dimensions"]:
+        for c in d.get("checks", []):
+            rl = " [红线]" if c.get("redline") else ""
+            L.append("- %s(%s·%s%s): %s | 触发降档: %s" % (
+                c["id"], d["name_zh"], c["label"], rl, c.get("desc", ""), c.get("effect", "")))
+    L += ["", "## 答案键 ground_truth", json.dumps(ground_truth, ensure_ascii=False),
+          "", "## 报告正文", report_text or "(空)",
+          "", "## 输出(只输出严格 JSON,不要多余文字):",
+          '{"checks":{"T1":"met","T2":"miss", ...每条 check 都要},',
+          ' "reasoning":{"T1":"一句话","T2":"一句话", ...}}']
+    return "\n".join(L)
+
+
+def _call_opus(prompt: str) -> str:
+    """调 LLM 判分。支持直连 Anthropic 或第三方中转(new-api/bianxie 等 OpenAI 兼容)。
+    环境变量:
+      ANTHROPIC_API_KEY     必填,key
+      ANTHROPIC_BASE_URL    base url(默认 https://api.anthropic.com;第三方填其 url)
+      ANTHROPIC_JUDGE_MODEL 模型 id(默认 claude-opus-4-8)
+      LLM_API_STYLE         openai | anthropic(不填则:非 anthropic.com 域名自动用 openai)
+    """
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("未设置 ANTHROPIC_API_KEY —— 无法在页面直调。请先 export 后重启 server。")
+    base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
+    model = os.environ.get("ANTHROPIC_JUDGE_MODEL", "claude-opus-4-8")
+    style = os.environ.get("LLM_API_STYLE", "").lower() or ("anthropic" if "anthropic.com" in base else "openai")
+    if style == "openai":
+        url = base + "/v1/chat/completions"
+        headers = {"Authorization": "Bearer " + key, "content-type": "application/json"}
+    else:
+        url = base + "/v1/messages"
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    body = json.dumps({"model": model, "max_tokens": 2000,
+                       "messages": [{"role": "user", "content": prompt}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers=headers)
+    with urllib.request.urlopen(req, timeout=90) as resp:
+        j = json.loads(resp.read().decode("utf-8"))
+    if style == "openai":
+        return j["choices"][0]["message"]["content"]
+    return "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
+
+
+def _extract_json(text: str):
+    m = re.search(r"\{.*\}", text or "", re.S)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+def _restore_all():
+    """启动时从磁盘恢复所有已落盘的 session。"""
+    ids = persist.list_session_ids()
+    ok = 0
+    for sid in ids:
+        snap = persist.load_snapshot(sid)
+        if not snap:
+            continue
+        try:
+            SESSIONS[sid] = session_mod.Session.restore(snap, prefer_real=PREFER_REAL)
+            ok += 1
+        except Exception as e:
+            print("[restore] 跳过 %s: %s" % (sid, e))
+    if ids:
+        print("[restore] 从磁盘恢复 %d/%d 个会话" % (ok, len(ids)))
+    return ok
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass  # 静默
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        elif isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body(self):
+        n = int(self.headers.get("Content-Length", 0))
+        if not n:
+            return {}
+        try:
+            return json.loads(self.rfile.read(n).decode("utf-8"))
+        except Exception:
+            return {}
+
+    def _sess(self, sid):
+        s = SESSIONS.get(sid)
+        if not s:
+            self._send(404, {"error": "会话不存在: %s" % sid})
+            return None
+        return s
+
+    def _account(self):
+        """取当前 iOA 登录账号(LoginName)。无有效身份 -> 回 401 并返回 None(调用方 return)。"""
+        ident = auth_mod.current_user(self.headers)
+        acct = auth_mod.account_of(ident)
+        if not acct:
+            self._send(401, {"error": "未登录或身份校验失败，请经 iOA 网关访问", "need_auth": True})
+            return None
+        self._identity = ident
+        return acct
+
+    # ---------------- GET ----------------
+    def do_GET(self):
+        u = urlparse(self.path)
+        if u.path in ("/", "/index.html"):
+            path = os.path.join(HERE, "index.html")
+            with open(path, encoding="utf-8") as f:
+                return self._send(200, f.read(), "text/html; charset=utf-8")
+        # 其余 /api/* 一律需要 iOA 身份
+        acct = self._account()
+        if not acct:
+            return
+        if u.path == "/api/me":
+            ident = getattr(self, "_identity", {}) or {}
+            return self._send(200, {"login_name": acct,
+                                    "display_name": ident.get("DisplayName", acct),
+                                    "email": ident.get("Email", "")})
+        if u.path == "/api/session":
+            q = parse_qs(u.query)
+            sid = (q.get("id") or [None])[0]
+            s = self._sess(sid)
+            if s:
+                self._send(200, s.view(acct))
+            return
+        if u.path == "/api/sample_data":
+            q = parse_qs(u.query)
+            sid = (q.get("id") or [None])[0]
+            s = SESSIONS.get(sid)
+            product = s.rubric.get("product") if s else (q.get("product") or ["report-assistant"])[0]
+            rows, labels = _load_sample(product)
+            return self._send(200, {"rows": rows, "labels": labels, "n": len(rows)})
+        if u.path == "/api/sessions":
+            out = []
+            for sid, s in SESSIONS.items():
+                meta = persist.load_meta(sid) or {}
+                out.append({"id": sid, "product_id": s.product_id,
+                            "requirement": s.requirement,
+                            "current_version": s._current()["version"],
+                            "n_versions": len(s.versions), "n_cases": len(s.cases),
+                            "created_at": meta.get("created_at")})
+            out.sort(key=lambda x: x.get("created_at") or 0, reverse=True)
+            return self._send(200, {"sessions": out})
+        return self._send(404, {"error": "not found"})
+
+    # ---------------- POST ----------------
+    def do_POST(self):
+        u = urlparse(self.path)
+        b = self._body()
+
+        # 所有写接口一律需要 iOA 身份
+        acct = self._account()
+        if not acct:
+            return
+
+        if u.path == "/api/session":
+            req = (b.get("requirement") or "").strip()
+            if not req:
+                return self._send(400, {"error": "缺少 requirement(需求描述)"})
+            pid = (b.get("product_id") or "custom-skill").strip() or "custom-skill"
+            sid = uuid.uuid4().hex[:8]
+            try:
+                SESSIONS[sid] = session_mod.Session(sid, req, pid, prefer_real=PREFER_REAL)
+            except Exception as e:
+                return self._send(500, {"error": "生成 v0 失败: %s" % e})
+            return self._send(200, SESSIONS[sid].view(acct))
+
+        if u.path == "/api/data":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            rows = b.get("rows")
+            labels = b.get("labels")
+            if b.get("use_sample"):
+                rows, labels = _load_sample(s.rubric.get("product"))
+            if not rows:
+                return self._send(400, {"error": "无数据行; 传 rows 或 use_sample=true"})
+            return self._send(200, s.import_data(rows, labels, account=acct))
+
+        if u.path == "/api/labels":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            ver = b.get("version") or s._current()["version"]
+            labels = b.get("labels") or {}
+            return self._send(200, s.submit_labels(ver, labels, account=acct))
+
+        if u.path == "/api/rubric":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            return self._send(200, s.edit_rubric({k: b[k] for k in ("weights", "target") if k in b}, account=acct))
+
+        if u.path == "/api/advance":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            return self._send(200, s.advance(account=acct))
+
+        if u.path == "/api/import_output":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            case_id = b.get("case_id")
+            report_text = b.get("report_text") or ""
+            version = b.get("version")   # 缺省用当前版本
+            r = s.import_output(case_id, report_text, version, account=acct)
+            if "error" in r:
+                return self._send(400, r)
+            return self._send(200, r)
+
+        if u.path == "/api/import_judgment":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            r = s.import_judgment(b.get("case_id"), b.get("scores") or {},
+                                  b.get("reasoning"), b.get("version"), account=acct)
+            if "error" in r:
+                return self._send(400, r)
+            return self._send(200, r)
+
+        if u.path == "/api/upload_report":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            try:
+                raw = base64.b64decode(b.get("content_b64", ""))
+            except Exception:
+                return self._send(400, {"error": "文件解码失败"})
+            try:
+                text = _parse_report(b.get("filename", ""), raw)
+            except Exception as e:
+                return self._send(400, {"error": "解析文件失败: %s" % e})
+            if not (text or "").strip():
+                return self._send(400, {"error": "未解析出文本(可能是扫描件/加密/空文件)"})
+            return self._send(200, s.import_output(b.get("case_id"), text, b.get("version"), account=acct))
+
+        if u.path == "/api/submit_check_labels":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            r = s.submit_check_labels(b.get("case_id"), b.get("checks") or {}, b.get("version"), account=acct)
+            return self._send(400 if "error" in r else 200, r)
+
+        if u.path == "/api/run_judge":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            cid = b.get("case_id")
+            ver = b.get("version") or s._current()["version"]
+            report = s.report_outputs.get(ver, {}).get(cid)
+            if not report:
+                return self._send(400, {"error": "该 case 还没导入报告,先上传报告再跑 judge"})
+            case = next((c for c in s.cases if c["case_id"] == cid), None)
+            gt = (case or {}).get("ground_truth", {})
+            try:
+                text = _call_opus(_build_judge_prompt(s.rubric, report, gt))
+            except Exception as e:
+                return self._send(400, {"error": "调用 Opus 失败: %s" % e})
+            parsed = _extract_json(text)
+            if not parsed or "checks" not in parsed:
+                return self._send(400, {"error": "judge 输出解析失败", "raw": (text or "")[:500]})
+            r = s.set_judge_checks(cid, parsed["checks"], parsed.get("reasoning"), ver, account=acct)
+            return self._send(400 if "error" in r else 200, r)
+
+        return self._send(404, {"error": "not found"})
+
+
+def main():
+    global PREFER_REAL
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--real", action="store_true", help="有 API key 时用真实 Claude 生成/执行")
+    args = ap.parse_args()
+    PREFER_REAL = args.real
+
+    _restore_all()
+
+    srv = ThreadingHTTPServer((args.host, args.port), Handler)
+    print("OpenHarness 平台已启动: http://%s:%d" % (args.host, args.port))
+    print("  backend=%s  (加 --real 且有 ANTHROPIC_API_KEY 时启用真实 Claude)" % (
+        "claude?" if PREFER_REAL else "mock"))
+    print("  Ctrl+C 停止")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("\n已停止")
+
+
+if __name__ == "__main__":
+    main()

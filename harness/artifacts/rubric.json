@@ -1,0 +1,90 @@
+{
+  "product": "report-assistant",
+  "version": "v0",
+  "_note": "Machine-readable mirror of 业务汇报助手_Rubric落地文档.md. JSON used instead of YAML because the harness runs on Python stdlib (no yaml module). Field semantics are identical to the doc.",
+  "dimensions": [
+    {
+      "name": "data_accuracy",
+      "name_zh": "数据准确性",
+      "scale": [1, 5],
+      "weight": 0.40,
+      "hard_floor": 3,
+      "criteria": "每个数字/结论可回溯到 finding(带 source_ref);口径与计算正确;无编造数字。",
+      "anchors": {
+        "5": "所有数字/结论均可回溯;计算与口径全部正确;无编造。",
+        "4": "可回溯性完整、口径正确;仅 1 处非关键引用缺失或表述模糊。",
+        "3": "主体可回溯,但有 1 处关键数字无出处,或 1 处口径/计算错误。",
+        "2": "出现 >=1 个编造数字,或多处口径错误,核心结论可信度受损。",
+        "1": "大量数字无法回溯或明显编造;数据基础整体不可信。"
+      },
+      "positive_example": "本月 ARR ¥1,240 万,环比 +8.3%[F-012],增长由新增贡献[F-014]...",
+      "negative_example": "ARR 突破 1200 万,同比大幅提升约 30%,满意度显著上升。(无出处/疑编造)"
+    },
+    {
+      "name": "completeness",
+      "name_zh": "完整性",
+      "scale": [1, 5],
+      "weight": 0.25,
+      "hard_floor": null,
+      "criteria": "required_sections 全覆盖且非空;关键 finding 无遗漏。",
+      "anchors": {
+        "5": "required_sections 全覆盖且每段有实质内容;无关键 finding 遗漏。",
+        "4": "段落全覆盖;有 1 个次要 finding 未提及。",
+        "3": "缺 1 个 required section,或遗漏 1 个关键 finding。",
+        "2": "缺 >=2 个 required section,或遗漏多个关键 finding。",
+        "1": "大面积缺段,报告不成形。"
+      },
+      "positive_example": "五段齐全,且写入了华东区环比下滑异常。",
+      "negative_example": "缺'风险'段,且遗漏'现金跑道仅剩5个月'。"
+    },
+    {
+      "name": "insight",
+      "name_zh": "洞察质量",
+      "scale": [1, 5],
+      "weight": 0.25,
+      "hard_floor": null,
+      "criteria": "含归因/风险/下一步三要素,且判断落在 findings 内、非数据复读。",
+      "anchors": {
+        "5": "归因具体有据、风险到位、下一步可执行;提供由多条 findings 推出的非平凡判断。",
+        "4": "三要素齐全,但其中 1 项较泛或支撑略弱。",
+        "3": "有判断但偏表面(只复述'增长了'不解释,下一步空泛)。",
+        "2": "基本是数据复读,几乎无归因/风险/建议。",
+        "1": "纯数字罗列,无任何判断。"
+      },
+      "positive_example": "拆分新增vs留存,识别华东下滑风险,给出排查+加固建议。",
+      "negative_example": "各项指标向好,请继续保持。(纯复读)"
+    },
+    {
+      "name": "conciseness",
+      "name_zh": "简洁性",
+      "scale": [1, 5],
+      "weight": 0.10,
+      "hard_floor": null,
+      "is_reverse": true,
+      "criteria": "无冗余、不堆术语;长度匹配 audience_profiles。反向维度,防 reward hacking。",
+      "anchors": {
+        "5": "无冗余,每段服务于结论;长度与受众匹配。",
+        "4": "基本精炼,个别可删句子。",
+        "3": "存在一定冗余或轻度术语堆砌,或长度偏离受众设定。",
+        "2": "明显冗长/大量套话术语堆砌,或严重偏离受众长度设定。",
+        "1": "充斥空话,信息密度极低。"
+      },
+      "positive_example": "exec 版 ~200 字,直击业绩/风险/决策项。",
+      "negative_example": "满篇'数据驱动/闭环/赋能'术语,信息量趋零。"
+    }
+  ],
+  "aggregate": "weighted_avg",
+  "gates": [
+    {"id": "red_line_accuracy", "rule": "任一 case data_accuracy < 3 -> 该 case 不合格", "type": "hard_floor", "dimension": "data_accuracy", "floor": 3},
+    {"id": "no_regression", "rule": "候选版本采纳条件:目标维度↑ 且 其它维度均不塌(分维度看)", "type": "no_regression", "drop_tolerance": 0.15},
+    {"id": "hack_guard", "rule": "conciseness < 3 -> 触发人工复检(疑似 reward hacking)", "type": "human_review", "dimension": "conciseness", "floor": 3}
+  ],
+  "target": {
+    "data_accuracy": 4.2,
+    "completeness": 4.0,
+    "insight": 3.8,
+    "conciseness": 3.5,
+    "overall": 4.0,
+    "judge_human_agreement": 0.85
+  }
+}
