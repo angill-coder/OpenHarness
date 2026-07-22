@@ -1,0 +1,1221 @@
+{
+  "id": "real-eval",
+  "requirement": "真实报告标注与校准(第一期:定标准)",
+  "product_id": "research_insight",
+  "rubric": {
+    "product": "research_insight",
+    "version": "v0",
+    "_note": "调研洞察汇报助手 六维 rubric。机器可读镜像 调研洞察汇报助手_Rubric落地文档.md §1-3。JSON(非YAML)因 harness 走 Python stdlib。judge.score_report_research 读 report[signals] 照本文件锚点打分。",
+    "dimensions": [
+      {
+        "name": "traceability",
+        "name_zh": "可回溯性与支撑充分",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.28,
+        "hard_floor": 3,
+        "is_reverse": false,
+        "criteria": "论断可回溯到 source/claim;不曲解、不编造;冲突指出而非混用;素材不足处诚实留白;结论需≥2独立信源否则降级'待验证'。",
+        "anchors": {
+          "5": "所有论断可回溯;无曲解无编造;冲突被正确指出;素材不足处明确说明证据不足;单一信源结论均已标注'待验证'。",
+          "4": "可回溯性完整;仅1处非关键引用缺失或表述略模糊,不影响结论。",
+          "3": "主体可回溯,但1处关键论断无出处/轻度曲解/单一信源结论未降级。",
+          "2": "≥1处编造事实 / 把冲突素材当一致混用 / 无支撑下强行给结论。核心可信度受损(封顶,红线)。",
+          "1": "大量论断无法回溯或明显编造;报告事实基础整体不可信。"
+        },
+        "positive_example": "人均日时长Q2达27分钟[S-001];竞品X为去重会话时长[S-003],不可直接比较;投放方向素材不足,建议补充后再定。",
+        "negative_example": "满意度显著上升,NPS预计破50。(素材里没有)",
+        "checks": [
+          {
+            "id": "T1",
+            "label": "论断挂出处",
+            "desc": "每个事实/数据/结论能回溯到 S-xxx/C-xxx",
+            "effect": "关键论断无出处→3"
+          },
+          {
+            "id": "T2",
+            "label": "不编造·不曲解",
+            "desc": "无素材里不存在的新事实，未曲解原意",
+            "effect": "编造/曲解→2封顶",
+            "redline": true
+          },
+          {
+            "id": "T3",
+            "label": "冲突指出不混用",
+            "desc": "素材冲突正确指出、不当一致混用",
+            "effect": "混用冲突→2封顶",
+            "redline": true
+          },
+          {
+            "id": "T4",
+            "label": "单源降级待验证",
+            "desc": "单一信源结论标'待验证'，≥2 独立信源才作定论",
+            "effect": "未降级→3"
+          },
+          {
+            "id": "T5",
+            "label": "不足诚实留白",
+            "desc": "素材撑不起的问题说'证据不足'，不硬答",
+            "effect": "硬答→2封顶",
+            "redline": true
+          },
+          {
+            "id": "T6",
+            "label": "口径注明",
+            "desc": "口径依赖的数/结论要注明口径、必要时给敏感性",
+            "effect": "选有利口径不注明→3"
+          },
+          {
+            "id": "T7",
+            "label": "披露样本偏差",
+            "desc": "已知样本有系统性偏差要披露、不当客观结论",
+            "effect": "无视偏差→3"
+          }
+        ]
+      },
+      {
+        "name": "structure",
+        "name_zh": "结构",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.15,
+        "hard_floor": null,
+        "is_reverse": false,
+        "criteria": "摘要≤3条bullet且每条直接写结论、按重要性排序;正文金字塔、章节MECE、紧凑无注水。",
+        "anchors": {
+          "5": "摘要≤3条纯结论按重要性排序;正文每章论点先行、章节MECE无重叠无遗漏;摘要与正文严格对应。",
+          "4": "结构基本达标,摘要/正文对应清晰;仅1处轻微交叉或1条bullet偏铺陈。",
+          "3": "有摘要+正文分层,但摘要含背景铺陈,或正文非金字塔,或章节明显重叠/遗漏。",
+          "2": "摘要是背景介绍而非结论 / 正文与摘要对不上 / 无明显章节逻辑(封顶)。",
+          "1": "无结构,流水账。"
+        },
+        "positive_example": "• 增长由重度用户留存加深驱动,非拉新。 • 可持续性存疑,仅两期数据。 • 建议资源转向激活。",
+        "negative_example": "• 本季度对DeepSeek用户时长进行了分析。 • 数据来自内部BI和6人访谈。(全是背景铺陈)",
+        "checks": [
+          {
+            "id": "S1",
+            "label": "摘要≤3条纯结论",
+            "desc": "摘要≤3 bullet、每条是结论非背景、重要在前",
+            "effect": "背景铺陈→2封顶"
+          },
+          {
+            "id": "S2",
+            "label": "金字塔",
+            "desc": "正文每章先给论点、再给支撑",
+            "effect": "支撑先于论点→3"
+          },
+          {
+            "id": "S3",
+            "label": "MECE 章节",
+            "desc": "章节不重复、不遗漏、不交叉",
+            "effect": "明显重叠/遗漏→3"
+          },
+          {
+            "id": "S4",
+            "label": "摘要↔正文对应",
+            "desc": "正文是摘要的展开、严格对应",
+            "effect": "对不上→2封顶"
+          }
+        ]
+      },
+      {
+        "name": "narrative",
+        "name_zh": "逻辑与故事线",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.12,
+        "hard_floor": null,
+        "is_reverse": false,
+        "criteria": "论点推进有逻辑;章节衔接自然串成故事线;同一概念/口径/术语全文含义一致。",
+        "anchors": {
+          "5": "一条清晰主线贯穿全文;章节因果/递进衔接自然;同一概念全文口径一致。",
+          "4": "主线清楚;个别衔接略生硬或1处措辞不统一(不影响理解)。",
+          "3": "能读懂,但章节像并列拼接、缺推进感;或有1处概念前后不一致。",
+          "2": "故事线断裂跳跃 / 概念自相矛盾(封顶)。",
+          "1": "逻辑混乱,无法跟随。"
+        },
+        "positive_example": "从'时长为何涨'→'谁在涨'→'能否持续'→'我们该做什么',一条主线递进。",
+        "negative_example": "前文'时长'指累计前台时长,后文对比时不声明换成去重会话时长。",
+        "checks": [
+          {
+            "id": "N1",
+            "label": "主线贯穿",
+            "desc": "一条清晰主线、章节因果/递进衔接自然",
+            "effect": "并列拼接缺推进→3"
+          },
+          {
+            "id": "N2",
+            "label": "概念口径一致",
+            "desc": "同一名词/口径全文含义不漂移",
+            "effect": "概念自相矛盾→2封顶"
+          }
+        ]
+      },
+      {
+        "name": "insight",
+        "name_zh": "提炼与洞察",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.22,
+        "hard_floor": null,
+        "is_reverse": false,
+        "criteria": "案例抽象提炼成模式非罗列;归因/趋势(标置信)/建议三要素;噪音片段不引用;命中 expected_insights。",
+        "anchors": {
+          "5": "命中expected_insights;案例被提炼成规律;归因具体有据、趋势标置信度、建议可执行;噪音全部剔除。",
+          "4": "三要素齐,但1项较泛或支撑略弱,或趋势过度外推未标置信;噪音基本剔除。",
+          "3": "有判断但偏表面(只说'增长了'不解释),或案例是罗列而非提炼,或引用了噪音片段。",
+          "2": "基本是素材复述 / 大量引用噪音片段充数,几乎无归因/趋势/建议(封顶)。",
+          "1": "纯素材罗列,无任何判断。"
+        },
+        "positive_example": "5家AI Native公司4家采用'人机双轨过渡'——先影子运行再切流,共性是把风险控制在可回退区间[C-003,C-004,C-005]。",
+        "negative_example": "把5家公司案例逐条抄一遍,不提炼共性。",
+        "checks": [
+          {
+            "id": "I1",
+            "label": "提炼成规律",
+            "desc": "案例抽象成模式/共性，非逐条罗列",
+            "effect": "罗列→3"
+          },
+          {
+            "id": "I2",
+            "label": "归因/趋势/建议三要素",
+            "desc": "有归因、趋势(标置信度)、可执行建议",
+            "effect": "仅复述→2封顶"
+          },
+          {
+            "id": "I3",
+            "label": "不过度外推",
+            "desc": "趋势标置信、不越界外推",
+            "effect": "过度外推→4(并拉低可回溯性)"
+          },
+          {
+            "id": "I4",
+            "label": "剔噪",
+            "desc": "不引用噪音片段(noise_source_ids)",
+            "effect": "引噪音充数→3"
+          },
+          {
+            "id": "I5",
+            "label": "异常交叉验证",
+            "desc": "一次性异常/离群作交叉或情境解释、不当作趋势或错误归因",
+            "effect": "异常当趋势→4"
+          }
+        ]
+      },
+      {
+        "name": "coverage",
+        "name_zh": "覆盖度",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.08,
+        "hard_floor": null,
+        "is_reverse": false,
+        "criteria": "素材支持的 key_question 全答;key_claim_ids 无遗漏;required_sections 全覆盖且非空。素材答不了的(unsupportable_questions)不算漏。",
+        "anchors": {
+          "5": "可答的key_question全答、关键claim无遗漏、段落齐且有实质内容。",
+          "4": "段落齐、可答问题全答;有1个次要claim未提。",
+          "3": "缺1个required section,或漏1个关键claim / 未答1个素材支持的key_question。",
+          "2": "缺≥2段,或漏多个关键claim / 多个可答问题未答。",
+          "1": "大面积缺失,报告不成形。"
+        },
+        "positive_example": "五段齐全,时长变化原因与贡献用户群都答到。",
+        "negative_example": "缺'归因分析'段,且漏答'增长由哪类用户贡献'。",
+        "checks": [
+          {
+            "id": "V1",
+            "label": "可答问题全答",
+            "desc": "key_questions 中素材支持的都答到(答不了的不算漏)",
+            "effect": "漏答可答问题→3"
+          },
+          {
+            "id": "V2",
+            "label": "关键 claim 无遗漏",
+            "desc": "key_claim_ids 都覆盖",
+            "effect": "漏关键claim→3"
+          },
+          {
+            "id": "V3",
+            "label": "必需段落齐",
+            "desc": "required_sections 全覆盖且有实质内容",
+            "effect": "缺1段→3；缺≥2→2"
+          }
+        ]
+      },
+      {
+        "name": "expression",
+        "name_zh": "表达与受众契合",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.15,
+        "hard_floor": null,
+        "is_reverse": true,
+        "criteria": "面向高管精炼、结论先行、措辞严谨;关键数据用表/图结构化呈现;长度匹配受众;禁用'不是,而是'句式、不堆术语。反向维度防reward hacking。",
+        "checks": [
+          {
+            "id": "E1",
+            "label": "结论先行·措辞严谨",
+            "desc": "结论先行、直击决策，措辞严谨不含糊",
+            "effect": "缺失/通篇铺垫→降到3"
+          },
+          {
+            "id": "E2",
+            "label": "结构化呈现(表/图)",
+            "desc": "关键数据/对比用 markdown 表格或图，而非埋在长段文字里",
+            "effect": "该图不图→降到3"
+          },
+          {
+            "id": "E3",
+            "label": "长度匹配受众",
+            "desc": "长度合 exec(≤1.5 页量级)、不注水",
+            "effect": "严重偏离长度→2封顶"
+          },
+          {
+            "id": "E4",
+            "label": "风格禁令(硬红线)",
+            "desc": "禁用'不是,而是'句式;禁术语堆砌(数据驱动/闭环/赋能/范式重构式空话)",
+            "effect": "命中任一→2封顶",
+            "redline": true
+          },
+          {
+            "id": "E5",
+            "label": "措辞严谨",
+            "desc": "措辞严谨不含糊、不模棱两可(结论/限定条件清楚)",
+            "effect": "含糊/模棱→降档(真实judge评)"
+          }
+        ],
+        "anchors": {
+          "5": "结论先行直击决策;关键数据/对比用了表格或图;措辞严谨;长度合exec(≤1.5页);无违禁句式无注水。",
+          "4": "基本精炼;有个别可删句,或1处本该用表却用文字。",
+          "3": "一定冗余或轻度术语堆砌,或该可视化的没可视化,或长度偏离受众。",
+          "2": "出现'不是,而是'句式 / 明显冗长套话术语堆砌 / 严重偏离长度(封顶)。",
+          "1": "充斥空话,信息密度极低。"
+        },
+        "positive_example": "用一张3行表呈现Q1/Q2时长、重度/轻度增幅、样本量。",
+        "negative_example": "增长并非来自拉新,而是来自留存加深。(命中'不是,而是'句式)"
+      }
+    ],
+    "aggregate": "weighted_avg",
+    "gates": [
+      {
+        "id": "red_line_traceability",
+        "type": "hard_floor",
+        "dimension": "traceability",
+        "floor": 3,
+        "rule": "任一 case traceability < 3(编造/混用冲突/无据硬结论) -> 该 case 不合格"
+      },
+      {
+        "id": "no_regression",
+        "type": "no_regression",
+        "drop_tolerance": 0.15,
+        "rule": "候选版本采纳条件:目标维度↑ 且 其它维度均不塌(分维度看)"
+      },
+      {
+        "id": "structure_guard",
+        "type": "human_review",
+        "dimension": "structure",
+        "floor": 3,
+        "rule": "structure < 3 -> 人工复检"
+      },
+      {
+        "id": "narrative_guard",
+        "type": "human_review",
+        "dimension": "narrative",
+        "floor": 3,
+        "rule": "narrative < 3 -> 人工复检"
+      },
+      {
+        "id": "hack_guard",
+        "type": "human_review",
+        "dimension": "expression",
+        "floor": 3,
+        "rule": "expression < 3 -> 触发人工复检(疑似 reward hacking / 违禁句式)"
+      }
+    ],
+    "target": {
+      "traceability": 4.2,
+      "structure": 4.0,
+      "narrative": 3.8,
+      "insight": 3.6,
+      "coverage": 4.0,
+      "expression": 3.8,
+      "overall": 4.0,
+      "judge_human_agreement": 0.85
+    }
+  },
+  "gen_rationale": "识别为**调研洞察汇报**(基于异构素材的提炼+写作, 非算数字型)。\n结构: Intake→SourceCurator→Analyst→Insight→Writer→独立Verifier→交付。\n六维 rubric(可回溯性0.28红线/结构0.15/逻辑0.12/洞察0.22/覆盖0.08/表达0.15)。\nv0 directives 全关 —— 结构定上限, 由优化闭环逐个打开逼近上限。",
+  "detected": {
+    "report_type": "research_insight",
+    "audience": "exec"
+  },
+  "current_idx": 0,
+  "opt_history": [],
+  "cases": [
+    {
+      "case_id": "rr-ds-timelen",
+      "report_type": "research_insight",
+      "topic": "DeepSeek 用户时长分析",
+      "audience": "exec",
+      "deliverable": "editable_doc",
+      "split": "dev",
+      "key_questions": [
+        "DS 用户时长为何增长？",
+        "增长由哪类用户/场景贡献？",
+        "增长机制/为何粘性强？",
+        "对我们的策略启示？"
+      ],
+      "required_sections": [
+        "核心摘要",
+        "核心发现（含归因）",
+        "对我们的启示与建议（含趋势）"
+      ],
+      "hard_case_tags": [
+        "unsupported_extrapolation",
+        "outlier_confound",
+        "single_modality",
+        "missing_evidence",
+        "noise_present"
+      ],
+      "input": {
+        "brief": "面向最高管理层，说明 DS 用户时长增长的事实、结构、归因与粘性机制；不超过 1.5 页；不确定处留白。",
+        "_数值提示": "以下 excerpt 数值取自 vF 报告文本层，请用对应 xlsx 原表核对后确认。",
+        "sources": [
+          {
+            "id": "S-001",
+            "type": "excel",
+            "title": "QM 人均单日使用时长/单日时长拟合",
+            "excerpt": "DS 最新 15.7 min/人天(豆包11.4、元宝9.6)；近一年+94%，按 +0.24 min/周 稳定线性增长",
+            "meta": {
+              "file": "QM_人均使用时长(分钟).xlsx / QM_DS单日时长拟合.xlsx",
+              "source": "Questmobile"
+            }
+          },
+          {
+            "id": "S-002",
+            "type": "excel",
+            "title": "QM 人均单次使用时长",
+            "excerpt": "DS 1.7→2.0 分钟/次(+17%)；豆包 2.0→1.9(-5%)；元宝 2.3→1.9(-16%)",
+            "meta": {
+              "file": "QM_人均单次使用时长.xlsx"
+            }
+          },
+          {
+            "id": "S-003",
+            "type": "excel",
+            "title": "QM 人均单日使用次数",
+            "excerpt": "DS 4.9→8.2 次/天(+66%)；豆包+22%；元宝+4%",
+            "meta": {
+              "file": "QM_人均使用次数.xlsx"
+            }
+          },
+          {
+            "id": "S-004",
+            "type": "excel",
+            "title": "QM 人均使用时长区间分布",
+            "excerpt": "重度(>30min)占比 6%(187万)→13%(388万)；中度(1-10min)61%(2033万)→51%(1574万)；豆包重度8→9%，元宝8→6%",
+            "meta": {
+              "file": "QM_人均使用时长区间分布.xlsx"
+            }
+          },
+          {
+            "id": "S-005",
+            "type": "csv",
+            "title": "问卷(1,568人) 场景使用率",
+            "excerpt": "办公/深度研究 43.1%、文本创作 29.2%、代码生成 14.5%，均显著高于豆包/元宝",
+            "meta": {
+              "file": "问卷数据_DS时长分析.csv",
+              "n": 1568
+            }
+          },
+          {
+            "id": "S-006",
+            "type": "csv",
+            "title": "问卷 高时长×场景交叉",
+            "excerpt": "办公用户>30min 16.3% vs 未用 10.5%；写小说/角色扮演 21.2% vs 14.8%",
+            "meta": {
+              "file": "问卷数据_DS时长分析.csv"
+            }
+          },
+          {
+            "id": "S-007",
+            "type": "csv",
+            "title": "问卷 复杂场景用户画像",
+            "excerpt": "写小说用户 19-30岁 52.1% vs 43.3%、本科+ 73.4% vs 68.3%；办公用户本科+ 76.5% vs 65.2%",
+            "meta": {
+              "file": "问卷数据_DS时长分析.csv"
+            }
+          },
+          {
+            "id": "S-008",
+            "type": "interview",
+            "title": "重度用户抽样访谈记录",
+            "excerpt": "多条引用(投资专家44/程序员30/项目管理39/学生20/财务45)：任务做深(50万字提炼、连写1-2h)、简单场景建信任后外溢复杂场景、切换成本/信任惯性、v4 长文与长多轮记忆提升",
+            "meta": {
+              "file": "DS用户访谈记录.xlsx",
+              "modality": "定性"
+            }
+          },
+          {
+            "id": "S-009",
+            "type": "excel",
+            "title": "QM 终端价格分布(报告未使用)",
+            "excerpt": "终端价格分布汇总——与'时长归因'无关",
+            "meta": {
+              "file": "QM_终端价格分布汇总.xlsx",
+              "_note": "噪音：与本次时长归因无关"
+            }
+          }
+        ]
+      },
+      "ground_truth": {
+        "supported_claims": [
+          {
+            "id": "C-001",
+            "claim": "DS 人均单日时长近一年+94%(近翻倍)，最新 15.7 min/人天，高于竞品",
+            "source_ids": [
+              "S-001"
+            ],
+            "type": "fact"
+          },
+          {
+            "id": "C-002",
+            "claim": "增长同时来自'单次更久'(+17%)与'单日更频繁'(+66%)两条腿(单日时长=单次时长×单日次数)",
+            "source_ids": [
+              "S-002",
+              "S-003"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-003",
+            "claim": "时长增长的结构本质是中度用户向重度迁移(>30min 6%→13%，中度 61%→51%)",
+            "source_ids": [
+              "S-004"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-004",
+            "claim": "高时长主要由复杂任务(办公/创作/代码)贡献：复杂场景使用率超竞品，且高时长集中于复杂任务用户",
+            "source_ids": [
+              "S-005",
+              "S-006"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-005",
+            "claim": "机制是'简单场景建信任→外溢复杂场景→信任惯性/切换成本'形成粘性",
+            "source_ids": [
+              "S-008"
+            ],
+            "type": "qualitative",
+            "note": "仅访谈单一模态支撑，须标'定性、待量化验证'"
+          }
+        ],
+        "key_claim_ids": [
+          "C-001",
+          "C-002",
+          "C-003",
+          "C-004",
+          "C-005"
+        ],
+        "expected_insights": [
+          {
+            "id": "I-001",
+            "insight": "时长增长是'任务做深+场景变广'带来的用户价值加深，而非单纯拉新或机械轮次增加",
+            "depends_on": [
+              "C-002",
+              "C-003",
+              "C-004"
+            ]
+          },
+          {
+            "id": "I-002",
+            "insight": "本质是中度→重度迁移，获客策略应转向深使用激活而非单纯拉新(策略启示,应答)",
+            "depends_on": [
+              "C-003"
+            ]
+          },
+          {
+            "id": "I-003",
+            "insight": "信任外溢形成粘性/切换成本护城河，v4 长文能力是复杂任务留存支点(定性支撑,宜标待量化验证)",
+            "depends_on": [
+              "C-005"
+            ]
+          }
+        ],
+        "unsupportable_questions": [
+          "具体投放渠道/预算等下一步投放动作(无投放数据)",
+          "时长未来能否持续增长/天花板在哪(仅历史趋势，外推越界)",
+          "付费/商业化转化(无收入数据)"
+        ],
+        "noise_source_ids": [
+          "S-009"
+        ],
+        "traps": [
+          {
+            "type": "unsupported_extrapolation",
+            "involves": [
+              "S-001"
+            ],
+            "detail": "仅可陈述历史趋势；断言'将持续线性增长/再翻倍'越界，应扣①"
+          },
+          {
+            "type": "outlier_confound",
+            "involves": [
+              "S-001"
+            ],
+            "detail": "2月春节后 spike 须作节后返工交叉解释，不可当趋势(好报告已处理)"
+          },
+          {
+            "type": "single_modality",
+            "involves": [
+              "S-008"
+            ],
+            "detail": "C-005 信任外溢仅访谈支撑，须标'定性/待量化验证'，否则扣①"
+          },
+          {
+            "type": "missing_evidence",
+            "involves": [],
+            "detail": "无投放/商业化数据；硬给具体投放动作应扣①，诚实留白为宜"
+          },
+          {
+            "type": "noise_present",
+            "involves": [
+              "S-009"
+            ],
+            "detail": "终端价格分布被引用=剔噪失败，扣④"
+          }
+        ]
+      },
+      "key_finding_ids": []
+    },
+    {
+      "case_id": "rr-surge-eff",
+      "report_type": "research_insight",
+      "topic": "Surge AI 高人效原因分析",
+      "audience": "exec",
+      "deliverable": "editable_doc",
+      "split": "dev",
+      "key_questions": [
+        "Surge 高人效有多高、如何度量",
+        "高人效的形成机制是什么",
+        "对我们(数据团队)的启示"
+      ],
+      "required_sections": [
+        "核心摘要",
+        "核心发现（含归因）",
+        "对我们的启示与建议（含趋势）"
+      ],
+      "hard_case_tags": [
+        "metric_caveat",
+        "single_modality",
+        "unsupported_extrapolation",
+        "missing_evidence",
+        "noise_present"
+      ],
+      "input": {
+        "brief": "面向管理层，解释 Surge 高人效(ARR/全职员工)的量级与形成机制，给出对我们的启示；口径不确定处注明。",
+        "_数值提示": "excerpt 取自原始素材 docx 文本层，请核对。",
+        "sources": [
+          {
+            "id": "S-001",
+            "type": "doc",
+            "title": "人效对比表(公开+素材)",
+            "excerpt": "ARR/全职员工($mn): Surge~12(ARR>1.2bn,全职<100)、Scale 1.3、Turing 0.6、Micro1 4、Mercor 6；注:Surge公开总人数(含兼职+顾问)~250",
+            "meta": {
+              "caveat": "人效分母口径"
+            }
+          },
+          {
+            "id": "S-002",
+            "type": "doc",
+            "title": "Surge 发展史/标注均价",
+            "excerpt": "2020搜推低端~$8/h→2021-22 SFT/RLHF~$20→2023至今专业领域~$40最高上千",
+            "meta": {}
+          },
+          {
+            "id": "S-003",
+            "type": "interview",
+            "title": "混元数据团队反馈(定性)",
+            "excerpt": "Surge数据多样性/难度/自然度优于竞品；高难STEM(>$900/条)仅Surge可提供；质检力度更高；交付最快、产量最高2x(非同口径严格对比)",
+            "meta": {
+              "modality": "定性/经验值"
+            }
+          },
+          {
+            "id": "S-004",
+            "type": "doc",
+            "title": "创始人背景对比",
+            "excerpt": "Edwin Chen有Google/Meta模型训练工程背景；Scale偏客户合作、Turing/Mercor/Micro1招聘业务起家、创始人无AI训练背景",
+            "meta": {}
+          },
+          {
+            "id": "S-005",
+            "type": "doc",
+            "title": "质检/监控机制",
+            "excerpt": "三层质检:AI初筛(10-20%拒)→人工复核→专家终审+训练proxy小模型验证；100+行为信号监控、AI red team agent",
+            "meta": {}
+          },
+          {
+            "id": "S-006",
+            "type": "interview",
+            "title": "专家访谈notes(数据团队/Product Specialist)",
+            "excerpt": "2周产1k条 vs 竞品~300条/周；专家供给稳定、单量更多；项目启动0.5-2天;价格与竞品相近",
+            "meta": {
+              "modality": "定性/经验值"
+            }
+          },
+          {
+            "id": "S-007",
+            "type": "doc",
+            "title": "竞品业务/融资对比(公开)",
+            "excerpt": "Scale国防收入~13%含低端视觉标注拉低人效；Surge聚焦LLM高端后训练、暂停中低端(DataAnnotation)",
+            "meta": {}
+          },
+          {
+            "id": "S-008",
+            "type": "doc",
+            "title": "市场规模前瞻(素材)",
+            "excerpt": "数据标注市场 2025~2B → 2026~10B, CAGR~30%",
+            "meta": {
+              "nature": "前瞻估计"
+            }
+          },
+          {
+            "id": "S-009",
+            "type": "doc",
+            "title": "Surge团队明细(招聘/名单/领英抽样)",
+            "excerpt": "官网47个在招岗位、key leads姓名、8位research fellows名单、staff领英抽样背景",
+            "meta": {
+              "_note": "exec报告无关细节，引入=注水"
+            }
+          }
+        ]
+      },
+      "ground_truth": {
+        "supported_claims": [
+          {
+            "id": "C-001",
+            "claim": "Surge人效~$12M/全职员工，约为主要竞品2-10倍",
+            "source_ids": [
+              "S-001"
+            ],
+            "type": "fact",
+            "note": "分母用'全职<100'口径，含兼职顾问~250会显著拉低，须注明"
+          },
+          {
+            "id": "C-002",
+            "claim": "高人效=高客单价×高质量交付带来的客户粘性×自动化带来的高交付速度(三乘数)",
+            "source_ids": [
+              "S-002",
+              "S-003",
+              "S-005",
+              "S-006"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-003",
+            "claim": "高客单价来自转型大模型高端标注+聚焦头部客户(竞品仍保留低端)",
+            "source_ids": [
+              "S-002",
+              "S-007"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-004",
+            "claim": "高质量来自创始人'Solution Provider'基因+AI自动化精细质检",
+            "source_ids": [
+              "S-003",
+              "S-004",
+              "S-005"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-005",
+            "claim": "高速来自工具链复用+20万专家池模型化调度(启动0.5-2天、产量最高2x)",
+            "source_ids": [
+              "S-006"
+            ],
+            "type": "attribution",
+            "note": "多为混元团队/访谈定性经验值，须标定性"
+          }
+        ],
+        "key_claim_ids": [
+          "C-001",
+          "C-002",
+          "C-003",
+          "C-004",
+          "C-005"
+        ],
+        "expected_insights": [
+          {
+            "id": "I-001",
+            "insight": "高人效源于极致质量与效率追求，三乘数相互强化(质量→头部粘性→premium→再投入)",
+            "depends_on": [
+              "C-002",
+              "C-003",
+              "C-004",
+              "C-005"
+            ]
+          },
+          {
+            "id": "I-002",
+            "insight": "对我们的启示(策略,应答):①对质量不妥协、提前布局高难场景 ②保持前沿认知换premium ③关键决策放一线、后台Agent托底",
+            "depends_on": [
+              "C-004",
+              "C-005"
+            ]
+          }
+        ],
+        "unsupportable_questions": [
+          "Surge确切估值/融资是否达成(仅'考虑融资10亿'，未确定)",
+          "Surge利润率/成本结构(无财务数据)",
+          "各家精确ARR(多为>X估计、口径不一)"
+        ],
+        "noise_source_ids": [
+          "S-009"
+        ],
+        "traps": [
+          {
+            "type": "metric_caveat",
+            "involves": [
+              "S-001"
+            ],
+            "detail": "人效分母用'全职<100'偏乐观，含兼职顾问~250会显著拉低'2-10倍'，好报告须注明口径"
+          },
+          {
+            "type": "single_modality",
+            "involves": [
+              "S-003",
+              "S-006"
+            ],
+            "detail": "质量/速度优势多靠单一内部团队反馈/访谈的定性经验值，须标'定性/非严格对比'"
+          },
+          {
+            "type": "unsupported_extrapolation",
+            "involves": [
+              "S-008"
+            ],
+            "detail": "市场2B→10B/CAGR30%是前瞻估计，不可当既定结论"
+          },
+          {
+            "type": "missing_evidence",
+            "involves": [],
+            "detail": "无Surge内部财务/成本数据，硬断言利润/成本优势应扣①"
+          },
+          {
+            "type": "noise_present",
+            "involves": [
+              "S-009"
+            ],
+            "detail": "把fellows/staff/key leads人名清单塞进exec结论=剔噪失败"
+          }
+        ]
+      },
+      "key_finding_ids": []
+    },
+    {
+      "case_id": "rr-retention",
+      "report_type": "research_insight",
+      "topic": "AI产品用户留存洞察(元宝/DS/豆包)",
+      "audience": "exec",
+      "deliverable": "editable_doc",
+      "split": "dev",
+      "key_questions": [
+        "三家留存现状与差距",
+        "哪些因素驱动强留存(人群/文本/功能/召回)",
+        "元宝下一步该做什么"
+      ],
+      "required_sections": [
+        "核心摘要",
+        "核心发现（含归因）",
+        "对我们的启示与建议（含趋势）"
+      ],
+      "hard_case_tags": [
+        "metric_caveat",
+        "selection_bias",
+        "unsupported_extrapolation",
+        "missing_evidence"
+      ],
+      "input": {
+        "brief": "面向管理层，说明元宝/DS/豆包留存差距与驱动因素，给元宝可执行的下一步；口径/偏差与外推处注明。",
+        "sources": [
+          {
+            "id": "S-001",
+            "type": "survey",
+            "title": "问卷设计与样本",
+            "excerpt": "腾讯问卷,11/11-13,4174有效样本;'对比打分'(离散选择思路,同问卷评多产品)+'强留存率'(最近一周主用)定义",
+            "meta": {}
+          },
+          {
+            "id": "S-002",
+            "type": "analysis",
+            "title": "问卷可信性检验",
+            "excerpt": "问卷实际分布(元宝14/DS31/豆包55%) vs 理论估算(9/25/66%,幂函数留存曲线×新增)趋势一致;注:腾讯问卷对腾讯系偏好,横向比较略利好元宝",
+            "meta": {
+              "caveat": "选择偏差"
+            }
+          },
+          {
+            "id": "S-003",
+            "type": "survey",
+            "title": "强留存率",
+            "excerpt": "元宝19% / DS34% / 豆包54%",
+            "meta": {}
+          },
+          {
+            "id": "S-004",
+            "type": "survey",
+            "title": "纯白用户",
+            "excerpt": "纯白强留存显著更高(元宝+14pp/DS+18pp/豆包+10pp);近月几乎无新增纯白、获取难度上升;画像元宝豆包更下沉、DS更高学历;下沉≠高留存",
+            "meta": {}
+          },
+          {
+            "id": "S-005",
+            "type": "survey",
+            "title": "功能纯白",
+            "excerpt": "拍照答疑/AI创作纯白提升最高(元宝16/14pp);但元宝功能上线晚、纯白占比低",
+            "meta": {}
+          },
+          {
+            "id": "S-006",
+            "type": "survey",
+            "title": "迁移矩阵",
+            "excerpt": "10/24-25,DS919/豆包1103;迁DS用户难度<豆包;相同触达下面向DS'洗盘'效率约豆包2x;注:乐观估计,需A/B验证",
+            "meta": {
+              "caveat": "需A/B验证"
+            }
+          },
+          {
+            "id": "S-007",
+            "type": "survey",
+            "title": "文本满意度(+评测+访谈)",
+            "excerpt": "可靠性/深度思考是三家共同Top抓手(豆包24/25pp,元宝DS 10-15pp);元宝吐字速度快但总回答时长待优化(评测+访谈印证)",
+            "meta": {}
+          },
+          {
+            "id": "S-008",
+            "type": "survey",
+            "title": "功能满意度",
+            "excerpt": "追随豆包打磨边际收益收窄;深度思考/拍照答疑关键;元宝拍照答疑较DS更高",
+            "meta": {}
+          },
+          {
+            "id": "S-009",
+            "type": "survey",
+            "title": "召回手段",
+            "excerpt": "三家均以'主动打开'为主;红点仅豆包+5pp;个性化推荐/社交裂变国内尚无成熟样板",
+            "meta": {}
+          },
+          {
+            "id": "S-010",
+            "type": "doc",
+            "title": "DAU/新增(QM+访谈口径)",
+            "excerpt": "DAU 元宝560/700w、DS2865/3000w、豆包5413/8000w;新增7日 元宝11-12%/DS17-19%/豆包21-23%",
+            "meta": {
+              "caveat": "QM与访谈双口径"
+            }
+          },
+          {
+            "id": "S-011",
+            "type": "doc",
+            "title": "豆包规划表+社交裂变创新方案",
+            "excerpt": "豆包下一步场景规划;AI社交裂变(公域AI Cameo/私域邀请/积分)创意方案",
+            "meta": {
+              "nature": "竞品情报+探索性建议"
+            }
+          }
+        ]
+      },
+      "ground_truth": {
+        "supported_claims": [
+          {
+            "id": "C-001",
+            "claim": "留存排序 豆包54%>DS34%>元宝19%，元宝增长受限于留存偏低",
+            "source_ids": [
+              "S-003",
+              "S-010"
+            ],
+            "type": "fact"
+          },
+          {
+            "id": "C-002",
+            "claim": "纯白用户强留存显著更高，对元宝/DS拉动更大",
+            "source_ids": [
+              "S-004"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-003",
+            "claim": "纯白获取难度上升、增量来自下沉，但'下沉≠高留存'",
+            "source_ids": [
+              "S-004"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-004",
+            "claim": "文本满意度(尤其可靠性/深度思考)是留存核心，本质是模型能力",
+            "source_ids": [
+              "S-007"
+            ],
+            "type": "attribution"
+          },
+          {
+            "id": "C-005",
+            "claim": "迁DS用户比豆包易、洗盘效率~2x",
+            "source_ids": [
+              "S-006"
+            ],
+            "type": "attribution",
+            "note": "乐观估计，须标需A/B验证"
+          },
+          {
+            "id": "C-006",
+            "claim": "召回手段仍在早期，个性化/社交裂变是空白",
+            "source_ids": [
+              "S-009"
+            ],
+            "type": "attribution"
+          }
+        ],
+        "key_claim_ids": [
+          "C-001",
+          "C-002",
+          "C-003",
+          "C-004",
+          "C-005",
+          "C-006"
+        ],
+        "expected_insights": [
+          {
+            "id": "I-001",
+            "insight": "打'功能纯白'(新功能/场景抢首发心智)比抢产品纯白更可行，值得加大投入",
+            "depends_on": [
+              "C-002",
+              "C-003",
+              "C-005"
+            ]
+          },
+          {
+            "id": "I-002",
+            "insight": "模型是根基:可靠性/深度思考/速度，产品侧强化'快且稳'",
+            "depends_on": [
+              "C-004"
+            ]
+          },
+          {
+            "id": "I-003",
+            "insight": "迁移优先聚焦DS存量(洗盘效率2x)、关键功能做体验领先",
+            "depends_on": [
+              "C-005"
+            ]
+          },
+          {
+            "id": "I-004",
+            "insight": "召回蓝海:个性化推荐+社交裂变(国内空白)",
+            "depends_on": [
+              "C-006"
+            ]
+          }
+        ],
+        "unsupportable_questions": [
+          "洗盘/迁移的真实达成率(报告已注明乐观估计、需A/B验证，不可当既定)",
+          "各产品未来留存走势/终局份额(无前瞻数据)"
+        ],
+        "noise_source_ids": [],
+        "traps": [
+          {
+            "type": "metric_caveat",
+            "involves": [
+              "S-002",
+              "S-010"
+            ],
+            "detail": "DAU有QM/访谈双口径、问卷分布vs理论估算，好报告须交叉验证并注明(本报告已做)"
+          },
+          {
+            "type": "selection_bias",
+            "involves": [
+              "S-002"
+            ],
+            "detail": "腾讯问卷对腾讯系偏好、横向比较略利好元宝，须注明(本报告已注明)"
+          },
+          {
+            "type": "unsupported_extrapolation",
+            "involves": [
+              "S-006"
+            ],
+            "detail": "洗盘2x是乐观估计，断言'必达'越界，须标需A/B验证"
+          },
+          {
+            "type": "missing_evidence",
+            "involves": [],
+            "detail": "无真实营销转化/ROI数据，硬给投放ROI应扣①"
+          }
+        ]
+      },
+      "key_finding_ids": []
+    }
+  ],
+  "human_labels": {
+    "v0": {}
+  },
+  "versions": [
+    {
+      "skill": {
+        "id": "research_insight",
+        "version": "v0",
+        "parent_version": null,
+        "structure": {
+          "flow": [
+            {
+              "step": 0,
+              "name": "Intake & Scoping（开场三轮交互）",
+              "produces": "report_spec{背景, hypothesis, 重点素材}",
+              "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材(已提供的不重复问);三项都用进报告;hypothesis只验证/证伪、不迎合"
+            },
+            {
+              "step": 1,
+              "name": "Source Curation",
+              "subagent": "SourceCurator",
+              "produces": "source_slices",
+              "rule": "素材切片配 S-xxx ID"
+            },
+            {
+              "step": 2,
+              "name": "Claim Analysis",
+              "subagent": "Analyst",
+              "produces": "claims",
+              "rule": "抽 claim 挂 source_ids, 强制标冲突"
+            },
+            {
+              "step": 3,
+              "name": "Insight Extraction",
+              "subagent": "Insight",
+              "produces": "insights",
+              "rule": "案例提炼成规律, 只在 claims 内推理"
+            },
+            {
+              "step": 4,
+              "name": "Narrative Composition",
+              "subagent": "Writer",
+              "produces": "draft_report",
+              "rule": "论断携带 [S-xxx]/[C-xxx]"
+            },
+            {
+              "step": 5,
+              "name": "Verification",
+              "subagent": "Verifier",
+              "produces": "verification_report",
+              "rule": "独立对抗, 查编造/混用/剔噪",
+              "loop_back_to": 4
+            },
+            {
+              "step": 6,
+              "name": "Deliver",
+              "produces": "final_doc"
+            }
+          ],
+          "subagents": [
+            {
+              "name": "SourceCurator",
+              "responsibility": "素材切片、配 ID、去重"
+            },
+            {
+              "name": "Analyst",
+              "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+            },
+            {
+              "name": "Insight",
+              "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+            },
+            {
+              "name": "Writer",
+              "responsibility": "金字塔组织、携带引用、结构化呈现"
+            },
+            {
+              "name": "Verifier",
+              "responsibility": "对抗查错(编造/混用/噪音/越界)",
+              "independent": true
+            }
+          ],
+          "memory_schema": [
+            "config",
+            "facts",
+            "learned_rules"
+          ]
+        },
+        "instructions": {
+          "prose": "你是调研洞察汇报助手。基于给定异构素材(doc/pdf/excel/访谈), 为最高管理层产出可编辑的调研报告。可回溯性是生命线, 素材不足处诚实留白。",
+          "directives": {
+            "require_source_ref": false,
+            "flag_source_conflict": false,
+            "honest_on_unsupportable": false,
+            "require_two_sources": false,
+            "summary_format": false,
+            "pyramid_body": false,
+            "mece_sections": false,
+            "concept_consistency": false,
+            "ensure_narrative_flow": false,
+            "require_insight_triplet": false,
+            "abstract_cases": false,
+            "drop_noise": false,
+            "mark_extrapolation_confidence": false,
+            "crosscheck_outliers": false,
+            "cover_key_claims": false,
+            "ban_bushi_ershi": false,
+            "require_charts": false,
+            "match_exec_length": false,
+            "require_rigorous_wording": false,
+            "verify_no_fabrication": false,
+            "note_metric_caveat": false,
+            "disclose_sample_bias": false,
+            "buzzword_emphasis": false
+          }
+        },
+        "few_shots": [],
+        "memory_content": {
+          "config": {
+            "required_sections": [
+              "核心摘要",
+              "核心发现（含归因）",
+              "对我们的启示与建议（含趋势）"
+            ],
+            "audience_profiles": {
+              "exec": {
+                "length": "<=1.5页",
+                "focus": [
+                  "结论",
+                  "决策项"
+                ]
+              }
+            }
+          },
+          "facts": {},
+          "learned_rules": []
+        },
+        "changelog": "v0 调研洞察: 6步 flow + 六维 directive 全关, 作为优化起跑线(结构定上限)。"
+      },
+      "adopted": true,
+      "proposal": null
+    }
+  ],
+  "_saved_at": 1784271830.27
+}

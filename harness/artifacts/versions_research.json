@@ -1,0 +1,2509 @@
+[
+  {
+    "version": "v0",
+    "parent": null,
+    "changelog": "v0 六维 directive 全关, 作为优化起跑线(结构定上限)。",
+    "directives_on": [],
+    "dev": {
+      "traceability": 2.333,
+      "structure": 2.0,
+      "narrative": 2.667,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.173,
+      "red_line_fails": 2
+    },
+    "test": {
+      "traceability": 2.333,
+      "structure": 2.0,
+      "narrative": 2.667,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.173,
+      "red_line_fails": 2
+    },
+    "adopted": true,
+    "proposal": null,
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v0",
+      "parent_version": null,
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": false,
+          "flag_source_conflict": false,
+          "honest_on_unsupportable": false,
+          "require_two_sources": false,
+          "summary_format": false,
+          "pyramid_body": false,
+          "mece_sections": false,
+          "concept_consistency": false,
+          "ensure_narrative_flow": false,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "v0 六维 directive 全关, 作为优化起跑线(结构定上限)。"
+    }
+  },
+  {
+    "version": "v1",
+    "parent": "v0",
+    "changelog": "相对 v0: 打开 directive: flag_source_conflict (针对'素材冲突未指出/直接混用')",
+    "directives_on": [
+      "flag_source_conflict"
+    ],
+    "dev": {
+      "traceability": 2.667,
+      "structure": 2.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.307,
+      "red_line_fails": 1
+    },
+    "test": {
+      "traceability": 2.667,
+      "structure": 2.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.307,
+      "red_line_fails": 1
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "flag_source_conflict",
+      "value": true,
+      "change": "打开 directive: flag_source_conflict",
+      "addresses": "素材冲突未指出/直接混用",
+      "affected_dims": [
+        "traceability"
+      ],
+      "hypothesis": "预计提升 traceability, 不损伤其它维度",
+      "from_pattern": "trace_conflict",
+      "hit_count": 3
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v1",
+      "parent_version": "v0",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": false,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": false,
+          "require_two_sources": false,
+          "summary_format": false,
+          "pyramid_body": false,
+          "mece_sections": false,
+          "concept_consistency": false,
+          "ensure_narrative_flow": false,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v0: 打开 directive: flag_source_conflict (针对'素材冲突未指出/直接混用')"
+    }
+  },
+  {
+    "version": "v2",
+    "parent": "v1",
+    "changelog": "相对 v1: 打开 directive: honest_on_unsupportable (针对'素材不足却硬给结论')",
+    "directives_on": [
+      "flag_source_conflict",
+      "honest_on_unsupportable"
+    ],
+    "dev": {
+      "traceability": 3.0,
+      "structure": 2.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.4,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 3.0,
+      "structure": 2.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.4,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "honest_on_unsupportable",
+      "value": true,
+      "change": "打开 directive: honest_on_unsupportable",
+      "addresses": "素材不足却硬给结论",
+      "affected_dims": [
+        "traceability"
+      ],
+      "hypothesis": "预计提升 traceability, 不损伤其它维度",
+      "from_pattern": "trace_hardanswer",
+      "hit_count": 2
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v2",
+      "parent_version": "v1",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": false,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": false,
+          "summary_format": false,
+          "pyramid_body": false,
+          "mece_sections": false,
+          "concept_consistency": false,
+          "ensure_narrative_flow": false,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v1: 打开 directive: honest_on_unsupportable (针对'素材不足却硬给结论')"
+    }
+  },
+  {
+    "version": "v3",
+    "parent": "v2",
+    "changelog": "相对 v2: 打开 directive: require_source_ref (针对'论断无出处,不可回溯')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable"
+    ],
+    "dev": {
+      "traceability": 3.667,
+      "structure": 2.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.587,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 3.667,
+      "structure": 2.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.587,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "require_source_ref",
+      "value": true,
+      "change": "打开 directive: require_source_ref",
+      "addresses": "论断无出处,不可回溯",
+      "affected_dims": [
+        "traceability"
+      ],
+      "hypothesis": "预计提升 traceability, 不损伤其它维度",
+      "from_pattern": "trace_uncited",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v3",
+      "parent_version": "v2",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": false,
+          "summary_format": false,
+          "pyramid_body": false,
+          "mece_sections": false,
+          "concept_consistency": false,
+          "ensure_narrative_flow": false,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v2: 打开 directive: require_source_ref (针对'论断无出处,不可回溯')"
+    }
+  },
+  {
+    "version": "v4",
+    "parent": "v3",
+    "changelog": "相对 v3: 打开 directive: require_two_sources (针对'单一信源结论未降级'待验证'')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 2.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.96,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 2.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 2.96,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "require_two_sources",
+      "value": true,
+      "change": "打开 directive: require_two_sources",
+      "addresses": "单一信源结论未降级'待验证'",
+      "affected_dims": [
+        "traceability"
+      ],
+      "hypothesis": "预计提升 traceability, 不损伤其它维度",
+      "from_pattern": "trace_single_source",
+      "hit_count": 5
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v4",
+      "parent_version": "v3",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": false,
+          "pyramid_body": false,
+          "mece_sections": false,
+          "concept_consistency": false,
+          "ensure_narrative_flow": false,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v3: 打开 directive: require_two_sources (针对'单一信源结论未降级'待验证'')"
+    }
+  },
+  {
+    "version": "v5",
+    "parent": "v4",
+    "changelog": "相对 v4: 打开 directive: summary_format (针对'摘要是背景铺陈而非结论')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 3.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 3.11,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 3.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 3.11,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "summary_format",
+      "value": true,
+      "change": "打开 directive: summary_format",
+      "addresses": "摘要是背景铺陈而非结论",
+      "affected_dims": [
+        "structure"
+      ],
+      "hypothesis": "预计提升 structure, 不损伤其它维度",
+      "from_pattern": "struct_summary",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v5",
+      "parent_version": "v4",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": false,
+          "mece_sections": false,
+          "concept_consistency": false,
+          "ensure_narrative_flow": false,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v4: 打开 directive: summary_format (针对'摘要是背景铺陈而非结论')"
+    }
+  },
+  {
+    "version": "v6",
+    "parent": "v5",
+    "changelog": "相对 v5: 打开 directive: pyramid_body (针对'正文非金字塔(支撑先于论点)')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 4.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 3.26,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 4.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 2.0,
+      "expression": 2.0,
+      "overall": 3.26,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "pyramid_body",
+      "value": true,
+      "change": "打开 directive: pyramid_body",
+      "addresses": "正文非金字塔(支撑先于论点)",
+      "affected_dims": [
+        "structure"
+      ],
+      "hypothesis": "预计提升 structure, 不损伤其它维度",
+      "from_pattern": "struct_pyramid",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v6",
+      "parent_version": "v5",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": false,
+          "concept_consistency": false,
+          "ensure_narrative_flow": false,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v5: 打开 directive: pyramid_body (针对'正文非金字塔(支撑先于论点)')"
+    }
+  },
+  {
+    "version": "v7",
+    "parent": "v6",
+    "changelog": "相对 v6: 打开 directive: mece_sections (针对'章节非MECE/缺段/交叉')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 3.0,
+      "expression": 2.0,
+      "overall": 3.49,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 3.0,
+      "insight": 2.0,
+      "coverage": 3.0,
+      "expression": 2.0,
+      "overall": 3.49,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "mece_sections",
+      "value": true,
+      "change": "打开 directive: mece_sections",
+      "addresses": "章节非MECE/缺段/交叉",
+      "affected_dims": [
+        "structure",
+        "coverage"
+      ],
+      "hypothesis": "预计提升 structure/coverage, 不损伤其它维度",
+      "from_pattern": "struct_mece",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v7",
+      "parent_version": "v6",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": true,
+          "concept_consistency": false,
+          "ensure_narrative_flow": false,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v6: 打开 directive: mece_sections (针对'章节非MECE/缺段/交叉')"
+    }
+  },
+  {
+    "version": "v8",
+    "parent": "v7",
+    "changelog": "相对 v7: 打开 directive: ensure_narrative_flow (针对'无清晰主线/章节并列拼接缺推进')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections",
+      "ensure_narrative_flow"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 4.0,
+      "insight": 2.0,
+      "coverage": 3.0,
+      "expression": 2.0,
+      "overall": 3.61,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 4.0,
+      "insight": 2.0,
+      "coverage": 3.0,
+      "expression": 2.0,
+      "overall": 3.61,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "ensure_narrative_flow",
+      "value": true,
+      "change": "打开 directive: ensure_narrative_flow",
+      "addresses": "无清晰主线/章节并列拼接缺推进",
+      "affected_dims": [
+        "narrative"
+      ],
+      "hypothesis": "预计提升 narrative, 不损伤其它维度",
+      "from_pattern": "narr_flow",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v8",
+      "parent_version": "v7",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": true,
+          "concept_consistency": false,
+          "ensure_narrative_flow": true,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v7: 打开 directive: ensure_narrative_flow (针对'无清晰主线/章节并列拼接缺推进')"
+    }
+  },
+  {
+    "version": "v9",
+    "parent": "v8",
+    "changelog": "相对 v8: 打开 directive: concept_consistency (针对'概念漂移/口径前后不一致')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections",
+      "concept_consistency",
+      "ensure_narrative_flow"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 2.0,
+      "coverage": 3.0,
+      "expression": 2.0,
+      "overall": 3.73,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 2.0,
+      "coverage": 3.0,
+      "expression": 2.0,
+      "overall": 3.73,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "concept_consistency",
+      "value": true,
+      "change": "打开 directive: concept_consistency",
+      "addresses": "概念漂移/口径前后不一致",
+      "affected_dims": [
+        "narrative"
+      ],
+      "hypothesis": "预计提升 narrative, 不损伤其它维度",
+      "from_pattern": "narr_drift",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v9",
+      "parent_version": "v8",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": true,
+          "concept_consistency": true,
+          "ensure_narrative_flow": true,
+          "require_insight_triplet": false,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v8: 打开 directive: concept_consistency (针对'概念漂移/口径前后不一致')"
+    }
+  },
+  {
+    "version": "v10",
+    "parent": "v9",
+    "changelog": "相对 v9: 打开 directive: require_insight_triplet (针对'素材复述,缺归因/趋势/建议')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections",
+      "concept_consistency",
+      "ensure_narrative_flow",
+      "require_insight_triplet"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.0,
+      "coverage": 4.0,
+      "expression": 2.0,
+      "overall": 4.03,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.0,
+      "coverage": 4.0,
+      "expression": 2.0,
+      "overall": 4.03,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "require_insight_triplet",
+      "value": true,
+      "change": "打开 directive: require_insight_triplet",
+      "addresses": "素材复述,缺归因/趋势/建议",
+      "affected_dims": [
+        "insight"
+      ],
+      "hypothesis": "预计提升 insight, 不损伤其它维度",
+      "from_pattern": "insight_restate",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v10",
+      "parent_version": "v9",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": true,
+          "concept_consistency": true,
+          "ensure_narrative_flow": true,
+          "require_insight_triplet": true,
+          "abstract_cases": false,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v9: 打开 directive: require_insight_triplet (针对'素材复述,缺归因/趋势/建议')"
+    }
+  },
+  {
+    "version": "v11",
+    "parent": "v10",
+    "changelog": "相对 v10: 打开 directive: abstract_cases (针对'案例罗列而非提炼')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections",
+      "concept_consistency",
+      "ensure_narrative_flow",
+      "require_insight_triplet",
+      "abstract_cases"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.667,
+      "coverage": 4.0,
+      "expression": 2.0,
+      "overall": 4.177,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.667,
+      "coverage": 4.0,
+      "expression": 2.0,
+      "overall": 4.177,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "abstract_cases",
+      "value": true,
+      "change": "打开 directive: abstract_cases",
+      "addresses": "案例罗列而非提炼",
+      "affected_dims": [
+        "insight"
+      ],
+      "hypothesis": "预计提升 insight, 不损伤其它维度",
+      "from_pattern": "insight_listing",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v11",
+      "parent_version": "v10",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": true,
+          "concept_consistency": true,
+          "ensure_narrative_flow": true,
+          "require_insight_triplet": true,
+          "abstract_cases": true,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": false,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v10: 打开 directive: abstract_cases (针对'案例罗列而非提炼')"
+    }
+  },
+  {
+    "version": "v12",
+    "parent": "v11",
+    "changelog": "相对 v11: 打开 directive: cover_key_claims (针对'关键claim/可答问题未覆盖全')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections",
+      "concept_consistency",
+      "ensure_narrative_flow",
+      "require_insight_triplet",
+      "abstract_cases",
+      "cover_key_claims"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.667,
+      "coverage": 5.0,
+      "expression": 2.0,
+      "overall": 4.257,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.667,
+      "coverage": 5.0,
+      "expression": 2.0,
+      "overall": 4.257,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "cover_key_claims",
+      "value": true,
+      "change": "打开 directive: cover_key_claims",
+      "addresses": "关键claim/可答问题未覆盖全",
+      "affected_dims": [
+        "coverage"
+      ],
+      "hypothesis": "预计提升 coverage, 不损伤其它维度",
+      "from_pattern": "cover_key_missed",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v12",
+      "parent_version": "v11",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": true,
+          "concept_consistency": true,
+          "ensure_narrative_flow": true,
+          "require_insight_triplet": true,
+          "abstract_cases": true,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": true,
+          "ban_bushi_ershi": false,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v11: 打开 directive: cover_key_claims (针对'关键claim/可答问题未覆盖全')"
+    }
+  },
+  {
+    "version": "v13",
+    "parent": "v12",
+    "changelog": "相对 v12: 打开 directive: ban_bushi_ershi (针对''不是,而是'句式/术语注水')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections",
+      "concept_consistency",
+      "ensure_narrative_flow",
+      "require_insight_triplet",
+      "abstract_cases",
+      "cover_key_claims",
+      "ban_bushi_ershi"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.667,
+      "coverage": 5.0,
+      "expression": 3.0,
+      "overall": 4.407,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.667,
+      "coverage": 5.0,
+      "expression": 3.0,
+      "overall": 4.407,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "ban_bushi_ershi",
+      "value": true,
+      "change": "打开 directive: ban_bushi_ershi",
+      "addresses": "'不是,而是'句式/术语注水",
+      "affected_dims": [
+        "expression"
+      ],
+      "hypothesis": "预计提升 expression, 不损伤其它维度",
+      "from_pattern": "expr_bushi",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v13",
+      "parent_version": "v12",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": true,
+          "concept_consistency": true,
+          "ensure_narrative_flow": true,
+          "require_insight_triplet": true,
+          "abstract_cases": true,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": true,
+          "ban_bushi_ershi": true,
+          "require_charts": false,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v12: 打开 directive: ban_bushi_ershi (针对''不是,而是'句式/术语注水')"
+    }
+  },
+  {
+    "version": "v14",
+    "parent": "v13",
+    "changelog": "相对 v13: 打开 directive: require_charts (针对'关键数据未结构化呈现(表/图)')",
+    "directives_on": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "honest_on_unsupportable",
+      "require_two_sources",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections",
+      "concept_consistency",
+      "ensure_narrative_flow",
+      "require_insight_triplet",
+      "abstract_cases",
+      "cover_key_claims",
+      "ban_bushi_ershi",
+      "require_charts"
+    ],
+    "dev": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.667,
+      "coverage": 5.0,
+      "expression": 4.0,
+      "overall": 4.557,
+      "red_line_fails": 0
+    },
+    "test": {
+      "traceability": 5.0,
+      "structure": 5.0,
+      "narrative": 5.0,
+      "insight": 3.667,
+      "coverage": 5.0,
+      "expression": 4.0,
+      "overall": 4.557,
+      "red_line_fails": 0
+    },
+    "adopted": true,
+    "proposal": {
+      "target": "instructions",
+      "level": "L1",
+      "directive": "require_charts",
+      "value": true,
+      "change": "打开 directive: require_charts",
+      "addresses": "关键数据未结构化呈现(表/图)",
+      "affected_dims": [
+        "expression"
+      ],
+      "hypothesis": "预计提升 expression, 不损伤其它维度",
+      "from_pattern": "expr_nochart",
+      "hit_count": 7
+    },
+    "skill": {
+      "id": "research-insight-assistant",
+      "version": "v14",
+      "parent_version": "v13",
+      "structure": {
+        "flow": [
+          {
+            "step": 0,
+            "name": "Intake & Scoping（开场三轮交互）",
+            "produces": "report_spec{背景, hypothesis, 重点素材}",
+            "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"
+          },
+          {
+            "step": 1,
+            "name": "Source Curation",
+            "subagent": "SourceCurator",
+            "produces": "source_slices",
+            "rule": "素材切片配 S-xxx ID"
+          },
+          {
+            "step": 2,
+            "name": "Claim Analysis",
+            "subagent": "Analyst",
+            "produces": "claims",
+            "rule": "抽 claim 挂 source_ids, 强制标冲突"
+          },
+          {
+            "step": 3,
+            "name": "Insight Extraction",
+            "subagent": "Insight",
+            "produces": "insights",
+            "rule": "案例提炼成规律, 只在 claims 内推理"
+          },
+          {
+            "step": 4,
+            "name": "Narrative Composition",
+            "subagent": "Writer",
+            "produces": "draft_report",
+            "rule": "论断携带 [S-xxx]/[C-xxx]"
+          },
+          {
+            "step": 5,
+            "name": "Verification",
+            "subagent": "Verifier",
+            "produces": "verification_report",
+            "rule": "独立对抗, 查编造/混用/剔噪",
+            "loop_back_to": 4
+          },
+          {
+            "step": 6,
+            "name": "Deliver",
+            "produces": "final_doc"
+          }
+        ],
+        "subagents": [
+          {
+            "name": "SourceCurator",
+            "responsibility": "素材切片、配 ID、去重"
+          },
+          {
+            "name": "Analyst",
+            "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+          },
+          {
+            "name": "Insight",
+            "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+          },
+          {
+            "name": "Writer",
+            "responsibility": "金字塔组织、携带引用、结构化呈现"
+          },
+          {
+            "name": "Verifier",
+            "responsibility": "对抗查错(编造/混用/噪音/越界)",
+            "independent": true
+          }
+        ],
+        "memory_schema": [
+          "config",
+          "facts",
+          "learned_rules"
+        ]
+      },
+      "instructions": {
+        "prose": "你是调研洞察汇报助手。基于给定异构素材, 为最高管理层产出可编辑的调研报告。",
+        "directives": {
+          "require_source_ref": true,
+          "flag_source_conflict": true,
+          "honest_on_unsupportable": true,
+          "require_two_sources": true,
+          "summary_format": true,
+          "pyramid_body": true,
+          "mece_sections": true,
+          "concept_consistency": true,
+          "ensure_narrative_flow": true,
+          "require_insight_triplet": true,
+          "abstract_cases": true,
+          "drop_noise": false,
+          "mark_extrapolation_confidence": false,
+          "crosscheck_outliers": false,
+          "cover_key_claims": true,
+          "ban_bushi_ershi": true,
+          "require_charts": true,
+          "match_exec_length": false,
+          "require_rigorous_wording": false,
+          "verify_no_fabrication": false,
+          "note_metric_caveat": false,
+          "disclose_sample_bias": false,
+          "buzzword_emphasis": false
+        }
+      },
+      "few_shots": [],
+      "memory_content": {
+        "config": {},
+        "facts": {},
+        "learned_rules": []
+      },
+      "changelog": "相对 v13: 打开 directive: require_charts (针对'关键数据未结构化呈现(表/图)')"
+    }
+  }
+]

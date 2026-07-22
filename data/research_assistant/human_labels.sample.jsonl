@@ -1,0 +1,1 @@
+{"case_id": "rr-001", "version": "v0", "split": "dev", "human_scores": {"traceability": 4, "structure": 3, "narrative": 3, "insight": 2, "coverage": 3, "expression": 3}, "labeler": "← 你的名字", "_note": "对某版skill输出的专家分维度打分(1-5)。六维=可回溯性/结构/逻辑与故事线/提炼与洞察/覆盖度/表达与受众契合。真实项目由你按rubric手工填；每采纳一个新版本对其输出补标一批；首轮抽30-50条覆盖高/中/低质量用于校准judge。"}

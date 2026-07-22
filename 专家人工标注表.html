@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>调研洞察汇报助手 — 专家人工标注表</title>
+<style>
+  :root{ --ink:#1a1a1a; --mut:#666; --line:#bbb; --red:#c0392b; --box:#000; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{ font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB",-apple-system,sans-serif;
+        color:var(--ink); font-size:12px; line-height:1.5; padding:18px 22px; }
+  h1{ font-size:19px; margin:0 0 2px; }
+  h2{ font-size:14px; margin:0; }
+  .sub{ color:var(--mut); font-size:11px; margin:2px 0 10px; }
+  .meta{ display:flex; gap:22px; flex-wrap:wrap; border:1px solid var(--line);
+         padding:8px 12px; border-radius:5px; margin-bottom:12px; font-size:12px; }
+  .meta .fld{ flex:1 1 180px; }
+  .meta .fill{ display:inline-block; min-width:120px; border-bottom:1px solid var(--ink); }
+  .howto{ background:#f6f6f6; border:1px solid var(--line); border-radius:5px;
+          padding:8px 12px; margin-bottom:14px; font-size:11px; }
+  .howto b{ color:var(--red); }
+  .dim{ border:1px solid var(--line); border-radius:6px; margin-bottom:12px;
+        break-inside:avoid; page-break-inside:avoid; }
+  .dim-hd{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+           background:#eef2f5; padding:6px 12px; border-bottom:1px solid var(--line);
+           border-radius:6px 6px 0 0; }
+  .dim-hd .w{ color:var(--mut); font-size:11px; }
+  .dim-hd .tgt{ color:var(--mut); font-size:11px; }
+  .redflag{ color:#fff; background:var(--red); font-size:10px; padding:1px 5px;
+            border-radius:3px; font-weight:bold; }
+  .revflag{ color:#fff; background:#8e44ad; font-size:10px; padding:1px 5px; border-radius:3px; }
+  .crit{ padding:6px 12px 0; color:var(--mut); font-size:11px; }
+  .gatehint{ padding:2px 12px 0; color:var(--red); font-size:11px; }
+  table{ width:100%; border-collapse:collapse; margin:6px 0 0; }
+  th,td{ border:1px solid var(--line); padding:5px 7px; text-align:left; vertical-align:top; }
+  th{ background:#fafafa; font-weight:600; font-size:11px; }
+  .col-chk{ width:56px; text-align:center; }
+  .cid{ font-weight:700; white-space:nowrap; }
+  .eff{ color:var(--mut); font-size:11px; }
+  .box{ display:inline-block; width:14px; height:14px; border:1.4px solid var(--box);
+        border-radius:3px; vertical-align:middle; }
+  .anchors{ padding:6px 12px; font-size:10.5px; color:#333; border-top:1px dashed var(--line); }
+  .anchors b{ color:var(--ink); }
+  .anchors .a{ display:block; margin:1px 0; }
+  .anchors .a5{ color:#1a7a3a; } .anchors .a2,.anchors .a1{ color:var(--red); }
+  .score{ padding:7px 12px; border-top:1px solid var(--line); background:#fcfcfc;
+          display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .score .big{ font-size:12px; }
+  .score .fill{ display:inline-block; min-width:44px; border-bottom:1.4px solid var(--ink);
+                text-align:center; font-weight:700; }
+  .score .note{ flex:1 1 220px; color:var(--mut); }
+  .score .noteline{ display:inline-block; min-width:180px; border-bottom:1px solid var(--line); }
+  .overall{ border:2px solid var(--ink); border-radius:6px; padding:10px 14px; margin-top:6px; }
+  .overall table{ margin-top:8px; }
+  .overall .w{ text-align:center; }
+  .appendix{ margin-top:16px; page-break-before:always; }
+  .appendix h2{ font-size:14px; margin-bottom:6px; }
+  .appendix table td{ font-size:11px; }
+  .foot{ color:var(--mut); font-size:10px; margin-top:10px; }
+  @media print{
+    body{ padding:0 6mm; font-size:11px; }
+    .howto{ break-inside:avoid; }
+    @page{ margin:12mm 10mm; }
+  }
+</style>
+</head>
+<body>
+
+<h1>调研洞察汇报助手 — 专家人工标注表</h1>
+<div class="sub">六维 rubric（research_insight）· 逐条 check 人工打勾 · 与平台「第 4 步 逐 check 标注」口径一致（满足=1 / 部分满足=0.5 / 不满足=0）</div>
+
+<div class="meta">
+  <div class="fld">报告 / Case 名称：<span class="fill">&nbsp;</span></div>
+  <div class="fld">评判专家：<span class="fill">&nbsp;</span></div>
+  <div class="fld">标注日期：<span class="fill">&nbsp;</span></div>
+</div>
+
+<div class="howto">
+  <b>打勾规则</b>：每条 check 三选一 —— <span class="box"></span>&nbsp;满足（完全做到，1分）｜
+  <span class="box"></span>&nbsp;部分满足（做到但有瑕疵，0.5分）｜<span class="box"></span>&nbsp;不满足（没做到，0分）。<br>
+  <b>红线 check</b>（标「红线」者）一旦「不满足」，该维度整体分<b>直接封顶 2 分</b>，无论其它 check 如何。<br>
+  每维读完 check + 右下角 1–5 锚点后，在「本维整体分」栏填一个 <b>1–5 整数分</b>（这是判分的最终依据，check 打勾是支撑与校准用）。
+</div>
+
+<!-- ===================== 1 可回溯性 ===================== -->
+<div class="dim">
+  <div class="dim-hd"><h2>1. 可回溯性与支撑充分（traceability）</h2>
+    <span class="w">权重 0.28</span><span class="tgt">目标 ≥4.2</span>
+    <span class="redflag">含红线维 · &lt;3 一票否决</span></div>
+  <div class="crit">论断可回溯到 source/claim；不曲解、不编造；冲突指出而非混用；素材不足处诚实留白；结论需 ≥2 独立信源否则降级"待验证"。</div>
+  <div class="gatehint">红线：编造事实 / 把冲突素材当一致混用 / 无支撑硬给结论 → 本维 &lt;3，该 case 直接不合格。</div>
+  <table>
+    <tr><th>Check</th><th>检查点</th><th>不满足的影响</th>
+        <th class="col-chk">满足</th><th class="col-chk">部分</th><th class="col-chk">不满足</th></tr>
+    <tr><td class="cid">T1</td><td>论断挂出处<div class="eff">每个事实/数据/结论能回溯到 S-xxx/C-xxx</div></td><td class="eff">关键论断无出处→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">T2 <span class="redflag">红线</span></td><td>不编造·不曲解<div class="eff">无素材里不存在的新事实，未曲解原意</div></td><td class="eff">编造/曲解→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">T3 <span class="redflag">红线</span></td><td>冲突指出不混用<div class="eff">素材冲突正确指出、不当一致混用</div></td><td class="eff">混用冲突→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">T4</td><td>单源降级待验证<div class="eff">单一信源结论标'待验证'，≥2 独立信源才作定论</div></td><td class="eff">未降级→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">T5 <span class="redflag">红线</span></td><td>不足诚实留白<div class="eff">素材撑不起的问题说'证据不足'，不硬答</div></td><td class="eff">硬答→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">T6</td><td>口径注明<div class="eff">口径依赖的数/结论要注明口径、必要时给敏感性</div></td><td class="eff">选有利口径不注明→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">T7</td><td>披露样本偏差<div class="eff">已知样本有系统性偏差要披露、不当客观结论</div></td><td class="eff">无视偏差→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+  </table>
+  <div class="anchors">
+    <span class="a a5"><b>5</b>：所有论断可回溯；无曲解无编造；冲突被正确指出；素材不足处明确说明证据不足；单源结论均标'待验证'。</span>
+    <span class="a"><b>4</b>：可回溯性完整；仅1处非关键引用缺失或表述略模糊，不影响结论。</span>
+    <span class="a"><b>3</b>：主体可回溯，但1处关键论断无出处/轻度曲解/单源结论未降级。</span>
+    <span class="a a2"><b>2</b>：≥1处编造 / 冲突当一致混用 / 无支撑硬给结论（红线封顶）。</span>
+    <span class="a a1"><b>1</b>：大量论断无法回溯或明显编造，事实基础整体不可信。</span>
+  </div>
+  <div class="score"><span class="big">本维整体分（1–5）：<span class="fill">&nbsp;</span></span>
+    <span class="note">备注：<span class="noteline">&nbsp;</span></span></div>
+</div>
+
+<!-- ===================== 2 结构 ===================== -->
+<div class="dim">
+  <div class="dim-hd"><h2>2. 结构（structure）</h2><span class="w">权重 0.15</span><span class="tgt">目标 ≥4.0</span></div>
+  <div class="crit">摘要≤3条bullet且每条直接写结论、按重要性排序；正文金字塔、章节MECE、紧凑无注水。</div>
+  <table>
+    <tr><th>Check</th><th>检查点</th><th>不满足的影响</th>
+        <th class="col-chk">满足</th><th class="col-chk">部分</th><th class="col-chk">不满足</th></tr>
+    <tr><td class="cid">S1</td><td>摘要≤3条纯结论<div class="eff">摘要≤3 bullet、每条是结论非背景、重要在前</div></td><td class="eff">背景铺陈→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">S2</td><td>金字塔<div class="eff">正文每章先给论点、再给支撑</div></td><td class="eff">支撑先于论点→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">S3</td><td>MECE 章节<div class="eff">章节不重复、不遗漏、不交叉</div></td><td class="eff">明显重叠/遗漏→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">S4</td><td>摘要↔正文对应<div class="eff">正文是摘要的展开、严格对应</div></td><td class="eff">对不上→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+  </table>
+  <div class="anchors">
+    <span class="a a5"><b>5</b>：摘要≤3条纯结论按重要性排序；正文每章论点先行、章节MECE无重叠无遗漏；摘要与正文严格对应。</span>
+    <span class="a"><b>4</b>：结构基本达标，摘要/正文对应清晰；仅1处轻微交叉或1条bullet偏铺陈。</span>
+    <span class="a"><b>3</b>：有摘要+正文分层，但摘要含背景铺陈，或正文非金字塔，或章节明显重叠/遗漏。</span>
+    <span class="a a2"><b>2</b>：摘要是背景介绍而非结论 / 正文与摘要对不上 / 无明显章节逻辑（封顶）。</span>
+    <span class="a a1"><b>1</b>：无结构，流水账。</span>
+  </div>
+  <div class="score"><span class="big">本维整体分（1–5）：<span class="fill">&nbsp;</span></span>
+    <span class="note">备注：<span class="noteline">&nbsp;</span></span></div>
+</div>
+
+<!-- ===================== 3 逻辑与故事线 ===================== -->
+<div class="dim">
+  <div class="dim-hd"><h2>3. 逻辑与故事线（narrative）</h2><span class="w">权重 0.12</span><span class="tgt">目标 ≥3.8</span></div>
+  <div class="crit">论点推进有逻辑；章节衔接自然串成故事线；同一概念/口径/术语全文含义一致。</div>
+  <table>
+    <tr><th>Check</th><th>检查点</th><th>不满足的影响</th>
+        <th class="col-chk">满足</th><th class="col-chk">部分</th><th class="col-chk">不满足</th></tr>
+    <tr><td class="cid">N1</td><td>主线贯穿<div class="eff">一条清晰主线、章节因果/递进衔接自然</div></td><td class="eff">并列拼接缺推进→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">N2</td><td>概念口径一致<div class="eff">同一名词/口径全文含义不漂移</div></td><td class="eff">概念自相矛盾→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+  </table>
+  <div class="anchors">
+    <span class="a a5"><b>5</b>：一条清晰主线贯穿全文；章节因果/递进衔接自然；同一概念全文口径一致。</span>
+    <span class="a"><b>4</b>：主线清楚；个别衔接略生硬或1处措辞不统一（不影响理解）。</span>
+    <span class="a"><b>3</b>：能读懂，但章节像并列拼接、缺推进感；或有1处概念前后不一致。</span>
+    <span class="a a2"><b>2</b>：故事线断裂跳跃 / 概念自相矛盾（封顶）。</span>
+    <span class="a a1"><b>1</b>：逻辑混乱，无法跟随。</span>
+  </div>
+  <div class="score"><span class="big">本维整体分（1–5）：<span class="fill">&nbsp;</span></span>
+    <span class="note">备注：<span class="noteline">&nbsp;</span></span></div>
+</div>
+
+<!-- ===================== 4 提炼与洞察 ===================== -->
+<div class="dim">
+  <div class="dim-hd"><h2>4. 提炼与洞察（insight）</h2><span class="w">权重 0.22</span><span class="tgt">目标 ≥3.6</span></div>
+  <div class="crit">案例抽象提炼成模式非罗列；归因/趋势(标置信)/建议三要素；噪音片段不引用；命中 expected_insights。</div>
+  <table>
+    <tr><th>Check</th><th>检查点</th><th>不满足的影响</th>
+        <th class="col-chk">满足</th><th class="col-chk">部分</th><th class="col-chk">不满足</th></tr>
+    <tr><td class="cid">I1</td><td>提炼成规律<div class="eff">案例抽象成模式/共性，非逐条罗列</div></td><td class="eff">罗列→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">I2</td><td>归因/趋势/建议三要素<div class="eff">有归因、趋势(标置信度)、可执行建议</div></td><td class="eff">仅复述→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">I3</td><td>不过度外推<div class="eff">趋势标置信、不越界外推</div></td><td class="eff">过度外推→4（并拉低可回溯性）</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">I4</td><td>剔噪<div class="eff">不引用噪音片段(noise_source_ids)</div></td><td class="eff">引噪音充数→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">I5</td><td>异常交叉验证<div class="eff">一次性异常/离群作交叉或情境解释、不当趋势或错误归因</div></td><td class="eff">异常当趋势→4</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+  </table>
+  <div class="anchors">
+    <span class="a a5"><b>5</b>：命中expected_insights；案例被提炼成规律；归因具体有据、趋势标置信度、建议可执行；噪音全部剔除。</span>
+    <span class="a"><b>4</b>：三要素齐，但1项较泛或支撑略弱，或趋势过度外推未标置信；噪音基本剔除。</span>
+    <span class="a"><b>3</b>：有判断但偏表面（只说'增长了'不解释），或案例是罗列而非提炼，或引用了噪音片段。</span>
+    <span class="a a2"><b>2</b>：基本是素材复述 / 大量引用噪音片段充数，几乎无归因/趋势/建议（封顶）。</span>
+    <span class="a a1"><b>1</b>：纯素材罗列，无任何判断。</span>
+  </div>
+  <div class="score"><span class="big">本维整体分（1–5）：<span class="fill">&nbsp;</span></span>
+    <span class="note">备注：<span class="noteline">&nbsp;</span></span></div>
+</div>
+
+<!-- ===================== 5 覆盖度 ===================== -->
+<div class="dim">
+  <div class="dim-hd"><h2>5. 覆盖度（coverage）</h2><span class="w">权重 0.08</span><span class="tgt">目标 ≥4.0</span></div>
+  <div class="crit">素材支持的 key_question 全答；key_claim_ids 无遗漏；required_sections 全覆盖且非空。素材答不了的(unsupportable_questions)不算漏。</div>
+  <table>
+    <tr><th>Check</th><th>检查点</th><th>不满足的影响</th>
+        <th class="col-chk">满足</th><th class="col-chk">部分</th><th class="col-chk">不满足</th></tr>
+    <tr><td class="cid">V1</td><td>可答问题全答<div class="eff">key_questions 中素材支持的都答到（答不了的不算漏）</div></td><td class="eff">漏答可答问题→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">V2</td><td>关键 claim 无遗漏<div class="eff">key_claim_ids 都覆盖</div></td><td class="eff">漏关键claim→3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">V3</td><td>必需段落齐<div class="eff">required_sections 全覆盖且有实质内容</div></td><td class="eff">缺1段→3；缺≥2→2</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+  </table>
+  <div class="anchors">
+    <span class="a a5"><b>5</b>：可答的key_question全答、关键claim无遗漏、段落齐且有实质内容。</span>
+    <span class="a"><b>4</b>：段落齐、可答问题全答；有1个次要claim未提。</span>
+    <span class="a"><b>3</b>：缺1个required section，或漏1个关键claim / 未答1个素材支持的key_question。</span>
+    <span class="a a2"><b>2</b>：缺≥2段，或漏多个关键claim / 多个可答问题未答。</span>
+    <span class="a a1"><b>1</b>：大面积缺失，报告不成形。</span>
+  </div>
+  <div class="score"><span class="big">本维整体分（1–5）：<span class="fill">&nbsp;</span></span>
+    <span class="note">备注：<span class="noteline">&nbsp;</span></span></div>
+</div>
+
+<!-- ===================== 6 表达与受众契合 ===================== -->
+<div class="dim">
+  <div class="dim-hd"><h2>6. 表达与受众契合（expression）</h2><span class="w">权重 0.15</span><span class="tgt">目标 ≥3.8</span>
+    <span class="revflag">反向维 · 防 reward-hack</span></div>
+  <div class="crit">面向高管精炼、结论先行、措辞严谨；关键数据用表/图结构化呈现；长度匹配受众；禁用'不是,而是'句式、不堆术语。</div>
+  <table>
+    <tr><th>Check</th><th>检查点</th><th>不满足的影响</th>
+        <th class="col-chk">满足</th><th class="col-chk">部分</th><th class="col-chk">不满足</th></tr>
+    <tr><td class="cid">E1</td><td>结论先行·措辞严谨<div class="eff">结论先行、直击决策，措辞严谨不含糊</div></td><td class="eff">缺失/通篇铺垫→降到3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">E2</td><td>结构化呈现(表/图)<div class="eff">关键数据/对比用 markdown 表格或图，而非埋在长段文字里</div></td><td class="eff">该图不图→降到3</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">E3</td><td>长度匹配受众<div class="eff">长度合 exec（≤1.5 页量级）、不注水</div></td><td class="eff">严重偏离长度→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">E4 <span class="redflag">红线</span></td><td>风格禁令(硬红线)<div class="eff">禁用'不是,而是'句式；禁术语堆砌（数据驱动/闭环/赋能/范式重构式空话）</div></td><td class="eff">命中任一→2封顶</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+    <tr><td class="cid">E5</td><td>措辞严谨<div class="eff">措辞严谨不含糊、不模棱两可（结论/限定条件清楚）</div></td><td class="eff">含糊/模棱→降档</td>
+        <td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td><td class="col-chk"><span class="box"></span></td></tr>
+  </table>
+  <div class="anchors">
+    <span class="a a5"><b>5</b>：结论先行直击决策；关键数据/对比用了表格或图；措辞严谨；长度合exec（≤1.5页）；无违禁句式无注水。</span>
+    <span class="a"><b>4</b>：基本精炼；有个别可删句，或1处本该用表却用文字。</span>
+    <span class="a"><b>3</b>：一定冗余或轻度术语堆砌，或该可视化的没可视化，或长度偏离受众。</span>
+    <span class="a a2"><b>2</b>：出现'不是,而是'句式 / 明显冗长套话术语堆砌 / 严重偏离长度（封顶）。</span>
+    <span class="a a1"><b>1</b>：充斥空话，信息密度极低。</span>
+  </div>
+  <div class="score"><span class="big">本维整体分（1–5）：<span class="fill">&nbsp;</span></span>
+    <span class="note">备注：<span class="noteline">&nbsp;</span></span></div>
+</div>
+
+<!-- ===================== 汇总 ===================== -->
+<div class="overall">
+  <h2>整体汇总（加权 overall 目标 ≥4.0）</h2>
+  <table>
+    <tr><th>维度</th><th class="w">权重</th><th class="w">本维整体分(1–5)</th><th class="w">加权(分×权重)</th></tr>
+    <tr><td>可回溯性 traceability</td><td class="w">0.28</td><td class="w"><span class="fill">&nbsp;</span></td><td class="w"><span class="fill">&nbsp;</span></td></tr>
+    <tr><td>结构 structure</td><td class="w">0.15</td><td class="w"><span class="fill">&nbsp;</span></td><td class="w"><span class="fill">&nbsp;</span></td></tr>
+    <tr><td>逻辑与故事线 narrative</td><td class="w">0.12</td><td class="w"><span class="fill">&nbsp;</span></td><td class="w"><span class="fill">&nbsp;</span></td></tr>
+    <tr><td>提炼与洞察 insight</td><td class="w">0.22</td><td class="w"><span class="fill">&nbsp;</span></td><td class="w"><span class="fill">&nbsp;</span></td></tr>
+    <tr><td>覆盖度 coverage</td><td class="w">0.08</td><td class="w"><span class="fill">&nbsp;</span></td><td class="w"><span class="fill">&nbsp;</span></td></tr>
+    <tr><td>表达 expression</td><td class="w">0.15</td><td class="w"><span class="fill">&nbsp;</span></td><td class="w"><span class="fill">&nbsp;</span></td></tr>
+    <tr><td><b>Overall（加权和）</b></td><td class="w">1.00</td><td class="w">—</td><td class="w"><span class="fill">&nbsp;</span></td></tr>
+  </table>
+  <div style="margin-top:8px">是否触发红线（traceability&lt;3 或 E4 命中）：&nbsp;<span class="box"></span>&nbsp;是（该 case 不合格）&nbsp;&nbsp;<span class="box"></span>&nbsp;否</div>
+  <div style="margin-top:6px">总体评语：<span class="noteline" style="min-width:70%">&nbsp;</span></div>
+</div>
+
+<!-- ===================== 附录：directive 清单 ===================== -->
+<div class="appendix">
+  <h2>附录：skill 被要求做到的 directive 清单（供参照，非打勾项）</h2>
+  <div class="sub">这些是报告生成 skill 打开的「指令」（优化动作 L1），每条对应上表某维的失分点。专家判分只看报告成品是否满足 check，此表帮助理解报告为何应该做到某点。</div>
+  <table>
+    <tr><th>directive</th><th>含义</th><th>对应维度 / check</th></tr>
+    <tr><td>require_source_ref</td><td>论断挂 S-xxx/C-xxx 出处</td><td>可回溯 · T1</td></tr>
+    <tr><td>verify_no_fabrication <span class="redflag">红线</span></td><td>独立核验、不编造/曲解素材没有的事实</td><td>可回溯 · T2</td></tr>
+    <tr><td>flag_source_conflict</td><td>指出素材冲突而非混用</td><td>可回溯 · T3</td></tr>
+    <tr><td>require_two_sources</td><td>单一信源结论降级"待验证"</td><td>可回溯 · T4</td></tr>
+    <tr><td>honest_on_unsupportable</td><td>素材不足诚实留白，不硬给结论</td><td>可回溯 · T5</td></tr>
+    <tr><td>note_metric_caveat</td><td>口径依赖处注明口径/给敏感性</td><td>可回溯 · T6</td></tr>
+    <tr><td>disclose_sample_bias</td><td>披露样本代表性/选择偏差</td><td>可回溯 · T7</td></tr>
+    <tr><td>summary_format</td><td>摘要≤3 bullet、结论先行</td><td>结构 · S1</td></tr>
+    <tr><td>pyramid_body</td><td>正文金字塔：每章论点先行</td><td>结构 · S2</td></tr>
+    <tr><td>mece_sections</td><td>章节 MECE、必需段落齐</td><td>结构 · S3 / 覆盖 · V3</td></tr>
+    <tr><td>concept_consistency</td><td>概念/口径前后一致</td><td>逻辑 · N2</td></tr>
+    <tr><td>ensure_narrative_flow</td><td>一条主线贯穿、章节递进衔接</td><td>逻辑 · N1</td></tr>
+    <tr><td>abstract_cases</td><td>案例抽象提炼非罗列</td><td>洞察 · I1</td></tr>
+    <tr><td>require_insight_triplet</td><td>归因/趋势/建议三要素</td><td>洞察 · I2 / 覆盖</td></tr>
+    <tr><td>mark_extrapolation_confidence</td><td>趋势标置信、不过度外推</td><td>洞察 · I3</td></tr>
+    <tr><td>drop_noise</td><td>不引用噪音片段</td><td>洞察 · I4</td></tr>
+    <tr><td>crosscheck_outliers</td><td>异常/离群作交叉解释、不当趋势</td><td>洞察 · I5</td></tr>
+    <tr><td>cover_key_claims</td><td>覆盖 key_questions/关键 claim</td><td>覆盖 · V1/V2</td></tr>
+    <tr><td>ban_bushi_ershi</td><td>禁"不是,而是"句式/注水</td><td>表达 · E4</td></tr>
+    <tr><td>require_charts</td><td>关键数据用表/图结构化呈现</td><td>表达 · E2</td></tr>
+    <tr><td>match_exec_length</td><td>长度匹配高管受众</td><td>表达 · E3</td></tr>
+    <tr><td>require_rigorous_wording</td><td>措辞严谨不含糊</td><td>表达 · E5</td></tr>
+    <tr><td style="color:#999">buzzword_emphasis <span class="revflag">FORBIDDEN</span></td><td style="color:#999">堆术语讨好裁判（reward-hack 杠杆，永久关闭）</td><td style="color:#999">表达↓（负例）</td></tr>
+  </table>
+</div>
+
+<div class="foot">OpenHarness · research_insight 六维 rubric v0 · 本表镜像 rubric_research.json，与平台「逐 check 标注」口径一致（满足/部分满足/不满足 = 1/0.5/0）。打印：浏览器打开本文件 → Cmd/Ctrl+P → 建议 A4、缩放 100%。</div>
+
+</body>
+</html>
