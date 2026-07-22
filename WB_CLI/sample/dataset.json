@@ -1,0 +1,43 @@
+{
+  "defaults": {
+    "skills": ["research-report"],
+    "artifact_globs": ["deliverables/**"]
+  },
+  "cases": [
+    {
+      "id": "market-case-001",
+      "data": {
+        "topic": "示例市场",
+        "audience": "管理层"
+      },
+      "input_files": [
+        {
+          "source": "materials/market-case-001",
+          "target": "materials"
+        }
+      ],
+      "turns": [
+        {
+          "round": 0,
+          "label": "task",
+          "prompt": "请基于提供的参考资料，为{{data.audience}}撰写{{data.topic}}分析报告。"
+        },
+        {
+          "round": 1,
+          "label": "brief_confirmation",
+          "prompt": "Brief 信息准确，请继续；重点回答市场进入时机。"
+        },
+        {
+          "round": 2,
+          "label": "analysis_confirmation",
+          "prompt": "选择方案 2，保留方案 1 作为反方观点。"
+        },
+        {
+          "round": 3,
+          "label": "storyline_confirmation",
+          "prompt": "故事线确认，请生成最终报告并把产物写入 deliverables/。"
+        }
+      ]
+    }
+  ]
+}

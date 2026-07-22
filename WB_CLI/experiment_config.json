@@ -1,0 +1,20 @@
+{
+  "model": "deepseek-v4-pro",
+  "parallel": 3,
+  "repetition": 2,
+  "timeout_seconds": 1800,
+  "launch_interval_seconds": 0.5,
+  "dangerously_skip_permissions": true,
+  "permission_mode": "bypassPermissions",
+  "allowed_tools": [
+    "Read",
+    "Write",
+    "Edit",
+    "Bash",
+    "Skill"
+  ],
+  "artifact_globs": [
+    "deliverables/**"
+  ],
+  "capture_native_session": true
+}

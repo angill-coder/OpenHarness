@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "id": "market-case-001",
+      "input_files": [
+        {"source": "materials/market-case-001", "target": "materials"}
+      ],
+      "turns": [
+        {"round": 0, "label": "task", "prompt": "请基于提供的参考资料撰写市场进入报告。"},
+        {"round": 1, "label": "brief_confirmation", "prompt": "Brief 确认，请继续。"},
+        {"round": 2, "label": "analysis_confirmation", "prompt": "采用方案二，请继续。"},
+        {"round": 3, "label": "storyline_confirmation", "prompt": "故事线确认，请生成最终报告。"}
+      ]
+    },
+    {
+      "id": "growth-case-002",
+      "input_files": [
+        {"source": "materials/growth-case-002", "target": "materials"}
+      ],
+      "turns": [
+        {"round": 0, "label": "task", "prompt": "请基于提供的参考资料撰写增长策略报告。"},
+        {"round": 1, "label": "brief_confirmation", "prompt": "Brief 确认，重点关注留存。"},
+        {"round": 2, "label": "analysis_confirmation", "prompt": "选择用户分层方案。"},
+        {"round": 3, "label": "storyline_confirmation", "prompt": "故事线确认，请生成最终报告。"}
+      ]
+    },
+    {
+      "id": "competition-case-003",
+      "input_files": [
+        {"source": "materials/competition-case-003", "target": "materials"}
+      ],
+      "turns": [
+        {"round": 0, "label": "task", "prompt": "请基于提供的参考资料撰写竞争格局报告。"},
+        {"round": 1, "label": "brief_confirmation", "prompt": "Brief 确认，请继续。"},
+        {"round": 2, "label": "analysis_confirmation", "prompt": "重点比较产品与渠道差异。"},
+        {"round": 3, "label": "storyline_confirmation", "prompt": "故事线确认，请生成最终报告。"}
+      ]
+    }
+  ]
+}
