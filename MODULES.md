@@ -21,6 +21,7 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 ┌─ harness/  离线引擎（纯 stdlib、确定性）——「算法闭环」
 │    schemas → store → runner → judge → calibration → clustering → optimizer → loop → dashboard
 │    backend.py（Mock / ResearchMock / Recorded 三后端）
+│    workbuddy_runner.py → workbuddy_batch/*（真实外部报告生成）
 │    artifacts/rubric*.json（评测尺子）
 │
 ├─ app/  Web 平台（stdlib http + 单页 JS）——「运行时 / 人在环」
@@ -36,7 +37,7 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 
 ---
 
-## 2. 六模块划分
+## 2. 七模块划分
 
 | 模块 | 职责 | 主要文件 | owner 画像 |
 |---|---|---|---|
@@ -46,6 +47,7 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 | **M4 前端 UI** | 单页三栏交互、标注表、打印 | `app/index.html`（结构+样式） + `app/app.js`（逻辑） | 前端 |
 | **M5 Rubric 与数据资产** | 六维尺子、数据集、校准集、坏变体 | `harness/artifacts/rubric_research.json`、`调研…落地文档.md`、`data/research_assistant/*` | **用户本人（不可外包）** |
 | **M6 生成 skill 母本** | 下属实际用的 research-report skill | `skills/research-report/*` | 用户 + 提示词工程 |
+| **M7 真实外部执行** | Runner→WorkBuddy、产物验收、attempt 重试、provenance | `harness/{workbuddy_runner,external_run_models,report_artifact,run_external}.py` + `harness/workbuddy_batch/*` | 执行框架/基础设施 |
 
 > M3 内部拆分后可 2–3 人并行（core/eval/label 各一 owner，共享 `Session` 组合类）；M4 拆分后 UI（HTML/CSS）与逻辑（JS）可分人。
 
@@ -138,6 +140,20 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 - overall 目标 **4.0**，校准门槛 **0.85**。gates: `red_line_traceability` / `no_regression` / `structure_guard` / `narrative_guard` / `hack_guard`。
 - checks 汇成一个 1–5 分（不单独打分、不改权重）。人读锚点见 `调研洞察汇报助手_Rubric落地文档.md`（须与 json 同步）。
 
+### 契约 E — Runner ↔ WorkBuddy 真实外部执行
+
+- 对外唯一入口：`harness.runner.run_external_cases(ExternalRunRequest)`。
+- `ExternalRunRequest`/`ExternalBatchResult` 定义在
+  `harness/external_run_models.py`；字段变更按跨模块契约处理。
+- `harness/workbuddy_runner.py` 是唯一 façade；Session、Web 和 Loop
+  不得直接 import `workbuddy_batch`。
+- WB `repetition=1`；无有效报告的条件重试由 façade 负责。
+- `status=success` 不代表报告成功；只有 `report_artifact.py` 验收通过
+  才能进入 import/Judge。
+- `ground_truth`、rubric、人工/Judge 分不得进入 CaseSpec、workspace
+  或生成 prompt。
+- `harness/workbuddy_batch/*` 是内部实现，协议调整需同步契约测试。
+
 ---
 
 ## 4. 大文件拆分现状（第一个 PR，已完成）
@@ -167,6 +183,7 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 - **分支策略**：按模块开短生命周期分支 `feat/m1-judge`、`feat/m3-server`、`feat/m4-ui` 等。**M2↔M1 的成对契约改动（signal↔judge 锚点）放同一分支同一 PR。**
 - **验收闸门（写进 PR 模板）**：
   - 改 `harness/*`：跑 `run_demo_research.py`(六维) + `run_demo.py`(防旧产品回归)——这俩是 M1/M2 的 CI 试金石。
+  - 改 M7：额外跑 `python -m unittest discover -s harness/tests -p 'test_*.py' -v`。
   - 改 `app/session*.py`：`python3 -c "import session"` + restore 一个真实会话 + `advance` 冒烟。
   - 改 `app/app.js`：`node --check app/app.js`。
   - 改 `rubric_research.json` / `sessions/*/state.json`：重启 server 复核。

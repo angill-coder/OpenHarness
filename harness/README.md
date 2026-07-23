@@ -67,3 +67,51 @@ python3 run_demo.py
 1. 按结构设计文档 + rubric 文档，写该产品的 `skill_v0.json`（结构 + directives 动作空间）和 `rubric.json`。
 2. 按 `data/report_assistant/` 的格式准备 `dataset.jsonl`（含 `ground_truth_findings` + 硬 case）和 `human_labels.jsonl`。
 3. 若接真实平台，实现 `ClaudeBackend.run`（或新增 adapter），把 skill 拼成提示、回收结构化输出与 trace。
+
+## WorkBuddy 真实报告生成（Phase 0）
+
+Runner 已新增真实外部执行入口，保留原有 `run_split()` Mock 路径不变。
+
+从 OpenHarness 根目录执行：
+
+```bash
+python harness/run_external.py \
+  --session-id research-run \
+  --version v-full \
+  --dataset ../case.json \
+  --skill-path skills/research-report \
+  --model deepseek-v4-pro \
+  --parallel 3 \
+  --repetition 1 \
+  --max-report-retries 3 \
+  --timeout 900 \
+  --stall-timeout 180 \
+  --output generation_runs
+```
+
+规则：
+
+- `case.json.turns` 提供业务任务和多轮 intake；
+- Runner 强制注入 Skill、最终轮交付指令和
+  `deliverables/report.md` 输出契约；
+- WB `repetition` 固定为 1；
+- 没有有效报告时使用新 session/workspace 完整重跑，最多额外 3 次；
+- 每个 attempt 的 WB status、manifest、trace、Token 和失败原因均保留；
+- 只有 Artifact Validator 验收通过的报告才标记为 `generated`。
+
+输出位于：
+
+```text
+generation_runs/<generation-id>/
+├── request.json
+├── generation_result.json
+├── attempt-01/
+├── attempt-02/
+└── ...
+```
+
+运行不调用真实模型的契约测试：
+
+```bash
+python -m unittest discover -s harness/tests -p 'test_*.py' -v
+```

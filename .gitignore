@@ -12,3 +12,6 @@ __pycache__/
 data/
 data/
 .env
+
+# WorkBuddy 真实生成 trace/workspace（体积大，仅本地保留）
+generation_runs/
