@@ -16,10 +16,15 @@ API:
   POST /api/advance           {id}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
+  POST /api/generation/start  {id, idempotency_key?} -> 后台调用 WB 并自动批量导入
+  GET  /api/generation?id=    -> 查询生成任务
+  POST /api/generation/retry  {job_id} -> 仅重跑未导入的 case
+  POST /api/generation/cancel {job_id} -> 请求取消
   GET  /api/sample_data       -> 返回内置样例数据集(供页面一键导入)
 """
 import argparse
 import base64
+from contextlib import nullcontext
 import io
 import json
 import os
@@ -34,6 +39,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import session as session_mod  # noqa: E402
 import persistence as persist  # noqa: E402
+from generation_jobs import (  # noqa: E402
+    GenerationJobError,
+    GenerationJobService,
+)
 # import auth as auth_mod  # [鉴权已临时关闭·本地测试] 恢复时取消注释
 
 ROOT = os.path.dirname(HERE)
@@ -44,6 +53,19 @@ DATA_DIRS = {
 
 SESSIONS = {}          # sid -> Session
 PREFER_REAL = False
+GENERATION_SERVICE = None
+
+
+def _session_lock(sid):
+    if GENERATION_SERVICE is None:
+        return nullcontext()
+    return GENERATION_SERVICE.session_lock(sid)
+
+
+def _active_generation(sid):
+    if GENERATION_SERVICE is None:
+        return None
+    return GENERATION_SERVICE.active_for_session(sid)
 
 
 def _load_sample(product="report-assistant"):
@@ -225,8 +247,54 @@ class Handler(BaseHTTPRequestHandler):
             sid = (q.get("id") or [None])[0]
             s = self._sess(sid)
             if s:
-                self._send(200, s.view(acct))
+                with _session_lock(sid):
+                    self._send(200, s.view(acct))
             return
+        if u.path == "/api/generation/config":
+            if GENERATION_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "GenerationJobService 尚未初始化"},
+                )
+            return self._send(
+                200,
+                GENERATION_SERVICE.configuration(),
+            )
+        if u.path == "/api/generation":
+            if GENERATION_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "GenerationJobService 尚未初始化"},
+                )
+            q = parse_qs(u.query)
+            job_id = (q.get("id") or [None])[0]
+            sid = (q.get("session_id") or [None])[0]
+            try:
+                if job_id:
+                    return self._send(
+                        200,
+                        GENERATION_SERVICE.get(job_id).to_dict(),
+                    )
+                if sid:
+                    latest = GENERATION_SERVICE.latest_for_session(sid)
+                    return self._send(
+                        200,
+                        {
+                            "job": latest.to_dict() if latest else None,
+                            "jobs": [
+                                item.to_dict()
+                                for item in GENERATION_SERVICE.list_for_session(
+                                    sid
+                                )[:20]
+                            ],
+                        },
+                    )
+                return self._send(
+                    400,
+                    {"error": "缺少 id 或 session_id"},
+                )
+            except GenerationJobError as exc:
+                return self._send(404, {"error": str(exc)})
         if u.path == "/api/sample_data":
             q = parse_qs(u.query)
             sid = (q.get("id") or [None])[0]
@@ -238,11 +306,12 @@ class Handler(BaseHTTPRequestHandler):
             out = []
             for sid, s in SESSIONS.items():
                 meta = persist.load_meta(sid) or {}
-                out.append({"id": sid, "product_id": s.product_id,
-                            "requirement": s.requirement,
-                            "current_version": s._current()["version"],
-                            "n_versions": len(s.versions), "n_cases": len(s.cases),
-                            "created_at": meta.get("created_at")})
+                with _session_lock(sid):
+                    out.append({"id": sid, "product_id": s.product_id,
+                                "requirement": s.requirement,
+                                "current_version": s._current()["version"],
+                                "n_versions": len(s.versions), "n_cases": len(s.cases),
+                                "created_at": meta.get("created_at")})
             out.sort(key=lambda x: x.get("created_at") or 0, reverse=True)
             return self._send(200, {"sessions": out})
         return self._send(404, {"error": "not found"})
@@ -273,13 +342,24 @@ class Handler(BaseHTTPRequestHandler):
             s = self._sess(b.get("id"))
             if not s:
                 return
+            active = _active_generation(s.id)
+            if active:
+                return self._send(
+                    409,
+                    {
+                        "error": "真实报告生成中，暂不能替换数据集",
+                        "job_id": active.job_id,
+                    },
+                )
             rows = b.get("rows")
             labels = b.get("labels")
             if b.get("use_sample"):
                 rows, labels = _load_sample(s.rubric.get("product"))
             if not rows:
                 return self._send(400, {"error": "无数据行; 传 rows 或 use_sample=true"})
-            return self._send(200, s.import_data(rows, labels, account=acct))
+            with _session_lock(s.id):
+                result = s.import_data(rows, labels, account=acct)
+            return self._send(200, result)
 
         if u.path == "/api/labels":
             s = self._sess(b.get("id"))
@@ -287,28 +367,132 @@ class Handler(BaseHTTPRequestHandler):
                 return
             ver = b.get("version") or s._current()["version"]
             labels = b.get("labels") or {}
-            return self._send(200, s.submit_labels(ver, labels, account=acct))
+            with _session_lock(s.id):
+                result = s.submit_labels(ver, labels, account=acct)
+            return self._send(200, result)
 
         if u.path == "/api/rubric":
             s = self._sess(b.get("id"))
             if not s:
                 return
-            return self._send(200, s.edit_rubric({k: b[k] for k in ("weights", "target") if k in b}, account=acct))
+            active = _active_generation(s.id)
+            if active:
+                return self._send(
+                    409,
+                    {
+                        "error": "真实报告生成中，暂不能修改 Rubric",
+                        "job_id": active.job_id,
+                    },
+                )
+            with _session_lock(s.id):
+                result = s.edit_rubric(
+                    {k: b[k] for k in ("weights", "target") if k in b},
+                    account=acct,
+                )
+            return self._send(200, result)
 
         if u.path == "/api/advance":
             s = self._sess(b.get("id"))
             if not s:
                 return
-            return self._send(200, s.advance(account=acct))
+            active = _active_generation(s.id)
+            if active:
+                return self._send(
+                    409,
+                    {
+                        "error": "真实报告生成中，暂不能推进 Skill 版本",
+                        "job_id": active.job_id,
+                    },
+                )
+            with _session_lock(s.id):
+                result = s.advance(account=acct)
+            return self._send(200, result)
+
+        if u.path == "/api/generation/start":
+            if GENERATION_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "GenerationJobService 尚未初始化"},
+                )
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            try:
+                job, reused = GENERATION_SERVICE.start(
+                    s.id,
+                    acct,
+                    case_ids=b.get("case_ids"),
+                    idempotency_key=(
+                        b.get("idempotency_key")
+                        or self.headers.get("Idempotency-Key")
+                    ),
+                )
+            except (GenerationJobError, OSError, ValueError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(
+                200 if reused else 202,
+                {"reused": reused, "job": job.to_dict()},
+            )
+
+        if u.path == "/api/generation/retry":
+            if GENERATION_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "GenerationJobService 尚未初始化"},
+                )
+            try:
+                job, reused = GENERATION_SERVICE.retry(
+                    b.get("job_id") or "",
+                    acct,
+                    idempotency_key=(
+                        b.get("idempotency_key")
+                        or self.headers.get("Idempotency-Key")
+                    ),
+                )
+            except (GenerationJobError, OSError, ValueError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(
+                200 if reused else 202,
+                {"reused": reused, "job": job.to_dict()},
+            )
+
+        if u.path == "/api/generation/cancel":
+            if GENERATION_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "GenerationJobService 尚未初始化"},
+                )
+            try:
+                job = GENERATION_SERVICE.cancel(
+                    b.get("job_id") or ""
+                )
+            except GenerationJobError as exc:
+                return self._send(404, {"error": str(exc)})
+            return self._send(202, {"job": job.to_dict()})
 
         if u.path == "/api/import_output":
             s = self._sess(b.get("id"))
             if not s:
                 return
+            active = _active_generation(s.id)
+            if active:
+                return self._send(
+                    409,
+                    {
+                        "error": "自动生成导入中，请等待任务结束后再手工导入",
+                        "job_id": active.job_id,
+                    },
+                )
             case_id = b.get("case_id")
             report_text = b.get("report_text") or ""
             version = b.get("version")   # 缺省用当前版本
-            r = s.import_output(case_id, report_text, version, account=acct)
+            with _session_lock(s.id):
+                r = s.import_output(
+                    case_id,
+                    report_text,
+                    version,
+                    account=acct,
+                )
             if "error" in r:
                 return self._send(400, r)
             return self._send(200, r)
@@ -317,8 +501,14 @@ class Handler(BaseHTTPRequestHandler):
             s = self._sess(b.get("id"))
             if not s:
                 return
-            r = s.import_judgment(b.get("case_id"), b.get("scores") or {},
-                                  b.get("reasoning"), b.get("version"), account=acct)
+            with _session_lock(s.id):
+                r = s.import_judgment(
+                    b.get("case_id"),
+                    b.get("scores") or {},
+                    b.get("reasoning"),
+                    b.get("version"),
+                    account=acct,
+                )
             if "error" in r:
                 return self._send(400, r)
             return self._send(200, r)
@@ -327,6 +517,15 @@ class Handler(BaseHTTPRequestHandler):
             s = self._sess(b.get("id"))
             if not s:
                 return
+            active = _active_generation(s.id)
+            if active:
+                return self._send(
+                    409,
+                    {
+                        "error": "自动生成导入中，请等待任务结束后再上传",
+                        "job_id": active.job_id,
+                    },
+                )
             try:
                 raw = base64.b64decode(b.get("content_b64", ""))
             except Exception:
@@ -337,13 +536,26 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "解析文件失败: %s" % e})
             if not (text or "").strip():
                 return self._send(400, {"error": "未解析出文本(可能是扫描件/加密/空文件)"})
-            return self._send(200, s.import_output(b.get("case_id"), text, b.get("version"), account=acct))
+            with _session_lock(s.id):
+                result = s.import_output(
+                    b.get("case_id"),
+                    text,
+                    b.get("version"),
+                    account=acct,
+                )
+            return self._send(200, result)
 
         if u.path == "/api/submit_check_labels":
             s = self._sess(b.get("id"))
             if not s:
                 return
-            r = s.submit_check_labels(b.get("case_id"), b.get("checks") or {}, b.get("version"), account=acct)
+            with _session_lock(s.id):
+                r = s.submit_check_labels(
+                    b.get("case_id"),
+                    b.get("checks") or {},
+                    b.get("version"),
+                    account=acct,
+                )
             return self._send(400 if "error" in r else 200, r)
 
         if u.path == "/api/run_judge":
@@ -364,14 +576,21 @@ class Handler(BaseHTTPRequestHandler):
             parsed = _extract_json(text)
             if not parsed or "checks" not in parsed:
                 return self._send(400, {"error": "judge 输出解析失败", "raw": (text or "")[:500]})
-            r = s.set_judge_checks(cid, parsed["checks"], parsed.get("reasoning"), ver, account=acct)
+            with _session_lock(s.id):
+                r = s.set_judge_checks(
+                    cid,
+                    parsed["checks"],
+                    parsed.get("reasoning"),
+                    ver,
+                    account=acct,
+                )
             return self._send(400 if "error" in r else 200, r)
 
         return self._send(404, {"error": "not found"})
 
 
 def main():
-    global PREFER_REAL
+    global PREFER_REAL, GENERATION_SERVICE
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--host", default="127.0.0.1")
@@ -380,6 +599,7 @@ def main():
     PREFER_REAL = args.real
 
     _restore_all()
+    GENERATION_SERVICE = GenerationJobService(SESSIONS)
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print("OpenHarness 平台已启动: http://%s:%d" % (args.host, args.port))

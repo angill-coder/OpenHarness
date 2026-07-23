@@ -87,6 +87,7 @@ class SessionCore:
         self.report_judgments: Dict[str, Dict[str, Dict]] = {}  # {version: {case_id: {scores,reasoning,flagged}}} 平台LLM-judge
         self.human_checks: Dict[str, Dict[str, Dict[str, float]]] = {}   # {version:{case:{check_id:1/0.5/0}}} 专家逐check
         self.judge_checks: Dict[str, Dict[str, Dict]] = {}   # {version:{case:{checks,reasoning}}} Opus逐check
+        self.generation_imports: Dict[str, Dict[str, str]] = {}
 
         self._add_version(v0, adopted=True, proposal=None)
 
@@ -137,6 +138,7 @@ class SessionCore:
             "opt_history": self.opt_history,
             "cases": self.cases,
             "human_labels": self.human_labels,
+            "generation_imports": self.generation_imports,
             "versions": [{
                 "skill": v["skill"].to_dict(), "adopted": v["adopted"], "proposal": v["proposal"],
             } for v in self.versions],
@@ -162,6 +164,7 @@ class SessionCore:
         self.report_judgments = persist.load_judgments(self.id)  # 真实报告的 LLM-judge 评分由 judgments.jsonl 恢复
         self.human_checks = persist.load_check_labels(self.id)   # 逐check人工标注由 check_labels.jsonl 恢复
         self.judge_checks = persist.load_check_judgments(self.id)  # 逐check judge 由 check_judgments.jsonl 恢复
+        self.generation_imports = snap.get("generation_imports", {})
         self.failure_history = []
         self.versions = []
         for vd in snap["versions"]:

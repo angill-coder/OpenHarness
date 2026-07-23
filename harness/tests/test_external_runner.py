@@ -205,6 +205,45 @@ class ExternalRunnerTest(unittest.TestCase):
             )
         self.assertFalse((self.root / "runs").exists())
 
+    def test_filters_by_openharness_case_id_and_reports_progress(self) -> None:
+        updates = []
+        request = replace(
+            self._request(succeed_on_attempt=1, max_retries=3),
+            openharness_case_ids=("oh-case",),
+        )
+
+        result = run_external_cases(
+            request,
+            progress_callback=lambda item: updates.append(item.status),
+        )
+
+        self.assertTrue(result.succeeded)
+        self.assertEqual(updates[0], "running")
+        self.assertEqual(updates[-1], "completed")
+
+    def test_rejects_unknown_openharness_case_filter(self) -> None:
+        request = replace(
+            self._request(succeed_on_attempt=1, max_retries=3),
+            openharness_case_ids=("missing-case",),
+        )
+
+        with self.assertRaisesRegex(
+            ExternalRunConfigurationError,
+            "missing-case",
+        ):
+            run_external_cases(request)
+        self.assertFalse((self.root / "runs").exists())
+
+    def test_can_cancel_before_first_attempt(self) -> None:
+        result = run_external_cases(
+            self._request(succeed_on_attempt=1, max_retries=3),
+            should_cancel=lambda: True,
+        )
+
+        self.assertEqual(result.status, "cancelled")
+        self.assertEqual(result.cases[0].status, "cancelled")
+        self.assertEqual(result.cases[0].attempts, [])
+
 
 if __name__ == "__main__":
     unittest.main()

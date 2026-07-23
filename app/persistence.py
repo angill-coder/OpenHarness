@@ -23,8 +23,11 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-# 落盘根目录: app/sessions/
-_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions")
+# 落盘根目录: 默认 app/sessions/；测试/多实例可用环境变量隔离。
+_BASE = os.environ.get(
+    "OPENHARNESS_SESSIONS_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "sessions"),
+)
 
 
 def _ensure(sid: str) -> str:
@@ -76,6 +79,30 @@ def append_output(sid: str, version: str, case_id: str, report_text: str):
     rec = {"ts": _now(), "version": version, "case_id": case_id, "report_text": report_text}
     with open(os.path.join(d, "outputs.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def append_outputs_batch(
+    sid: str,
+    version: str,
+    outputs: Dict[str, str],
+    generation_id: str = None,
+):
+    """一次打开文件写入一批报告，避免逐 case 重复打开和中途重评。"""
+    if not outputs:
+        return
+    d = _ensure(sid)
+    now = _now()
+    with open(os.path.join(d, "outputs.jsonl"), "a", encoding="utf-8") as f:
+        for case_id, report_text in outputs.items():
+            rec = {
+                "ts": now,
+                "version": version,
+                "case_id": case_id,
+                "report_text": report_text,
+            }
+            if generation_id:
+                rec["generation_id"] = generation_id
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
 def append_judgment(sid: str, version: str, case_id: str, scores: Dict[str, int],
@@ -209,6 +236,43 @@ def load_meta(sid: str) -> Optional[Dict[str, Any]]:
         return None
     with open(p, encoding="utf-8") as f:
         return json.load(f)
+
+
+def save_generation_job(sid: str, job_id: str, payload: Dict[str, Any]):
+    """原子保存一个前端真实生成任务。"""
+    d = os.path.join(_ensure(sid), "generation_jobs")
+    os.makedirs(d, exist_ok=True)
+    _atomic_write(os.path.join(d, job_id + ".json"), payload)
+
+
+def load_generation_job(sid: str, job_id: str) -> Optional[Dict[str, Any]]:
+    p = os.path.join(_BASE, sid, "generation_jobs", job_id + ".json")
+    if not os.path.isfile(p):
+        return None
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_generation_jobs(sid: str = None) -> List[Dict[str, Any]]:
+    """读取一个或全部会话的生成任务，按创建时间排序。"""
+    session_ids = [sid] if sid else list_session_ids()
+    jobs = []
+    for session_id in session_ids:
+        d = os.path.join(_BASE, session_id, "generation_jobs")
+        if not os.path.isdir(d):
+            continue
+        for name in os.listdir(d):
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(d, name), encoding="utf-8") as f:
+                    jobs.append(json.load(f))
+            except (OSError, json.JSONDecodeError):
+                continue
+    return sorted(
+        jobs,
+        key=lambda item: float(item.get("created_at") or 0),
+    )
 
 
 def base_dir() -> str:

@@ -14,7 +14,7 @@
 
 - **`harness/`** — 离线引擎（纯 stdlib、确定性）：`schemas` · `store` · `runner` · `judge` · `calibration` · `clustering` · `optimizer` · `loop` · `dashboard` · `backend`(Mock/ResearchMock/Recorded 三后端) · `artifacts/rubric*.json`(评测尺子)。
 - **`app/`** — Web 平台（stdlib http + 单页 JS，人在环运行时）：
-  - `server.py`(路由/鉴权入口) · `session.py`(组合入口) + `session_core.py`/`session_eval.py`/`session_label.py`(会话编排三 mixin) · `persistence.py`(落盘) · `generator.py`(需求→v0) · `auth.py`(iOA 鉴权)
+  - `server.py`(路由/鉴权入口) · `session.py`(组合入口) + `session_core.py`/`session_eval.py`/`session_label.py`/`session_generation.py`(会话编排) · `generation_jobs.py`(WB 后台任务) · `persistence.py`(落盘) · `generator.py`(需求→v0) · `auth.py`(iOA 鉴权)
   - `index.html`(单页 UI 结构+样式) + `app.js`(前端逻辑)
 
 ## 怎么跑
@@ -23,6 +23,7 @@
 # 平台(默认 8080)。判分 LLM key 走 start_real.sh(gitignored, 含密钥, 勿提交)
 cd app && source ./start_real.sh && python3 server.py --host 0.0.0.0 --port 8080
 # 浏览器打开 → 左上"打开已有会话"选 research-run(跑优化器) / real-eval(校准/逐check标注)
+# 当前 Session 导入 case 后，可在中列“真实运行 · WB CLI”一键生成并导入报告
 
 # 离线自测闭环(无需 key)
 cd harness && python3 run_demo_research.py   # 六维: dev overall 2.17→4.56, 采纳 15 版
@@ -40,6 +41,7 @@ cd harness && python3 run_demo.py            # 旧算数字产品, 防回归: 2.
 1. 改 `rubric_research.json` / `sessions/*/state.json` 后**必须重启 server** 才生效。
 2. 改 `app/app.js` 后先 `node --check app/app.js`。
 3. mock vs recorded 泾渭分明：优化器需 mock signals；recorded 真实报告 signals 为空 → 直接"收敛"（跑优化器用 research-run，校准用贴了真实报告的会话）。
+4. 当前一键 WB 运行使用固定 `skills/research-report`，已冻结 Session 版本/hash，但尚未把每版 `SkillArtifact` 渲染为可执行 Skill；因此只用于生成导入链路，不可作为真实版本 Gate。
 
 ## 注意
 

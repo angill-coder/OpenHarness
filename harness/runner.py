@@ -10,7 +10,7 @@ from schemas import EvalRecord
 import judge as judge_mod
 
 
-def run_external_cases(request):
+def run_external_cases(request, progress_callback=None, should_cancel=None):
     """统一的真实外部执行入口。
 
     WorkBuddy 的具体实现通过延迟导入隔离，确保未安装/不可用时不影响原有
@@ -18,7 +18,11 @@ def run_external_cases(request):
     """
     from workbuddy_runner import run_external_cases as _run_external_cases
 
-    return _run_external_cases(request)
+    return _run_external_cases(
+        request,
+        progress_callback=progress_callback,
+        should_cancel=should_cancel,
+    )
 
 
 def run_split(skill, cases: List[Dict[str, Any]], rubric: Dict[str, Any],

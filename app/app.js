@@ -6,6 +6,8 @@
 let DIMS=["data_accuracy","completeness","insight","conciseness"];
 let ZH={data_accuracy:"数据准确性",completeness:"完整性",insight:"洞察质量",conciseness:"简洁性"};
 let SID=null, STATE=null;
+let GEN_JOB=null, GEN_CONFIG=null, GEN_POLL=null;
+const GEN_TERMINAL_SEEN=new Set();
 
 function toast(m,ms=2600){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';
   clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',ms);}
@@ -31,6 +33,7 @@ function authWall(){
 }
 function fmt(x,d=2){return x==null?'-':Number(x).toFixed(d);}
 function bar(v,max=5){return `<div class="barwrap"><div class="bar" style="width:${(v/max*100)||0}%"></div></div>`;}
+function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // ---- 1. 生成 V0 ----
 document.getElementById('genBtn').onclick=async()=>{
@@ -38,7 +41,7 @@ document.getElementById('genBtn').onclick=async()=>{
   if(!req){toast('请先填写需求描述');return;}
   const pid=document.getElementById('pidInput').value.trim();
   const j=await api('/api/session','POST',{requirement:req,product_id:pid});
-  SID=j.session_id; STATE=j; render();
+  SID=j.session_id; STATE=j; GEN_JOB=null; render();
   toast('已生成 V0：'+j.product_id);
 };
 
@@ -147,6 +150,118 @@ document.getElementById('advanceBtn').onclick=async()=>{
   }
 };
 
+// ---- 真实运行 · WB CLI ----
+const GEN_STATUS_ZH={
+  queued:'排队中',running:'生成中',retrying:'自动重试中',importing:'批量导入中',
+  cancel_requested:'等待安全停止',completed:'已完成',partial:'部分成功',
+  failed:'失败',cancelled:'已取消',interrupted:'服务重启中断',
+  generated:'已生成',imported:'已导入',retry_exhausted:'重试耗尽'
+};
+function generationActive(){
+  return !!(GEN_JOB&&GEN_JOB.active);
+}
+function scheduleGenerationPoll(){
+  clearTimeout(GEN_POLL);
+  if(!GEN_JOB||!GEN_JOB.active)return;
+  GEN_POLL=setTimeout(pollGeneration,1200);
+}
+async function pollGeneration(){
+  if(!GEN_JOB)return;
+  try{
+    GEN_JOB=await api('/api/generation?id='+encodeURIComponent(GEN_JOB.job_id),'GET');
+    renderGenerationPanel();
+    if(GEN_JOB.active){scheduleGenerationPoll();return;}
+    if(!GEN_TERMINAL_SEEN.has(GEN_JOB.job_id)){
+      GEN_TERMINAL_SEEN.add(GEN_JOB.job_id);
+      const j=await api('/api/session?id='+encodeURIComponent(SID),'GET');
+      STATE=j; render();
+      const msg=GEN_JOB.status==='completed'
+        ?`真实报告已生成并导入：${GEN_JOB.imported_count}/${GEN_JOB.case_count}`
+        :`真实运行结束：${GEN_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status}，已导入 ${GEN_JOB.imported_count}/${GEN_JOB.case_count}`;
+      toast(msg,5200);
+    }
+  }catch(e){clearTimeout(GEN_POLL);}
+}
+async function loadLatestGeneration(){
+  clearTimeout(GEN_POLL);GEN_JOB=null;
+  if(!SID){renderGenerationPanel();return;}
+  try{
+    const j=await api('/api/generation?session_id='+encodeURIComponent(SID),'GET');
+    GEN_JOB=j.job||null;
+    renderGenerationPanel();
+    scheduleGenerationPoll();
+  }catch(e){renderGenerationPanel();}
+}
+document.getElementById('runGenerationBtn').onclick=async()=>{
+  if(!SID||!STATE||!STATE.n_cases){toast('请先导入评测数据');return;}
+  const key='start-'+SID+'-'+STATE.current_version+'-'+Date.now();
+  try{
+    const j=await api('/api/generation/start','POST',{id:SID,idempotency_key:key});
+    GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
+    toast(j.reused?'已有任务正在执行':'WB CLI 任务已启动');
+  }catch(e){renderGenerationPanel();}
+};
+document.getElementById('retryGenerationBtn').onclick=async()=>{
+  if(!GEN_JOB)return;
+  try{
+    const j=await api('/api/generation/retry','POST',{
+      job_id:GEN_JOB.job_id,idempotency_key:'retry-'+GEN_JOB.job_id+'-'+Date.now()
+    });
+    GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
+    toast('失败 case 重试任务已启动');
+  }catch(e){renderGenerationPanel();}
+};
+document.getElementById('cancelGenerationBtn').onclick=async()=>{
+  if(!GEN_JOB)return;
+  try{
+    const j=await api('/api/generation/cancel','POST',{job_id:GEN_JOB.job_id});
+    GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
+    toast('已请求安全停止；当前 CLI 轮次结束后生效');
+  }catch(e){renderGenerationPanel();}
+};
+function renderGenerationPanel(){
+  const cfg=document.getElementById('generationConfig');
+  const status=document.getElementById('generationStatus');
+  const cases=document.getElementById('generationCases');
+  const run=document.getElementById('runGenerationBtn');
+  const retry=document.getElementById('retryGenerationBtn');
+  const cancel=document.getElementById('cancelGenerationBtn');
+  if(!cfg)return;
+
+  if(!GEN_CONFIG){
+    cfg.textContent='正在读取运行配置…';
+  }else if(!GEN_CONFIG.ready){
+    cfg.innerHTML='<span class="warn-txt">运行配置不可用：'+esc(GEN_CONFIG.error)+'</span>';
+  }else{
+    cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>${esc(GEN_CONFIG.skill_ref)}</span></div>`+
+      `<div class="kv"><span>模型 / 并发</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel}</span></div>`+
+      `<div class="kv"><span>报告重试</span><span>最多额外 ${GEN_CONFIG.max_report_retries} 次</span></div>`+
+      `<div class="small warn-txt" style="margin-top:5px">当前为固定 Skill 链路验证；任务仍冻结并记录 Session 版本与哈希。</div>`;
+  }
+  const active=generationActive();
+  run.disabled=!STATE||!STATE.n_cases||active||!GEN_CONFIG||!GEN_CONFIG.ready;
+  retry.style.display=GEN_JOB&&!active&&GEN_JOB.failed_case_ids&&GEN_JOB.failed_case_ids.length?'':'none';
+  cancel.style.display=active?'':'none';
+  document.getElementById('advanceBtn').disabled=!STATE||!STATE.can_advance||active;
+  if(!GEN_JOB){
+    status.innerHTML='<span class="mut">尚未运行。成功报告只导入，不自动 Judge，也不推进版本。</span>';
+    cases.innerHTML='';return;
+  }
+  const total=GEN_JOB.case_count||0, imported=GEN_JOB.imported_count||0;
+  const done=(GEN_JOB.cases||[]).filter(x=>x.imported||['retry_exhausted','failed','cancelled'].includes(x.status)).length;
+  const pct=total?Math.round(done/total*100):0;
+  status.innerHTML=`<div class="kv"><span>状态</span><b class="${GEN_JOB.status==='completed'?'ok-txt':GEN_JOB.status==='failed'?'warn-txt':''}">${esc(GEN_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status)}</b></div>`+
+    `<div class="kv"><span>冻结版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.skill_artifact_hash||'').slice(0,10))}</span></div>`+
+    `<div class="kv"><span>已导入</span><span>${imported}/${total}</span></div>`+
+    `<div class="barwrap" style="margin-top:7px"><div class="bar" style="width:${pct}%"></div></div>`+
+    (GEN_JOB.error?`<div class="warn-txt" style="margin-top:6px">${esc(GEN_JOB.error)}</div>`:'');
+  cases.innerHTML=(GEN_JOB.cases||[]).map(c=>
+    `<div class="job-case"><span class="status-dot ${esc(c.status)}"></span><b>${esc(c.case_id)}</b> `+
+    `<span class="mut">${esc(GEN_STATUS_ZH[c.status]||c.status)} · ${c.attempts||0} 次</span>`+
+    (c.error?`<div class="mut" title="${esc(c.error)}">${esc(c.error).slice(0,180)}</div>`:'')+
+    `</div>`).join('');
+}
+
 // ---------------- 渲染 ----------------
 function render(){
   if(!STATE)return;
@@ -158,7 +273,7 @@ function render(){
   document.getElementById('backendBadge').textContent='backend: '+STATE.backend;
   document.getElementById('sessBadge').textContent='会话 '+STATE.session_id+' · '+STATE.product_id;
   document.getElementById('genRationale').innerHTML='<b>生成依据：</b><br>'+(STATE.gen_rationale||'').replace(/\n/g,'<br>');
-  ['dataCard','rubricCard','skillCard','labelCard','outputCard'].forEach(id=>document.getElementById(id).classList.add('active'));
+  ['dataCard','rubricCard','skillCard','realRunCard','labelCard','outputCard'].forEach(id=>document.getElementById(id).classList.add('active'));
 
   // 版本 pills
   const pills=STATE.versions.map((v,i)=>{
@@ -168,7 +283,7 @@ function render(){
   }).join('');
   document.getElementById('versionPills').innerHTML = pills +
     `<div class="small mut" style="margin-top:6px">数据 ${STATE.n_cases} 条 ${JSON.stringify(STATE.splits)}</div>`;
-  document.getElementById('advanceBtn').disabled=!STATE.can_advance;
+  document.getElementById('advanceBtn').disabled=!STATE.can_advance||generationActive();
 
   // 当前 skill
   const cv=STATE.versions.find(v=>v.version===STATE.current_version);
@@ -181,7 +296,7 @@ function render(){
     ${cv.proposal?`<details><summary>本版来自的优化提议</summary><pre>${JSON.stringify(cv.proposal,null,2)}</pre></details>`:''}
     <details><summary>查看结构（flow / subagents，冻结）</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
 
-  renderLabels(); renderCalib(); renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard();
+  renderLabels(); renderCalib(); renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard(); renderGenerationPanel();
 }
 
 function renderOutputCard(){
@@ -324,7 +439,8 @@ function renderRubricEditor(){
 
 const EV_ZH={created:"生成 V0",import_data:"导入数据",submit_labels:"人工标注",
   edit_rubric:"编辑 rubric",version_adopted:"采纳新版",version_rejected:"版本被拒",
-  converged:"收敛/平台期",import_output:"导入报告文本",import_judgment:"导入LLM评分"};
+  converged:"收敛/平台期",import_output:"导入报告文本",import_judgment:"导入LLM评分",
+  generation_import:"WB 批量导入"};
 // ---- 打开已有会话 ----
 async function loadSessions(){
   try{
@@ -339,7 +455,7 @@ async function loadSessions(){
 async function openSession(id){
   if(!id)return;
   const j=await api('/api/session?id='+encodeURIComponent(id),'GET');
-  SID=id; STATE=j; render(); toast('已打开会话 '+id);
+  SID=id; STATE=j; GEN_JOB=null; render(); await loadLatestGeneration(); toast('已打开会话 '+id);
 }
 document.getElementById('openSessBtn').onclick=()=>openSession(document.getElementById('sessSel').value);
 document.getElementById('refreshSessBtn').onclick=loadSessions;
@@ -350,6 +466,8 @@ document.getElementById('refreshSessBtn').onclick=loadSessions;
     const me=await api('/api/me','GET');
     document.getElementById('userBadge').textContent='👤 '+(me.display_name||me.login_name);
   }catch(e){return;}   // 401 已由 authWall 拦截整页
+  try{GEN_CONFIG=await api('/api/generation/config','GET');}catch(e){GEN_CONFIG={ready:false,error:'无法读取 WB 运行配置'};}
+  renderGenerationPanel();
   await loadSessions();
   const qid=new URLSearchParams(location.search).get('id');
   if(qid){ document.getElementById('sessSel').value=qid; openSession(qid); }
@@ -372,6 +490,7 @@ function renderHistory(){
       else if(e.type==='converged')detail=p.at_version;
       else if(e.type==='import_output')detail=p.case_id+' ('+p.n_chars+'字)';
       else if(e.type==='import_judgment')detail=p.case_id+' '+JSON.stringify(p.scores);
+      else if(e.type==='generation_import')detail=p.version+' · '+p.n_cases+' case';
       return `<div class="kv"><span><span class="mut">${hh}</span> ${EV_ZH[e.type]||e.type}</span><span class="mut">${detail}</span></div>`;
     }).join('');
 }

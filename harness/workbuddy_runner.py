@@ -13,7 +13,7 @@ import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Callable, Dict, Iterable, Optional
 
 from external_run_models import (
     ExternalAttemptResult,
@@ -351,6 +351,8 @@ def _batch_status(cases: list[ExternalCaseResult]) -> str:
         return "completed"
     if generated:
         return "partial"
+    if any(item.status == "cancelled" for item in cases):
+        return "cancelled"
     return "failed"
 
 
@@ -364,7 +366,26 @@ def _persist_result(
     )
 
 
-def run_external_cases(request: ExternalRunRequest) -> ExternalBatchResult:
+def _notify_progress(
+    callback: Optional[Callable[[ExternalBatchResult], None]],
+    result: ExternalBatchResult,
+) -> None:
+    if callback is None:
+        return
+    try:
+        callback(result)
+    except Exception:
+        # 进度上报属于旁路能力，不能反向打断真实报告生成。
+        pass
+
+
+def run_external_cases(
+    request: ExternalRunRequest,
+    progress_callback: Optional[
+        Callable[[ExternalBatchResult], None]
+    ] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> ExternalBatchResult:
     """执行真实报告生成；无有效报告时按 case 最多额外重试 N 次。"""
 
     case_file = request.case_file.expanduser().resolve()
@@ -395,6 +416,26 @@ def run_external_cases(request: ExternalRunRequest) -> ExternalBatchResult:
         replace(request, case_file=case_file),
         requested_skill_name,
     )
+    if request.openharness_case_ids:
+        requested_ids = set(request.openharness_case_ids)
+        available_ids = {
+            item["openharness_case_id"]
+            for item in identities.values()
+        }
+        missing_ids = sorted(requested_ids - available_ids)
+        if missing_ids:
+            raise ExternalRunConfigurationError(
+                "dataset 缺少 OpenHarness case 映射: "
+                + ", ".join(missing_ids)
+            )
+        cases = [
+            case
+            for case in cases
+            if identities[case.case_id]["openharness_case_id"]
+            in requested_ids
+        ]
+    if not cases:
+        raise ExternalRunConfigurationError("没有可执行的 case")
 
     generation_id = (
         f"gen-{datetime.now().strftime('%Y%m%dT%H%M%S')}-"
@@ -431,9 +472,26 @@ def run_external_cases(request: ExternalRunRequest) -> ExternalBatchResult:
         generation_dir,
         tuple(command),
     )
+    initial = ExternalBatchResult(
+        generation_id=generation_id,
+        session_id=request.session_id,
+        skill_version=request.skill_version,
+        status="running",
+        output_dir=str(generation_dir),
+        created_at=started_at,
+        finished_at=started_at,
+        cases=list(case_results.values()),
+    )
+    _persist_result(generation_dir, initial)
+    _notify_progress(progress_callback, initial)
 
     for attempt in range(1, request.max_attempts + 1):
         if not pending:
+            break
+        if should_cancel and should_cancel():
+            for wb_case_id in pending:
+                case_results[wb_case_id].status = "cancelled"
+            pending = []
             break
         wb_run_id = f"attempt-{attempt:02d}"
         attempt_cases = [case_by_id[item] for item in pending]
@@ -508,9 +566,14 @@ def run_external_cases(request: ExternalRunRequest) -> ExternalBatchResult:
             if validation.valid:
                 case_result.status = "generated"
                 case_result.report = validation.report
-            elif attempt < request.max_attempts:
+            elif (
+                attempt < request.max_attempts
+                and not (should_cancel and should_cancel())
+            ):
                 case_result.status = "retrying"
                 retry_ids.append(wb_case_id)
+            elif should_cancel and should_cancel():
+                case_result.status = "cancelled"
             else:
                 case_result.status = "retry_exhausted"
 
@@ -526,6 +589,7 @@ def run_external_cases(request: ExternalRunRequest) -> ExternalBatchResult:
             cases=list(case_results.values()),
         )
         _persist_result(generation_dir, snapshot)
+        _notify_progress(progress_callback, snapshot)
 
     result = ExternalBatchResult(
         generation_id=generation_id,
@@ -538,4 +602,5 @@ def run_external_cases(request: ExternalRunRequest) -> ExternalBatchResult:
         cases=list(case_results.values()),
     )
     _persist_result(generation_dir, result)
+    _notify_progress(progress_callback, result)
     return result

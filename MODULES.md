@@ -109,6 +109,8 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 | GET | `/api/session?id=` | query id | 完整会话视图(见 `view()`) | `view(account)` |
 | GET | `/api/sample_data?id=/product=` | query | `{rows, labels, n}` | — |
 | GET | `/api/sessions` | — | `{sessions:[{id,product_id,requirement,current_version,n_versions,n_cases,created_at}]}` | — |
+| GET | `/api/generation/config` | — | WB 配置与 `ready/error` | `GenerationJobService.configuration` |
+| GET | `/api/generation?id=/session_id=` | query | 单任务或 Session 最近 20 个任务 | `GenerationJobService.get/list` |
 | POST | `/api/session` | `{requirement, product_id?}` | 会话视图 | `__init__` |
 | POST | `/api/data` | `{id, rows?/use_sample?, labels?}` | 会话视图 | `import_data` |
 | POST | `/api/labels` | `{id, version, labels:{case:{dim:score}}}` | 会话视图 | `submit_labels` |
@@ -119,6 +121,9 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 | POST | `/api/upload_report` | `{id, case_id, filename, content_b64, version?}` | 会话视图 | `import_output`(解析后) |
 | POST | `/api/submit_check_labels` | `{id, case_id, checks:{cid:met/partial/miss}, version?}` | 会话视图 | `submit_check_labels` |
 | POST | `/api/run_judge` | `{id, case_id, version?}` | 会话视图（需 `ANTHROPIC_API_KEY`+网络） | `set_judge_checks` |
+| POST | `/api/generation/start` | `{id, case_ids?, idempotency_key?}` | `202 {reused,job}` | `GenerationJobService.start` |
+| POST | `/api/generation/retry` | `{job_id,idempotency_key?}` | `202 {reused,job}` | `GenerationJobService.retry` |
+| POST | `/api/generation/cancel` | `{job_id}` | `202 {job}` | `GenerationJobService.cancel` |
 
 > "会话视图" = `Session.view(account)` 的返回结构（`session_core.py`）：`session_id/product_id/backend/detected/n_cases/splits/current_version/rubric/versions/curve/current_eval/current_failures/calib/check_calib/dims/dim_zh/target/can_advance/opt_history/history`。前端字段依赖以此为准。
 
@@ -153,6 +158,9 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 - `ground_truth`、rubric、人工/Judge 分不得进入 CaseSpec、workspace
   或生成 prompt。
 - `harness/workbuddy_batch/*` 是内部实现，协议调整需同步契约测试。
+- Web 侧只调用 façade；`generation_jobs.py` 负责异步 Job、Session 锁、
+  版本/hash 冻结和批量导入。
+- 当前 Phase A 使用固定 Skill 路径，只验证生成导入，不参与真实版本 Gate。
 
 ---
 
@@ -160,16 +168,17 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 
 为让 M3/M4 内部可并行，两个大文件已物理拆分。**其他人基于拆分后的结构开工。**
 
-### 4.1 `session.py`(原 635 行单类) → mixin 三分
-`Session` 拆成三个 mixin，`session.py` 组合成 `class Session(SessionCore, SessionEval, SessionLabel)`。**对外契约不变**：`server.py` 仍只用 `session_mod.Session(...)` 与 `Session.restore(...)`；`session.DIMS`/`_dims_from_rubric` 等模块级名字经 `session.py` 回导出。
+### 4.1 `session.py`(原 635 行单类) → 组合式 mixin
+`Session` 由 Core/Eval/Label/Generation 四个 mixin 组合。**对外契约不变**：`server.py` 仍只用 `session_mod.Session(...)` 与 `Session.restore(...)`；`session.DIMS`/`_dims_from_rubric` 等模块级名字经 `session.py` 回导出。
 
 | 文件 | mixin | 内容 |
 |---|---|---|
 | `session_core.py` | `SessionCore` | 状态骨架：`__init__`/`to_snapshot`/`_save`/`restore`/`view`/`_version_view`/`_split_counts` + 版本管理 `_add_version`/`_current`/`_human_for`/`_human_checks_for`；模块常量 `DIMS`/`DIM_ZH` 与 helper `_dims_from_rubric`/`_migrate_human_labels` |
 | `session_eval.py` | `SessionEval` | 跑分与推进：`import_data`/`evaluate`/`_apply_recorded`/`_rec_view`/`_output_summary`/`edit_rubric`/`advance`/`_plateau_note` |
 | `session_label.py` | `SessionLabel` | 标注与真实产物：`import_output`/`import_judgment`/`submit_labels`/`submit_check_labels`/`set_judge_checks`/`_norm_checks`/`_check_calibration` |
+| `session_generation.py` | `SessionGeneration` | WB 报告批量幂等导入：`import_generated_outputs` |
 
-方法解析顺序 = Core→Eval→Label（无重名遮蔽）。跨 mixin 调用（如 `core.view` 调 `eval._rec_view` + `label._check_calibration`）在组合类上运行时解析，正常。
+方法解析顺序 = Core→Eval→Label→Generation（无重名遮蔽）。跨 mixin 调用在组合类上运行时解析。
 
 ### 4.2 `index.html`(原 592 行) → 抽 `app.js`
 `<script>…</script>` 整体外移到 `app/app.js`，HTML 内改为 `<script src="/app.js"></script>`。`server.py do_GET` 加 `GET /app.js` 静态路由（`text/javascript`，公开不鉴权，与 `index.html` 一致）。

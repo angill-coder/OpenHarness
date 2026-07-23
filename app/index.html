@@ -41,6 +41,13 @@
   .ver-pill.rej{opacity:.5;text-decoration:line-through}
   .barwrap{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:2px}
   .bar{height:100%;background:var(--acc)}
+  .job-case{padding:7px 0;border-bottom:1px dashed var(--line)}
+  .job-case:last-child{border-bottom:0}
+  .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mut);margin-right:6px}
+  .status-dot.running,.status-dot.retrying,.status-dot.importing{background:var(--warn)}
+  .status-dot.generated,.status-dot.imported,.status-dot.completed{background:var(--ok)}
+  .status-dot.failed,.status-dot.retry_exhausted,.status-dot.interrupted{background:var(--bad)}
+  #generationConfig .kv span:last-child{max-width:70%;text-align:right;word-break:break-all}
   .kv{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dashed var(--line)}
   .flag{color:var(--bad);font-size:11px}
   .redline{color:var(--bad);font-weight:600}
@@ -147,6 +154,19 @@
     <div class="card step" id="skillCard">
       <h2>当前版本 · Skill</h2>
       <div id="skillView" class="small mut">—</div>
+    </div>
+
+    <div class="card step" id="realRunCard">
+      <h2><span class="n">▶</span>真实运行 · WB CLI</h2>
+      <p class="small mut">一键执行当前 Session 的全部 case；缺失报告自动重试最多 3 次，通过验收的报告会批量导入当前冻结版本。</p>
+      <div id="generationConfig" class="small mut">正在读取运行配置…</div>
+      <div class="row" style="margin-top:10px">
+        <button class="ok" id="runGenerationBtn" disabled>▶ 一键生成并导入报告</button>
+        <button class="ghost" id="retryGenerationBtn" style="display:none">↻ 仅重试失败 case</button>
+        <button class="ghost" id="cancelGenerationBtn" style="display:none">停止</button>
+      </div>
+      <div id="generationStatus" class="small" style="margin-top:10px"></div>
+      <div id="generationCases" class="small" style="margin-top:6px"></div>
     </div>
 
     <div class="card step" id="labelCard">

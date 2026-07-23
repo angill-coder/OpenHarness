@@ -62,6 +62,7 @@ class ExternalRunRequest:
     disallowed_tools: Tuple[str, ...] = ()
     environment: Dict[str, str] = field(default_factory=dict)
     case_map: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    openharness_case_ids: Tuple[str, ...] = ()
     auto_judge: bool = False
 
     def __post_init__(self) -> None:
@@ -98,6 +99,9 @@ class ExternalRunRequest:
         payload["allowed_material_roots"] = [
             str(item) for item in self.allowed_material_roots
         ]
+        payload["openharness_case_ids"] = list(
+            self.openharness_case_ids
+        )
         payload["command"] = list(self.command) if self.command else None
         # 环境变量可能含密钥，只落盘变量名。
         payload["environment"] = sorted(self.environment)
