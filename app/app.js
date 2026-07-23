@@ -17,7 +17,12 @@ async function api(path,method,body){
   const r=await fetch(path,opt);
   if(r.status===401){authWall();throw new Error('未登录');}
   const j=await r.json();
-  if(!r.ok){toast(j.error||('错误 '+r.status));throw new Error(j.error||r.status);}
+  if(!r.ok){
+    toast(j.error||('错误 '+r.status));
+    const err=new Error(j.error||String(r.status));
+    err.status=r.status;
+    throw err;
+  }
   return j;
 }
 // iOA 未登录/身份校验失败: 整页拦截提示(而非吞成普通 toast)
@@ -466,7 +471,16 @@ document.getElementById('refreshSessBtn').onclick=loadSessions;
     const me=await api('/api/me','GET');
     document.getElementById('userBadge').textContent='👤 '+(me.display_name||me.login_name);
   }catch(e){return;}   // 401 已由 authWall 拦截整页
-  try{GEN_CONFIG=await api('/api/generation/config','GET');}catch(e){GEN_CONFIG={ready:false,error:'无法读取 WB 运行配置'};}
+  try{
+    GEN_CONFIG=await api('/api/generation/config','GET');
+  }catch(e){
+    GEN_CONFIG={
+      ready:false,
+      error:e.status===404
+        ?'当前后端版本过旧：请停止并重新启动 server.py'
+        :('无法读取 WB 运行配置：'+(e.message||'未知错误'))
+    };
+  }
   renderGenerationPanel();
   await loadSessions();
   const qid=new URLSearchParams(location.search).get('id');
