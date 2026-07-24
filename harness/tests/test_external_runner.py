@@ -13,6 +13,8 @@ if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
 from external_run_models import ExternalRunRequest, ReportOutputContract
+from run_external import _parser
+from workbuddy_batch.models import BatchConfig
 from workbuddy_runner import (
     ExternalRunConfigurationError,
     run_external_cases,
@@ -20,6 +22,26 @@ from workbuddy_runner import (
 
 
 class ExternalRunnerTest(unittest.TestCase):
+    def test_default_parallelism_is_ten(self) -> None:
+        request = ExternalRunRequest(
+            case_file=Path("case.json"),
+            output_root=Path("generation_runs"),
+            skill_version="test-v1",
+            skill_name="research-report",
+        )
+        self.assertEqual(request.parallel, 10)
+        self.assertEqual(
+            BatchConfig(
+                command=("workbuddy",),
+                output_root=Path("generation_runs"),
+            ).parallel,
+            10,
+        )
+        self.assertEqual(
+            _parser().parse_args(["--dataset", "case.json"]).parallel,
+            10,
+        )
+
     def setUp(self) -> None:
         self._temporary = tempfile.TemporaryDirectory()
         self.root = Path(self._temporary.name)

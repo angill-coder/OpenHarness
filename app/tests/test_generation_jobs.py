@@ -189,6 +189,7 @@ class GenerationJobServiceTest(unittest.TestCase):
             settings.dataset_path,
             APP.parent / "data" / "data.json",
         )
+        self.assertEqual(settings.parallel, 10)
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
