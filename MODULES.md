@@ -113,19 +113,20 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 | GET | `/api/generation?id=/session_id=` | query | 单任务或 Session 最近 20 个任务 | `GenerationJobService.get/list` |
 | POST | `/api/session` | `{requirement, product_id?}` | 会话视图 | `__init__` |
 | POST | `/api/data` | `{id, rows?/use_sample?, labels?}` | 会话视图 | `import_data` |
-| POST | `/api/labels` | `{id, version, labels:{case:{dim:score}}}` | 会话视图 | `submit_labels` |
+| POST | `/api/labels` | — | `410`（人工评分入口已停用） | — |
 | POST | `/api/rubric` | `{id, weights?, target?}` | 会话视图 | `edit_rubric` |
 | POST | `/api/advance` | `{id}` | 会话视图 + `advance_result` | `advance` |
 | POST | `/api/import_output` | `{id, case_id, report_text, version?}` | 会话视图 | `import_output` |
 | POST | `/api/import_judgment` | `{id, case_id, scores:{dim:int}, reasoning?, version?}` | 会话视图 | `import_judgment` |
 | POST | `/api/upload_report` | `{id, case_id, filename, content_b64, version?}` | 会话视图 | `import_output`(解析后) |
-| POST | `/api/submit_check_labels` | `{id, case_id, checks:{cid:met/partial/miss}, version?}` | 会话视图 | `submit_check_labels` |
-| POST | `/api/run_judge` | `{id, case_id, version?}` | 会话视图（需 `ANTHROPIC_API_KEY`+网络） | `set_judge_checks` |
+| POST | `/api/submit_check_labels` | — | `410`（人工 Check 已停用） | — |
+| POST | `/api/run_judge` | — | `410`（单 case Judge 已停用） | — |
+| POST | `/api/run_judge_batch` | `{id, version?}` | `{summary,results,state}`（需 Judge key+网络） | `judge_cases` + `set_judge_checks_batch` |
 | POST | `/api/generation/start` | `{id, case_ids?, idempotency_key?}` | `202 {reused,job}` | `GenerationJobService.start` |
 | POST | `/api/generation/retry` | `{job_id,idempotency_key?}` | `202 {reused,job}` | `GenerationJobService.retry` |
 | POST | `/api/generation/cancel` | `{job_id}` | `202 {job}` | `GenerationJobService.cancel` |
 
-> "会话视图" = `Session.view(account)` 的返回结构（`session_core.py`）：`session_id/product_id/backend/detected/n_cases/splits/current_version/rubric/versions/curve/current_eval/current_failures/calib/check_calib/dims/dim_zh/target/can_advance/opt_history/history`。前端字段依赖以此为准。
+> "会话视图" = `Session.view(account)` 的返回结构（`session_core.py`）：`session_id/product_id/backend/detected/n_cases/splits/current_version/rubric/versions/curve/current_eval/current_failures/evaluation_mode/judge_progress/dims/dim_zh/target/can_advance/opt_history/history`。`calib/check_calib` 为兼容旧客户端保留但固定为 `null`。
 
 ---
 
@@ -142,8 +143,8 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 | `coverage` 覆盖度 | 0.08 | ≥4.0 | —(答不了的不算漏) | V1–V3 |
 | `expression` 表达(反向) | 0.15 | ≥3.8 | "不是,而是"/注水=2封顶 | E1–E5 |
 
-- overall 目标 **4.0**，校准门槛 **0.85**。gates: `red_line_traceability` / `no_regression` / `structure_guard` / `narrative_guard` / `hack_guard`。
-- checks 汇成一个 1–5 分（不单独打分、不改权重）。人读锚点见 `调研洞察汇报助手_Rubric落地文档.md`（须与 json 同步）。
+- overall 目标 **4.0**。gates: `red_line_traceability` / `no_regression` / `structure_guard` / `narrative_guard` / `hack_guard`。
+- 模型 Judge 逐条判 checks，再汇成一个 1–5 分（不单独改权重）。人工 Check 与 meta-eval 校准暂时停用。
 
 ### 契约 E — Runner ↔ WorkBuddy 真实外部执行
 

@@ -7,6 +7,7 @@ let DIMS=["data_accuracy","completeness","insight","conciseness"];
 let ZH={data_accuracy:"数据准确性",completeness:"完整性",insight:"洞察质量",conciseness:"简洁性"};
 let SID=null, STATE=null;
 let GEN_JOB=null, GEN_CONFIG=null, GEN_POLL=null;
+let JUDGE_SUMMARY=null, JUDGE_RESULTS=[], JUDGE_RUNNING=false;
 const GEN_TERMINAL_SEEN=new Set();
 
 function toast(m,ms=2600){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';
@@ -46,7 +47,7 @@ document.getElementById('genBtn').onclick=async()=>{
   if(!req){toast('请先填写需求描述');return;}
   const pid=document.getElementById('pidInput').value.trim();
   const j=await api('/api/session','POST',{requirement:req,product_id:pid});
-  SID=j.session_id; STATE=j; GEN_JOB=null; render();
+  SID=j.session_id; STATE=j; GEN_JOB=null; JUDGE_SUMMARY=null; JUDGE_RESULTS=[]; render();
   toast('已生成 V0：'+j.product_id);
 };
 
@@ -66,20 +67,7 @@ document.getElementById('importBtn').onclick=async()=>{
   const j=await api('/api/data','POST',{id:SID,rows}); STATE=j; render(); toast('已导入 '+j.n_cases+' 条');
 };
 
-// ---- 3. 提交标注 ----
-document.getElementById('labelSaveBtn').onclick=async()=>{
-  const labels={};
-  document.querySelectorAll('#labelTable input.score-in').forEach(inp=>{
-    const v=inp.value.trim(); if(v==='')return;
-    const [cid,dim]=inp.dataset.k.split('|');
-    (labels[cid]=labels[cid]||{})[dim]=parseInt(v);
-  });
-  if(!Object.keys(labels).length){toast('未填写任何分数');return;}
-  const j=await api('/api/labels','POST',{id:SID,version:STATE.current_version,labels});
-  STATE=j; render(); toast('已提交标注，校准已重算');
-};
-
-// ---- 4. 导入报告文本 ----
+// ---- 3. 导入/补充报告文本 ----
 document.getElementById('importOutBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0 并导入数据');return;}
   const cid=document.getElementById('outCaseSel').value;
@@ -91,7 +79,7 @@ document.getElementById('importOutBtn').onclick=async()=>{
   toast('已导入 '+cid+' 的报告（'+txt.length+' 字）');
 };
 
-// ---- 4a. 上传报告文件 ----
+// ---- 3a. 上传报告文件 ----
 document.getElementById('uploadBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0 并导入数据');return;}
   const cid=document.getElementById('outCaseSel').value;
@@ -112,28 +100,30 @@ document.getElementById('uploadBtn').onclick=async()=>{
   }catch(e){/* api() 已 toast 错误 */}
 };
 
-// ---- 4b. 提交人工逐 check 标注 ----
-document.getElementById('submitCheckBtn').onclick=async()=>{
-  if(!SID){toast('请先生成 V0 并导入数据');return;}
-  const cid=document.getElementById('outCaseSel').value;
-  if(!cid){toast('请选择 case');return;}
-  const checks={};
-  document.querySelectorAll('#checkPanel select.chk').forEach(s=>{if(s.value)checks[s.dataset.cid]=s.value;});
-  if(!Object.keys(checks).length){toast('至少标一条 check');return;}
-  const j=await api('/api/submit_check_labels','POST',{id:SID,version:STATE.current_version,case_id:cid,checks});
-  STATE=j; render(); toast('已提交 '+Object.keys(checks).length+' 条 check 标注');
-};
-
-// ---- 4c. 一键跑 Opus judge ----
+// ---- 3b. 一键批量跑模型 Judge ----
 document.getElementById('runJudgeBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0 并导入数据');return;}
-  const cid=document.getElementById('outCaseSel').value;
-  if(!cid){toast('请选择 case');return;}
-  toast('调用 Opus 4.8 判分中…（约十几秒）',9000);
+  const progress=STATE&&STATE.judge_progress;
+  if(!progress||progress.reports_ready!==progress.total_cases){
+    toast('请先生成或补齐当前版本全部 case 的报告');return;
+  }
+  JUDGE_RUNNING=true;renderJudgeStatus();
+  toast(`正在批量 Judge ${progress.reports_ready}/${progress.total_cases} 份报告…`,9000);
   try{
-    const j=await api('/api/run_judge','POST',{id:SID,version:STATE.current_version,case_id:cid});
-    STATE=j; render(); toast('judge 完成');
-  }catch(e){/* api() 已 toast 错误(如无 key) */}
+    const j=await api('/api/run_judge_batch','POST',{id:SID,version:STATE.current_version});
+    STATE=j.state;JUDGE_SUMMARY=j.summary;JUDGE_RESULTS=j.results||[];render();
+    const s=j.summary;
+    toast(
+      s.status==='completed'
+        ?`批量 Judge 完成：${s.judged_cases}/${s.total_cases}`
+        :`批量 Judge ${s.status}：成功 ${s.judged_cases}/${s.total_cases}`,
+      5200
+    );
+  }catch(e){
+    /* api() 已 toast 错误(如无 key) */
+  }finally{
+    JUDGE_RUNNING=false;renderJudgeStatus();
+  }
 };
 document.getElementById('rubricSaveBtn').onclick=async()=>{
   if(!STATE){return;}
@@ -247,9 +237,9 @@ function renderGenerationPanel(){
   run.disabled=!STATE||!STATE.n_cases||active||!GEN_CONFIG||!GEN_CONFIG.ready;
   retry.style.display=GEN_JOB&&!active&&GEN_JOB.failed_case_ids&&GEN_JOB.failed_case_ids.length?'':'none';
   cancel.style.display=active?'':'none';
-  document.getElementById('advanceBtn').disabled=!STATE||!STATE.can_advance||active;
+  document.getElementById('advanceBtn').disabled=!STATE||!STATE.can_advance||active||JUDGE_RUNNING;
   if(!GEN_JOB){
-    status.innerHTML='<span class="mut">尚未运行。成功报告只导入，不自动 Judge，也不推进版本。</span>';
+    status.innerHTML='<span class="mut">尚未运行。报告导入后，请在下方一键批量 Judge 全部 case。</span>';
     cases.innerHTML='';return;
   }
   const total=GEN_JOB.case_count||0, imported=GEN_JOB.imported_count||0;
@@ -272,13 +262,10 @@ function render(){
   if(!STATE)return;
   if(STATE.dims)DIMS=STATE.dims;
   if(STATE.dim_zh)ZH=STATE.dim_zh;
-  // 调研洞察产品:隐藏旧的第3步(六维直接打分),只用第4步逐check标注(维度分由check派生)
-  const isResearch = STATE.rubric && STATE.rubric.product==='research_insight';
-  document.getElementById('labelCard').style.display = isResearch ? 'none' : '';
   document.getElementById('backendBadge').textContent='backend: '+STATE.backend;
   document.getElementById('sessBadge').textContent='会话 '+STATE.session_id+' · '+STATE.product_id;
   document.getElementById('genRationale').innerHTML='<b>生成依据：</b><br>'+(STATE.gen_rationale||'').replace(/\n/g,'<br>');
-  ['dataCard','rubricCard','skillCard','realRunCard','labelCard','outputCard'].forEach(id=>document.getElementById(id).classList.add('active'));
+  ['dataCard','rubricCard','skillCard','realRunCard','outputCard'].forEach(id=>document.getElementById(id).classList.add('active'));
 
   // 版本 pills
   const pills=STATE.versions.map((v,i)=>{
@@ -288,7 +275,7 @@ function render(){
   }).join('');
   document.getElementById('versionPills').innerHTML = pills +
     `<div class="small mut" style="margin-top:6px">数据 ${STATE.n_cases} 条 ${JSON.stringify(STATE.splits)}</div>`;
-  document.getElementById('advanceBtn').disabled=!STATE.can_advance||generationActive();
+  document.getElementById('advanceBtn').disabled=!STATE.can_advance||generationActive()||JUDGE_RUNNING;
 
   // 当前 skill
   const cv=STATE.versions.find(v=>v.version===STATE.current_version);
@@ -301,95 +288,84 @@ function render(){
     ${cv.proposal?`<details><summary>本版来自的优化提议</summary><pre>${JSON.stringify(cv.proposal,null,2)}</pre></details>`:''}
     <details><summary>查看结构（flow / subagents，冻结）</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
 
-  renderLabels(); renderCalib(); renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard(); renderGenerationPanel();
+  renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard(); renderGenerationPanel();
 }
 
 function renderOutputCard(){
   const sel=document.getElementById('outCaseSel');
   if(!STATE.current_eval){sel.innerHTML='<option value="">导入数据后可选</option>';
-    document.getElementById('checkPanel').innerHTML='';document.getElementById('reportPreview').textContent='';return;}
+    document.getElementById('checkPanel').innerHTML='';document.getElementById('reportPreview').textContent='';
+    renderJudgeStatus();return;}
   const prev=sel.value;
   sel.innerHTML=STATE.current_eval.map(r=>{
     const has=r.report_text?' ✓报告':'';
-    const hh=(r.check_human&&Object.keys(r.check_human).length)?' ✓标注':'';
     const hj=(r.check_judge&&Object.keys(r.check_judge).length)?' ✓judge':'';
-    return `<option value="${r.case_id}">${r.case_id} (${r.split})${has}${hh}${hj}</option>`;
+    return `<option value="${r.case_id}">${r.case_id} (${r.split})${has}${hj}</option>`;
   }).join('');
   if(prev)sel.value=prev;
   sel.onchange=renderCheckPanel;
   renderCheckPanel();
+  renderJudgeStatus();
 }
 
-const CHK_NUM={met:1,partial:0.5,miss:0}, CHK_ZH={1:'满足',0.5:'部分',0:'不满足'};
+const CHK_ZH={1:'满足',0.5:'部分',0:'不满足'};
 function renderCheckPanel(){
   const cid=document.getElementById('outCaseSel').value;
   const el=document.getElementById('checkPanel'), pv=document.getElementById('reportPreview');
   if(!STATE.current_eval||!cid){el.innerHTML='';pv.textContent='';return;}
   const r=STATE.current_eval.find(x=>x.case_id===cid); if(!r){el.innerHTML='';return;}
   pv.innerHTML = r.report_text ? ('📄 报告已导入('+r.report_text.length+'字)') : '<span class="warn-txt">尚未导入报告</span>';
-  const rb=STATE.rubric, hc=r.check_human||{}, jc=r.check_judge||{}, jr=r.check_judge_reason||{};
-  const opts=(val)=>'<option value="">-</option>'+['met','partial','miss'].map(o=>
-    `<option value="${o}" ${val===CHK_NUM[o]?'selected':''}>${CHK_ZH[CHK_NUM[o]]}</option>`).join('');
+  const rb=STATE.rubric, jc=r.check_judge||{}, jr=r.check_judge_reason||{};
   let h='';
   rb.dimensions.forEach(d=>{
-    const dh=(r.dims_human||{})[d.name], dj=(r.dims_judge||{})[d.name];
-    h+=`<div style="margin:8px 0 2px"><b>${d.name_zh}</b> <span class="mut">人工 ${dh!=null?dh:'-'} / judge ${dj!=null?dj:'-'}</span></div>`;
+    const dj=(r.dims_judge||{})[d.name];
+    h+=`<div style="margin:8px 0 2px"><b>${d.name_zh}</b> <span class="mut">模型 Judge ${dj!=null?dj:'—'}</span></div>`;
     (d.checks||[]).forEach(c=>{
       const jv=jc[c.id], jvt=(jv==null?'—':CHK_ZH[jv]);
       h+=`<div class="kv" title="${(c.desc||'').replace(/"/g,'&quot;')}"><span>· ${c.label}${c.redline?' <span class="flag">红线</span>':''}</span>`+
-         `<span><select class="chk score-in" data-cid="${c.id}" style="width:64px">${opts(hc[c.id])}</select> `+
-         `<span class="mut" title="${(jr[c.id]||'').replace(/"/g,'&quot;')}">judge:${jvt}</span></span></div>`;
+         `<span class="mut" title="${(jr[c.id]||'').replace(/"/g,'&quot;')}">${jvt}</span></div>`;
     });
   });
+  if(!Object.keys(jc).length){
+    h='<div class="mut">该 case 尚未完成模型 Judge。</div>'+h;
+  }
   el.innerHTML=h;
+}
+
+function renderJudgeStatus(){
+  const el=document.getElementById('judgeStatus');
+  const btn=document.getElementById('runJudgeBtn');
+  if(!el||!btn)return;
+  const p=STATE&&STATE.judge_progress;
+  const allReports=!!(p&&p.total_cases&&p.reports_ready===p.total_cases);
+  btn.disabled=!allReports||generationActive()||JUDGE_RUNNING;
+  btn.textContent=JUDGE_RUNNING?'批量 Judge 执行中…':'▶ 批量 Judge 全部 case';
+  if(!p){
+    el.innerHTML='<span class="mut">导入数据后显示 Judge 状态。</span>';return;
+  }
+  const complete=p.complete;
+  el.innerHTML=`<div class="kv"><span>报告已就绪</span><span>${p.reports_ready}/${p.total_cases}</span></div>`+
+    `<div class="kv"><span>模型 Judge</span><b class="${complete?'ok-txt':p.judged_cases?'warn-txt':'mut'}">${p.judged_cases}/${p.total_cases}</b></div>`+
+    (!allReports?`<div class="warn-txt" style="margin-top:5px">仍缺 ${p.total_cases-p.reports_ready} 份报告，请先重试 WB CLI 或手工补齐。</div>`:'')+
+    (complete?'<div class="ok-txt" style="margin-top:5px">全部 case 已完成模型 Judge，可以生成下一版 Skill。</div>':'')+
+    (JUDGE_SUMMARY&&JUDGE_SUMMARY.failed_cases
+      ?`<div class="warn-txt" style="margin-top:5px">最近一次批量 Judge 有 ${JUDGE_SUMMARY.failed_cases} 个 case 未成功，可再次点击整批重跑。</div>`+
+       JUDGE_RESULTS.filter(x=>x.status!=='judged').map(x=>
+         `<div class="mut">${esc(x.case_id)}：${esc(x.error||x.status)}</div>`).join('')
+      :'');
 }
 function cv_structure(){ // 结构从 rubric 无关, 取 v0 的展示(结构冻结, 各版一致)
   return {flow:["Intake","DataAnalyst→findings","Insight→insights","Writer→draft","Verifier(独立)","Format"],
           subagents:["DataAnalyst","Insight","Writer","Verifier(独立对抗)"],memory:["config","facts","learned_rules"]};
 }
 
-function renderLabels(){
-  const el=document.getElementById('labelTable');
-  if(!STATE.current_eval){el.innerHTML='<span class="mut">导入数据后显示</span>';document.getElementById('labelSaveBtn').disabled=true;return;}
-  document.getElementById('labelSaveBtn').disabled=false;
-  let h='<table><tr><th>case</th><th>split</th><th>judge</th><th>报告</th><th>问题/flag</th>'+DIMS.map(d=>`<th>${ZH[d]}</th>`).join('')+'</tr>';
-  STATE.current_eval.forEach(r=>{
-    const src=r.score_source==='recorded'?'<span class="ok-txt" title="平台 LLM-judge 真实评分">真</span>':'<span class="mut" title="mock 占位分">mock</span>';
-    const js=DIMS.map(d=>r.scores[d]).join('/')+' <span class="small">'+src+'</span>';
-    const flags=(r.red_line?'<span class="redline">红线</span> ':'')+(r.flagged||[]).filter(f=>!f.startsWith('RED_LINE')).map(f=>`<span class="flag">${f}</span>`).join(' ');
-    const rep=r.report_text?`<span class="ok-txt" title="${r.report_text.slice(0,400).replace(/"/g,'&quot;')}">📄已导入</span>`:'<span class="mut">—</span>';
-    const hl=r.human_label||{};
-    let tds='';DIMS.forEach(d=>{tds+=`<td><input class="score-in" data-k="${r.case_id}|${d}" value="${hl[d]!=null?hl[d]:''}" placeholder="${r.scores[d]}"></td>`;});
-    h+=`<tr><td title="${JSON.stringify(r.output_summary).replace(/"/g,'&quot;')}">${r.case_id}</td><td class="mut">${r.split}</td><td>${js}</td><td>${rep}</td><td>${flags||'<span class="mut">—</span>'}</td>${tds}</tr>`;
-  });
-  h+='</table><div class="small mut" style="margin-top:6px">灰色为 judge 分（placeholder），填入你的人工分即可覆盖。悬停 case 看输出摘要。</div>';
-  el.innerHTML=h;
-}
-
-function renderCalib(){
-  const c=STATE.calib; const el=document.getElementById('calibView');
-  if(!c){el.innerHTML='<span class="mut">导入数据后显示</span>';return;}
-  const pass=c.passes_gate;
-  el.innerHTML=`
-    <div class="kv"><span>整体一致率</span><b class="${pass?'ok-txt':'warn-txt'}">${fmt(c.overall,3)}</b></div>
-    <div class="kv"><span>门槛</span><span>${c.gate}</span></div>
-    <div class="kv"><span>状态</span><b class="${pass?'ok-txt':'warn-txt'}">${pass?'PASS ✅ 可开优化':'FAIL ❌ 先校准 judge'}</b></div>
-    <div class="kv"><span>已标注</span><span>${c.n_labeled} 条</span></div>
-    <div class="small mut" style="margin-top:6px">分维度：${DIMS.map(d=>`${ZH[d]} ${fmt(c.per_dim[d],2)}`).join(' · ')}</div>
-    ${c.worst_rate<1?`<div class="small mut">最弱：${ZH[c.worst_dim]||c.worst_dim} (${fmt(c.worst_rate,2)}) — 该补锚点/反例</div>`:''}`;
-  // 逐 check 校准(真实标注线:人工 check vs Opus judge check)
-  const cc=STATE.check_calib;
-  if(cc && cc.overall!=null){
-    el.innerHTML += `<hr style="border-color:var(--line);margin:8px 0"><div class="kv"><span><b>逐 check 一致率</b>(人工 vs Opus)</span><b class="${cc.overall>=0.85?'ok-txt':'warn-txt'}">${fmt(cc.overall,3)}</b></div>`+
-      `<div class="small mut">对比 ${cc.n_case_pairs} 个 case、${cc.n_checks_compared} 条 check</div>`+
-      (cc.worst&&cc.worst.length?`<div class="small mut">最不一致：${cc.worst.filter(w=>w[1]<1).map(w=>w[0]+' '+fmt(w[1],2)).join(' · ')||'（都一致）'}</div>`:'');
-  } else {
-    el.innerHTML += `<hr style="border-color:var(--line);margin:8px 0"><div class="small mut">逐 check 校准：待同一 case 上「人工 check 标注」和「跑 judge」都完成后显示。</div>`;
-  }
-}
-
 function renderCurve(){
   const el=document.getElementById('curveView');
+  const jp=STATE.judge_progress;
+  if(jp&&jp.required&&!jp.complete){
+    el.innerHTML=`<span class="mut">等待当前版本完成批量模型 Judge（${jp.judged_cases}/${jp.total_cases}）。完成前不展示 mock 占位分。</span>`;
+    return;
+  }
   if(!STATE.curve||!STATE.curve.length||!STATE.curve[0].dev){el.innerHTML='<span class="mut">导入数据后显示</span>';return;}
   let h='<table><tr><th>版本</th>'+DIMS.map(d=>`<th>${ZH[d]}</th>`).join('')+'<th>overall</th><th>红线</th></tr>';
   STATE.curve.forEach(pt=>{
@@ -406,6 +382,10 @@ function renderCurve(){
 
 function renderFail(){
   const el=document.getElementById('failView'); const f=STATE.current_failures;
+  const jp=STATE.judge_progress;
+  if(jp&&jp.required&&!jp.complete){
+    el.innerHTML='<span class="mut">批量模型 Judge 完成后再生成失败聚类。</span>';return;
+  }
   if(!f){el.innerHTML='<span class="mut">导入数据后显示</span>';return;}
   if(!f.length){el.innerHTML='<span class="ok-txt">当前无失败聚类 🎉</span>';return;}
   el.innerHTML=f.map(p=>`<div style="margin-bottom:8px">
@@ -428,7 +408,6 @@ function renderRubric(){
   el.innerHTML=`<div class="kv"><span>rubric 版本</span><b>${rb.version}</b></div>`+
     rubricDimsHtml(rb)+
     `<div class="kv" style="margin-top:6px"><span>overall 目标</span><b class="ok-txt">≥${(rb.target&&rb.target.overall)||'-'}</b></div>`+
-    `<div class="kv"><span>校准门槛</span><b>${(rb.target&&rb.target.judge_human_agreement)||0.85}</b></div>`+
     `<details><summary>gates</summary><pre>${JSON.stringify(rb.gates,null,1)}</pre></details>`;
 }
 
@@ -442,10 +421,10 @@ function renderRubricEditor(){
   const erb=document.getElementById('editorRubricBody'); if(erb)erb.innerHTML=rubricDimsHtml(rb);
 }
 
-const EV_ZH={created:"生成 V0",import_data:"导入数据",submit_labels:"人工标注",
+const EV_ZH={created:"生成 V0",import_data:"导入数据",submit_labels:"历史人工标注",
   edit_rubric:"编辑 rubric",version_adopted:"采纳新版",version_rejected:"版本被拒",
   converged:"收敛/平台期",import_output:"导入报告文本",import_judgment:"导入LLM评分",
-  generation_import:"WB 批量导入"};
+  generation_import:"WB 批量导入",run_judge_batch:"批量模型 Judge"};
 // ---- 打开已有会话 ----
 async function loadSessions(){
   try{
@@ -460,7 +439,8 @@ async function loadSessions(){
 async function openSession(id){
   if(!id)return;
   const j=await api('/api/session?id='+encodeURIComponent(id),'GET');
-  SID=id; STATE=j; GEN_JOB=null; render(); await loadLatestGeneration(); toast('已打开会话 '+id);
+  SID=id; STATE=j; GEN_JOB=null; JUDGE_SUMMARY=null; JUDGE_RESULTS=[]; JUDGE_RUNNING=false;
+  render(); await loadLatestGeneration(); toast('已打开会话 '+id);
 }
 document.getElementById('openSessBtn').onclick=()=>openSession(document.getElementById('sessSel').value);
 document.getElementById('refreshSessBtn').onclick=loadSessions;

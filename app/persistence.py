@@ -134,6 +134,24 @@ def append_check_judgment(sid: str, version: str, case_id: str,
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def append_check_judgments(sid: str, version: str, judgments: Dict[str, Dict]):
+    """一次追加一批模型逐-check判分，减少批量 Judge 的重复文件开关。"""
+    if not judgments:
+        return
+    d = _ensure(sid)
+    now = _now()
+    with open(os.path.join(d, "check_judgments.jsonl"), "a", encoding="utf-8") as f:
+        for case_id, judgment in judgments.items():
+            rec = {
+                "ts": now,
+                "version": version,
+                "case_id": case_id,
+                "checks": judgment.get("checks", {}),
+                "reasoning": judgment.get("reasoning", {}),
+            }
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
 # ---------------- 读 ----------------
 def list_session_ids() -> List[str]:
     if not os.path.isdir(_BASE):
