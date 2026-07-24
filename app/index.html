@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenHarness · Skill 标注与迭代平台</title>
+<title>OpenHarness · Skill 评测与迭代平台</title>
 <style>
   :root{--bg:#0f1216;--panel:#1a1f27;--panel2:#232a34;--line:#333c48;--fg:#e6e9ee;--mut:#9aa4b2;
         --acc:#4f9cf5;--ok:#3ecf8e;--warn:#f5a742;--bad:#f56b6b;--chip:#2b3644;}
@@ -41,6 +41,13 @@
   .ver-pill.rej{opacity:.5;text-decoration:line-through}
   .barwrap{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:2px}
   .bar{height:100%;background:var(--acc)}
+  .job-case{padding:7px 0;border-bottom:1px dashed var(--line)}
+  .job-case:last-child{border-bottom:0}
+  .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mut);margin-right:6px}
+  .status-dot.running,.status-dot.retrying,.status-dot.importing{background:var(--warn)}
+  .status-dot.generated,.status-dot.imported,.status-dot.completed{background:var(--ok)}
+  .status-dot.failed,.status-dot.retry_exhausted,.status-dot.interrupted{background:var(--bad)}
+  #generationConfig .kv span:last-child{max-width:70%;text-align:right;word-break:break-all}
   .kv{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dashed var(--line)}
   .flag{color:var(--bad);font-size:11px}
   .redline{color:var(--bad);font-weight:600}
@@ -51,24 +58,21 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);
        border:1px solid var(--acc);padding:10px 18px;border-radius:8px;z-index:9;max-width:70%}
   details summary{cursor:pointer;color:var(--acc);font-size:12px;margin-top:6px}
-  /* 打印：白底黑字、聚焦中列专家人工标注表、字体放大，供专家打印核对 */
+  /* 打印：白底黑字、聚焦报告与模型 Judge 结果 */
   @media print{
     body{background:#fff;color:#000}
     header .badge{display:none}
     .wrap{display:block;height:auto}
     .col{overflow:visible;padding:0}
-    .col.left,.col.right{display:none}          /* 只打印中列的标注表 */
+    .col.left,.col.right{display:none}
     .col.mid{width:100%}
     button,#advanceBox,#skillCard,input[type=file],textarea,details{display:none}
     .card{background:#fff;border:1px solid #000;break-inside:avoid;margin-bottom:12px}
     .card h2,label,.mut,.small,th,td{color:#000 !important}
-    /* 标注区整体放大、全黑 */
-    #labelCard,#outputCard,#checkPanel,#labelTable{font-size:15px !important;color:#000 !important}
-    #labelCard table th,#labelCard table td,
+    /* Judge 结果区整体放大、全黑 */
+    #outputCard,#checkPanel{font-size:15px !important;color:#000 !important}
     #outputCard table th,#outputCard table td,
-    #checkPanel table th,#checkPanel table td,
-    #labelTable th,#labelTable td{font-size:14px !important;color:#000 !important;border-color:#000 !important}
-    /* 下拉/输入的当前值(满足/部分/不满足、分数)打印为黑字白底 */
+    #checkPanel table th,#checkPanel table td{font-size:14px !important;color:#000 !important;border-color:#000 !important}
     select,input,.score-in,.chip{color:#000 !important;background:#fff !important;border-color:#000 !important}
   }
 </style>
@@ -76,7 +80,7 @@
 <body>
 <header>
   <h1>OpenHarness</h1>
-  <span class="badge">Skill 标注与迭代平台</span>
+  <span class="badge">Skill 评测与迭代平台</span>
   <span class="badge" id="backendBadge">backend: -</span>
   <span class="badge" id="sessBadge">未创建会话</span>
   <span class="badge" id="userBadge" style="margin-left:auto">👤 —</span>
@@ -133,7 +137,7 @@
     </div>
   </div>
 
-  <!-- 中列: 当前版本 skill+rubric + 标注 -->
+  <!-- 中列: 当前版本 skill + 真实报告 + 模型 Judge -->
   <div class="col mid">
     <div class="card">
       <h2>版本演进</h2>
@@ -149,19 +153,22 @@
       <div id="skillView" class="small mut">—</div>
     </div>
 
-    <div class="card step" id="labelCard">
-      <h2><span class="n">3</span>人工标注（当前版本每个 case）</h2>
-      <p class="small mut">给每个 case 分维度打 1–5 分。标注后校准一致率会更新；满意了再点"生成下一版"。</p>
-      <div id="labelTable"></div>
+    <div class="card step" id="realRunCard">
+      <h2><span class="n">▶</span>真实运行 · WB CLI</h2>
+      <p class="small mut">一键执行当前 Session 的全部 case；缺失报告自动重试最多 3 次，通过验收的报告会批量导入当前冻结版本。</p>
+      <div id="generationConfig" class="small mut">正在读取运行配置…</div>
       <div class="row" style="margin-top:10px">
-        <button class="ok" id="labelSaveBtn" disabled>提交标注并重算校准</button>
-        <span id="labelInfo" class="small mut"></span>
+        <button class="ok" id="runGenerationBtn" disabled>▶ 一键生成并导入报告</button>
+        <button class="ghost" id="retryGenerationBtn" style="display:none">↻ 仅重试失败 case</button>
+        <button class="ghost" id="cancelGenerationBtn" style="display:none">停止</button>
       </div>
+      <div id="generationStatus" class="small" style="margin-top:10px"></div>
+      <div id="generationCases" class="small" style="margin-top:6px"></div>
     </div>
 
     <div class="card step" id="outputCard">
-      <h2><span class="n">4</span>导入报告 + 逐 check 标注</h2>
-      <p class="small mut">选 case → 上传/粘贴报告 → 你逐条 check 标 满足/部分/不满足;可一键让 Opus judge 也逐条判,右列出逐 check 一致率。</p>
+      <h2><span class="n">3</span>报告与批量模型 Judge</h2>
+      <p class="small mut">WB CLI 会批量导入报告；也可在这里手工补充单个报告。点击一次即可并发 Judge 当前版本全部 case，每个 case 使用独立 Prompt。</p>
       <label>选择 case</label>
       <select id="outCaseSel"></select>
 
@@ -177,20 +184,15 @@
       </div>
 
       <div class="row" style="margin-top:12px">
-        <button id="runJudgeBtn">▶ 跑 judge(Opus 4.8)</button>
-        <button class="ok" id="submitCheckBtn">提交人工 check 标注</button>
-        <span id="checkInfo" class="small mut"></span>
+        <button class="ok" id="runJudgeBtn">▶ 批量 Judge 全部 case</button>
       </div>
+      <div id="judgeStatus" class="small" style="margin-top:8px"></div>
       <div id="checkPanel" class="small" style="margin-top:8px"></div>
     </div>
   </div>
 
   <!-- 右列: 看板 -->
   <div class="col right">
-    <div class="card">
-      <h2>Judge 校准（meta-eval）</h2>
-      <div id="calibView" class="small mut">—</div>
-    </div>
     <div class="card">
       <h2>分数曲线（每版）</h2>
       <div id="curveView" class="small mut">—</div>

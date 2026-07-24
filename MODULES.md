@@ -21,6 +21,7 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 ┌─ harness/  离线引擎（纯 stdlib、确定性）——「算法闭环」
 │    schemas → store → runner → judge → calibration → clustering → optimizer → loop → dashboard
 │    backend.py（Mock / ResearchMock / Recorded 三后端）
+│    workbuddy_runner.py → workbuddy_batch/*（真实外部报告生成）
 │    artifacts/rubric*.json（评测尺子）
 │
 ├─ app/  Web 平台（stdlib http + 单页 JS）——「运行时 / 人在环」
@@ -36,7 +37,7 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 
 ---
 
-## 2. 六模块划分
+## 2. 七模块划分
 
 | 模块 | 职责 | 主要文件 | owner 画像 |
 |---|---|---|---|
@@ -46,6 +47,7 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 | **M4 前端 UI** | 单页三栏交互、标注表、打印 | `app/index.html`（结构+样式） + `app/app.js`（逻辑） | 前端 |
 | **M5 Rubric 与数据资产** | 六维尺子、数据集、校准集、坏变体 | `harness/artifacts/rubric_research.json`、`调研…落地文档.md`、`data/research_assistant/*` | **用户本人（不可外包）** |
 | **M6 生成 skill 母本** | 下属实际用的 research-report skill | `skills/research-report/*` | 用户 + 提示词工程 |
+| **M7 真实外部执行** | Runner→WorkBuddy、产物验收、attempt 重试、provenance | `harness/{workbuddy_runner,external_run_models,report_artifact,run_external}.py` + `harness/workbuddy_batch/*` | 执行框架/基础设施 |
 
 > M3 内部拆分后可 2–3 人并行（core/eval/label 各一 owner，共享 `Session` 组合类）；M4 拆分后 UI（HTML/CSS）与逻辑（JS）可分人。
 
@@ -107,18 +109,24 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 | GET | `/api/session?id=` | query id | 完整会话视图(见 `view()`) | `view(account)` |
 | GET | `/api/sample_data?id=/product=` | query | `{rows, labels, n}` | — |
 | GET | `/api/sessions` | — | `{sessions:[{id,product_id,requirement,current_version,n_versions,n_cases,created_at}]}` | — |
+| GET | `/api/generation/config` | — | WB 配置与 `ready/error` | `GenerationJobService.configuration` |
+| GET | `/api/generation?id=/session_id=` | query | 单任务或 Session 最近 20 个任务 | `GenerationJobService.get/list` |
 | POST | `/api/session` | `{requirement, product_id?}` | 会话视图 | `__init__` |
 | POST | `/api/data` | `{id, rows?/use_sample?, labels?}` | 会话视图 | `import_data` |
-| POST | `/api/labels` | `{id, version, labels:{case:{dim:score}}}` | 会话视图 | `submit_labels` |
+| POST | `/api/labels` | — | `410`（人工评分入口已停用） | — |
 | POST | `/api/rubric` | `{id, weights?, target?}` | 会话视图 | `edit_rubric` |
 | POST | `/api/advance` | `{id}` | 会话视图 + `advance_result` | `advance` |
 | POST | `/api/import_output` | `{id, case_id, report_text, version?}` | 会话视图 | `import_output` |
 | POST | `/api/import_judgment` | `{id, case_id, scores:{dim:int}, reasoning?, version?}` | 会话视图 | `import_judgment` |
 | POST | `/api/upload_report` | `{id, case_id, filename, content_b64, version?}` | 会话视图 | `import_output`(解析后) |
-| POST | `/api/submit_check_labels` | `{id, case_id, checks:{cid:met/partial/miss}, version?}` | 会话视图 | `submit_check_labels` |
-| POST | `/api/run_judge` | `{id, case_id, version?}` | 会话视图（需 `ANTHROPIC_API_KEY`+网络） | `set_judge_checks` |
+| POST | `/api/submit_check_labels` | — | `410`（人工 Check 已停用） | — |
+| POST | `/api/run_judge` | — | `410`（单 case Judge 已停用） | — |
+| POST | `/api/run_judge_batch` | `{id, version?}` | `{summary,results,state}`（需 Judge key+网络） | `judge_cases` + `set_judge_checks_batch` |
+| POST | `/api/generation/start` | `{id, case_ids?, idempotency_key?}` | `202 {reused,job}` | `GenerationJobService.start` |
+| POST | `/api/generation/retry` | `{job_id,idempotency_key?}` | `202 {reused,job}` | `GenerationJobService.retry` |
+| POST | `/api/generation/cancel` | `{job_id}` | `202 {job}` | `GenerationJobService.cancel` |
 
-> "会话视图" = `Session.view(account)` 的返回结构（`session_core.py`）：`session_id/product_id/backend/detected/n_cases/splits/current_version/rubric/versions/curve/current_eval/current_failures/calib/check_calib/dims/dim_zh/target/can_advance/opt_history/history`。前端字段依赖以此为准。
+> "会话视图" = `Session.view(account)` 的返回结构（`session_core.py`）：`session_id/product_id/backend/detected/n_cases/splits/current_version/rubric/versions/curve/current_eval/current_failures/evaluation_mode/judge_progress/dims/dim_zh/target/can_advance/opt_history/history`。`calib/check_calib` 为兼容旧客户端保留但固定为 `null`。
 
 ---
 
@@ -135,8 +143,25 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 | `coverage` 覆盖度 | 0.08 | ≥4.0 | —(答不了的不算漏) | V1–V3 |
 | `expression` 表达(反向) | 0.15 | ≥3.8 | "不是,而是"/注水=2封顶 | E1–E5 |
 
-- overall 目标 **4.0**，校准门槛 **0.85**。gates: `red_line_traceability` / `no_regression` / `structure_guard` / `narrative_guard` / `hack_guard`。
-- checks 汇成一个 1–5 分（不单独打分、不改权重）。人读锚点见 `调研洞察汇报助手_Rubric落地文档.md`（须与 json 同步）。
+- overall 目标 **4.0**。gates: `red_line_traceability` / `no_regression` / `structure_guard` / `narrative_guard` / `hack_guard`。
+- 模型 Judge 逐条判 checks，再汇成一个 1–5 分（不单独改权重）。人工 Check 与 meta-eval 校准暂时停用。
+
+### 契约 E — Runner ↔ WorkBuddy 真实外部执行
+
+- 对外唯一入口：`harness.runner.run_external_cases(ExternalRunRequest)`。
+- `ExternalRunRequest`/`ExternalBatchResult` 定义在
+  `harness/external_run_models.py`；字段变更按跨模块契约处理。
+- `harness/workbuddy_runner.py` 是唯一 façade；Session、Web 和 Loop
+  不得直接 import `workbuddy_batch`。
+- WB `repetition=1`；无有效报告的条件重试由 façade 负责。
+- `status=success` 不代表报告成功；只有 `report_artifact.py` 验收通过
+  才能进入 import/Judge。
+- `ground_truth`、rubric、人工/Judge 分不得进入 CaseSpec、workspace
+  或生成 prompt。
+- `harness/workbuddy_batch/*` 是内部实现，协议调整需同步契约测试。
+- Web 侧只调用 façade；`generation_jobs.py` 负责异步 Job、Session 锁、
+  版本/hash 冻结和批量导入。
+- 当前 Phase A 使用固定 Skill 路径，只验证生成导入，不参与真实版本 Gate。
 
 ---
 
@@ -144,16 +169,17 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 
 为让 M3/M4 内部可并行，两个大文件已物理拆分。**其他人基于拆分后的结构开工。**
 
-### 4.1 `session.py`(原 635 行单类) → mixin 三分
-`Session` 拆成三个 mixin，`session.py` 组合成 `class Session(SessionCore, SessionEval, SessionLabel)`。**对外契约不变**：`server.py` 仍只用 `session_mod.Session(...)` 与 `Session.restore(...)`；`session.DIMS`/`_dims_from_rubric` 等模块级名字经 `session.py` 回导出。
+### 4.1 `session.py`(原 635 行单类) → 组合式 mixin
+`Session` 由 Core/Eval/Label/Generation 四个 mixin 组合。**对外契约不变**：`server.py` 仍只用 `session_mod.Session(...)` 与 `Session.restore(...)`；`session.DIMS`/`_dims_from_rubric` 等模块级名字经 `session.py` 回导出。
 
 | 文件 | mixin | 内容 |
 |---|---|---|
 | `session_core.py` | `SessionCore` | 状态骨架：`__init__`/`to_snapshot`/`_save`/`restore`/`view`/`_version_view`/`_split_counts` + 版本管理 `_add_version`/`_current`/`_human_for`/`_human_checks_for`；模块常量 `DIMS`/`DIM_ZH` 与 helper `_dims_from_rubric`/`_migrate_human_labels` |
 | `session_eval.py` | `SessionEval` | 跑分与推进：`import_data`/`evaluate`/`_apply_recorded`/`_rec_view`/`_output_summary`/`edit_rubric`/`advance`/`_plateau_note` |
 | `session_label.py` | `SessionLabel` | 标注与真实产物：`import_output`/`import_judgment`/`submit_labels`/`submit_check_labels`/`set_judge_checks`/`_norm_checks`/`_check_calibration` |
+| `session_generation.py` | `SessionGeneration` | WB 报告批量幂等导入：`import_generated_outputs` |
 
-方法解析顺序 = Core→Eval→Label（无重名遮蔽）。跨 mixin 调用（如 `core.view` 调 `eval._rec_view` + `label._check_calibration`）在组合类上运行时解析，正常。
+方法解析顺序 = Core→Eval→Label→Generation（无重名遮蔽）。跨 mixin 调用在组合类上运行时解析。
 
 ### 4.2 `index.html`(原 592 行) → 抽 `app.js`
 `<script>…</script>` 整体外移到 `app/app.js`，HTML 内改为 `<script src="/app.js"></script>`。`server.py do_GET` 加 `GET /app.js` 静态路由（`text/javascript`，公开不鉴权，与 `index.html` 一致）。
@@ -167,6 +193,7 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 - **分支策略**：按模块开短生命周期分支 `feat/m1-judge`、`feat/m3-server`、`feat/m4-ui` 等。**M2↔M1 的成对契约改动（signal↔judge 锚点）放同一分支同一 PR。**
 - **验收闸门（写进 PR 模板）**：
   - 改 `harness/*`：跑 `run_demo_research.py`(六维) + `run_demo.py`(防旧产品回归)——这俩是 M1/M2 的 CI 试金石。
+  - 改 M7：额外跑 `python -m unittest discover -s harness/tests -p 'test_*.py' -v`。
   - 改 `app/session*.py`：`python3 -c "import session"` + restore 一个真实会话 + `advance` 冒烟。
   - 改 `app/app.js`：`node --check app/app.js`。
   - 改 `rubric_research.json` / `sessions/*/state.json`：重启 server 复核。

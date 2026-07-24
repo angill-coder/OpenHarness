@@ -7,12 +7,11 @@ Session 已按职责拆成三个 mixin, 由 session.py 组合成 class Session(S
   __init__          —— 从需求生成 v0 skill+rubric, 建立会话
   to_snapshot/_save —— 序列化 durable 输入, 落盘
   restore           —— 从快照重建并重算派生量
-  view              —— 汇总当前会话状态给页面(组装派生量 + 按账号叠加人工分)
+  view              —— 汇总当前会话状态给页面(纯模型 Judge 模式)
   版本管理           —— _add_version / _current / _human_for / _human_checks_for
 
 本文件是模块级常量与 helper(_dims_from_rubric / _migrate_human_labels)的所有者。
 """
-import copy
 import sys
 import os
 from typing import Any, Dict, List, Optional
@@ -23,7 +22,6 @@ if HARNESS not in sys.path:
 
 from schemas import SkillArtifact, EvalRecord   # noqa: E402,F401
 import backend as backend_mod                    # noqa: E402
-import calibration as calibration_mod             # noqa: E402
 
 import generator as generator_mod                 # noqa: E402
 import persistence as persist                      # noqa: E402
@@ -87,6 +85,7 @@ class SessionCore:
         self.report_judgments: Dict[str, Dict[str, Dict]] = {}  # {version: {case_id: {scores,reasoning,flagged}}} 平台LLM-judge
         self.human_checks: Dict[str, Dict[str, Dict[str, float]]] = {}   # {version:{case:{check_id:1/0.5/0}}} 专家逐check
         self.judge_checks: Dict[str, Dict[str, Dict]] = {}   # {version:{case:{checks,reasoning}}} Opus逐check
+        self.generation_imports: Dict[str, Dict[str, str]] = {}
 
         self._add_version(v0, adopted=True, proposal=None)
 
@@ -137,6 +136,7 @@ class SessionCore:
             "opt_history": self.opt_history,
             "cases": self.cases,
             "human_labels": self.human_labels,
+            "generation_imports": self.generation_imports,
             "versions": [{
                 "skill": v["skill"].to_dict(), "adopted": v["adopted"], "proposal": v["proposal"],
             } for v in self.versions],
@@ -162,6 +162,7 @@ class SessionCore:
         self.report_judgments = persist.load_judgments(self.id)  # 真实报告的 LLM-judge 评分由 judgments.jsonl 恢复
         self.human_checks = persist.load_check_labels(self.id)   # 逐check人工标注由 check_labels.jsonl 恢复
         self.judge_checks = persist.load_check_judgments(self.id)  # 逐check judge 由 check_judgments.jsonl 恢复
+        self.generation_imports = snap.get("generation_imports", {})
         self.failure_history = []
         self.versions = []
         for vd in snap["versions"]:
@@ -192,14 +193,33 @@ class SessionCore:
         adopted = [v for v in self.versions if v["adopted"]]
         cur = self._current()
         recs = cur.get("_recs") or []
-        # 按当前账号叠加人工分, 现算 eval 行与校准(不写共享缓存, 线程安全)
-        current_eval = [self._rec_view(r, account) for r in recs]
-        acc_recs = []
-        for r in recs:
-            rr = copy.copy(r)
-            rr.human_label = self._rec_view(r, account).get("human_label")
-            acc_recs.append(rr)
-        calib = calibration_mod.agreement(acc_recs, self.rubric) if recs else None
+        # Web 流程已切换为纯模型 Judge；旧人工标注仍可恢复，但不再参与视图和门禁。
+        current_eval = [self._rec_view(r, None) for r in recs]
+        version = cur["version"]
+        case_ids = {str(case["case_id"]) for case in self.cases}
+        reports = self.report_outputs.get(version, {})
+        check_judgments = self.judge_checks.get(version, {})
+        direct_judgments = self.report_judgments.get(version, {})
+        reports_ready = {
+            case_id for case_id in case_ids if (reports.get(case_id) or "").strip()
+        }
+        judged = {
+            case_id
+            for case_id in case_ids
+            if (check_judgments.get(case_id) or {}).get("checks")
+            or case_id in direct_judgments
+        }
+        requires_model_judge = self.rubric.get("product") == "research_insight"
+        judge_complete = bool(case_ids) and judged == case_ids
+        judge_progress = {
+            "required": requires_model_judge,
+            "complete": judge_complete,
+            "total_cases": len(case_ids),
+            "reports_ready": len(reports_ready),
+            "judged_cases": len(judged),
+            "missing_report_case_ids": sorted(case_ids - reports_ready),
+            "pending_judge_case_ids": sorted(case_ids - judged),
+        }
         return {
             "session_id": self.id,
             "requirement": self.requirement,
@@ -217,11 +237,16 @@ class SessionCore:
                       for v in adopted],
             "current_eval": current_eval,
             "current_failures": cur["failures"],
-            "calib": calib,
-            "check_calib": self._check_calibration(cur["version"], account),
+            "evaluation_mode": "model_only",
+            "judge_progress": judge_progress,
+            # 保留字段形状，避免旧客户端崩溃；人工校准能力已停用。
+            "calib": None,
+            "check_calib": None,
             "dims": self.dims, "dim_zh": self.dim_zh,
             "target": self.rubric["target"],
-            "can_advance": bool(self.cases),
+            "can_advance": bool(self.cases) and (
+                not requires_model_judge or judge_complete
+            ),
             "opt_history": self.opt_history,
             "history": persist.load_events(self.id),
         }

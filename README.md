@@ -6,15 +6,15 @@
 
 ## 是什么
 
-闭环：**Runner → Judge（LLM-as-judge，需人工标注做 meta-eval 校准）→ 失败聚类 → Optimizer（反思式改写）→ 版本化 Store → 回归看板**。
+闭环：**Runner → 批量模型 Judge（LLM-as-judge）→ 失败聚类 → Optimizer（反思式改写）→ 版本化 Store → 回归看板**。
 
-铁律：结构定质量上限（flow/subagent schema 由人设对，优化器不动结构）；rubric 与数据是杠杆、不能外包；judge 校准一致率 ≥0.85 才允许开优化器。
+铁律：结构定质量上限（flow/subagent schema 由人设对，优化器不动结构）；rubric 与数据是杠杆、不能外包；真实调研会话必须全部 case 完成模型 Judge 才允许开优化器。
 
 ## 两大件
 
 - **`harness/`** — 离线引擎（纯 stdlib、确定性）：`schemas` · `store` · `runner` · `judge` · `calibration` · `clustering` · `optimizer` · `loop` · `dashboard` · `backend`(Mock/ResearchMock/Recorded 三后端) · `artifacts/rubric*.json`(评测尺子)。
-- **`app/`** — Web 平台（stdlib http + 单页 JS，人在环运行时）：
-  - `server.py`(路由/鉴权入口) · `session.py`(组合入口) + `session_core.py`/`session_eval.py`/`session_label.py`(会话编排三 mixin) · `persistence.py`(落盘) · `generator.py`(需求→v0) · `auth.py`(iOA 鉴权)
+- **`app/`** — Web 平台（stdlib http + 单页 JS，批量生成与模型评测运行时）：
+  - `server.py`(路由/鉴权入口) · `session.py`(组合入口) + `session_core.py`/`session_eval.py`/`session_label.py`/`session_generation.py`(会话编排) · `generation_jobs.py`(WB 后台任务) · `judge_batch.py`(批量模型 Judge) · `persistence.py`(落盘) · `generator.py`(需求→v0) · `auth.py`(iOA 鉴权)
   - `index.html`(单页 UI 结构+样式) + `app.js`(前端逻辑)
 
 ## 怎么跑
@@ -22,7 +22,8 @@
 ```bash
 # 平台(默认 8080)。判分 LLM key 走 start_real.sh(gitignored, 含密钥, 勿提交)
 cd app && source ./start_real.sh && python3 server.py --host 0.0.0.0 --port 8080
-# 浏览器打开 → 左上"打开已有会话"选 research-run(跑优化器) / real-eval(校准/逐check标注)
+# 浏览器打开 → 导入 case → “真实运行 · WB CLI”批量生成并导入报告
+# 然后点击“批量 Judge 全部 case”，全部完成后再生成下一版 Skill
 
 # 离线自测闭环(无需 key)
 cd harness && python3 run_demo_research.py   # 六维: dev overall 2.17→4.56, 采纳 15 版
@@ -39,7 +40,8 @@ cd harness && python3 run_demo.py            # 旧算数字产品, 防回归: 2.
 
 1. 改 `rubric_research.json` / `sessions/*/state.json` 后**必须重启 server** 才生效。
 2. 改 `app/app.js` 后先 `node --check app/app.js`。
-3. mock vs recorded 泾渭分明：优化器需 mock signals；recorded 真实报告 signals 为空 → 直接"收敛"（跑优化器用 research-run，校准用贴了真实报告的会话）。
+3. mock vs recorded 泾渭分明：Web UI 在模型 Judge 未覆盖全部 case 前不展示 mock 占位曲线，也不允许推进真实调研版本。
+4. 当前一键 WB 运行使用固定 `skills/research-report`，已冻结 Session 版本/hash，但尚未把每版 `SkillArtifact` 渲染为可执行 Skill；因此只用于生成导入链路，不可作为真实版本 Gate。
 
 ## 注意
 

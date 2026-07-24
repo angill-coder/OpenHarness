@@ -106,6 +106,43 @@ class SessionLabel:
         self._save()
         return self.view(account)
 
+    def set_judge_checks_batch(self, judgments, version=None, account=None):
+        """批量存模型逐-check判分，只重评和落盘一次。
+
+        ``judgments`` 形如
+        ``{case_id: {"checks": {...}, "reasoning": {...}}}``。
+        无有效判分时不改变 Session。
+        """
+        version = version or self._current()["version"]
+        valid_case_ids = {case["case_id"] for case in self.cases}
+        clean_batch = {}
+        for case_id, judgment in (judgments or {}).items():
+            if case_id not in valid_case_ids:
+                continue
+            clean = self._norm_checks((judgment or {}).get("checks"))
+            if not clean:
+                continue
+            clean_batch[case_id] = {
+                "checks": clean,
+                "reasoning": (judgment or {}).get("reasoning") or {},
+            }
+        if not clean_batch:
+            return {"error": "批量 Judge 未产出有效评分"}
+        self.judge_checks.setdefault(version, {}).update(clean_batch)
+        persist.append_check_judgments(self.id, version, clean_batch)
+        persist.append_event(
+            self.id,
+            "run_judge_batch",
+            {
+                "version": version,
+                "case_ids": list(clean_batch),
+                "n_cases": len(clean_batch),
+            },
+        )
+        self.evaluate(account)
+        self._save()
+        return self.view(account)
+
     def _check_calibration(self, version, account=None):
         """逐 check 一致率:同 case 上 当前账号人工 vs judge 每条 check 桶匹配(完全一致=agree)。"""
         hc_all = self._human_checks_for(version, account)
