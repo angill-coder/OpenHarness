@@ -122,7 +122,7 @@ document.getElementById('runJudgeBtn').onclick=async()=>{
   }catch(e){
     /* api() 已 toast 错误(如无 key) */
   }finally{
-    JUDGE_RUNNING=false;renderJudgeStatus();
+    JUDGE_RUNNING=false;render();
   }
 };
 document.getElementById('rubricSaveBtn').onclick=async()=>{

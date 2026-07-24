@@ -61,7 +61,7 @@ class GenerationSettings:
     skill_path: Optional[Path] = None
     skill_name: Optional[str] = None
     model: Optional[str] = "deepseek-v4-pro"
-    parallel: int = 3
+    parallel: int = 10
     max_report_retries: int = 3
     timeout_seconds: float = 900.0
     stall_timeout_seconds: float = 180.0
@@ -76,7 +76,7 @@ class GenerationSettings:
         dataset = Path(
             os.environ.get(
                 "OPENHARNESS_WB_DATASET",
-                str(ROOT.parent / "case.json"),
+                str(ROOT / "data" / "data.json"),
             )
         )
         output = Path(
@@ -109,7 +109,7 @@ class GenerationSettings:
                 "deepseek-v4-pro",
             )
             or None,
-            parallel=_env_int("OPENHARNESS_WB_PARALLEL", 3),
+            parallel=_env_int("OPENHARNESS_WB_PARALLEL", 10),
             max_report_retries=_env_int(
                 "OPENHARNESS_WB_MAX_REPORT_RETRIES",
                 3,
@@ -467,7 +467,7 @@ class GenerationJobService:
         missing_dataset = sorted(set(requested) - set(dataset))
         if missing_dataset:
             raise GenerationJobError(
-                "case.json 缺少这些 Session case 的映射: "
+                "data.json 缺少这些 Session case 的映射: "
                 + ", ".join(missing_dataset)
             )
 
