@@ -76,7 +76,7 @@ class GenerationSettings:
         dataset = Path(
             os.environ.get(
                 "OPENHARNESS_WB_DATASET",
-                str(ROOT.parent / "case.json"),
+                str(ROOT / "data.json"),
             )
         )
         output = Path(
@@ -467,7 +467,7 @@ class GenerationJobService:
         missing_dataset = sorted(set(requested) - set(dataset))
         if missing_dataset:
             raise GenerationJobError(
-                "case.json 缺少这些 Session case 的映射: "
+                "data.json 缺少这些 Session case 的映射: "
                 + ", ".join(missing_dataset)
             )
 

@@ -8,6 +8,7 @@ import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 APP = Path(__file__).resolve().parents[1]
 HARNESS = APP.parent / "harness"
@@ -180,6 +181,11 @@ class GenerationJobServiceTest(unittest.TestCase):
     def tearDown(self):
         persist._BASE = self.old_base
         self.tmp.cleanup()
+
+    def test_default_dataset_path_is_repository_local_data_json(self):
+        with patch.dict("os.environ", {}, clear=True):
+            settings = GenerationSettings.from_env()
+        self.assertEqual(settings.dataset_path, APP.parent / "data.json")
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
