@@ -76,7 +76,7 @@ class GenerationSettings:
         dataset = Path(
             os.environ.get(
                 "OPENHARNESS_WB_DATASET",
-                str(ROOT / "data.json"),
+                str(ROOT / "data" / "data.json"),
             )
         )
         output = Path(

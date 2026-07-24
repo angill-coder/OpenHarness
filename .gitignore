@@ -10,7 +10,6 @@ __pycache__/
 .DS_Store
 .env
 data/
-/data.json
 .learnings/
 
 # WorkBuddy 真实生成 trace/workspace（体积大，仅本地保留）

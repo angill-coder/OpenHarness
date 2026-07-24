@@ -185,7 +185,10 @@ class GenerationJobServiceTest(unittest.TestCase):
     def test_default_dataset_path_is_repository_local_data_json(self):
         with patch.dict("os.environ", {}, clear=True):
             settings = GenerationSettings.from_env()
-        self.assertEqual(settings.dataset_path, APP.parent / "data.json")
+        self.assertEqual(
+            settings.dataset_path,
+            APP.parent / "data" / "data.json",
+        )
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
