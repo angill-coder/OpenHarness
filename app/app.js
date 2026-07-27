@@ -119,7 +119,6 @@ document.getElementById('runJudgeBtn').onclick=async()=>{
   const parallel=readParallel(
     'judgeParallel',
     GEN_CONFIG&&GEN_CONFIG.judge_parallel,
-    GEN_CONFIG&&GEN_CONFIG.judge_max_parallel,
     'Judge'
   );
   if(parallel==null)return;
@@ -175,12 +174,11 @@ const GEN_STATUS_ZH={
 function generationActive(){
   return !!(GEN_JOB&&GEN_JOB.active);
 }
-function readParallel(id,fallback,maximum,label){
+function readParallel(id,fallback,label){
   const input=document.getElementById(id);
   const value=Number(input&&input.value||fallback);
-  const max=Number(maximum)||value;
-  if(!Number.isInteger(value)||value<1||value>max){
-    toast(`${label}并发必须是 1-${max} 的整数`);
+  if(!Number.isInteger(value)||value<1){
+    toast(`${label}并发必须是大于等于 1 的整数`);
     return null;
   }
   return value;
@@ -222,7 +220,6 @@ document.getElementById('runGenerationBtn').onclick=async()=>{
   const parallel=readParallel(
     'generationParallel',
     GEN_CONFIG&&GEN_CONFIG.parallel,
-    GEN_CONFIG&&GEN_CONFIG.max_parallel,
     '报告生成'
   );
   if(parallel==null)return;
@@ -270,13 +267,12 @@ function renderGenerationPanel(){
     cfg.innerHTML='<span class="warn-txt">运行配置不可用：'+esc(GEN_CONFIG.error)+'</span>';
   }else{
     cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>启动时编译当前 Session 版本</span></div>`+
-      `<div class="kv"><span>模型 / 默认并发 / 上限</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel} / ${GEN_CONFIG.max_parallel}</span></div>`+
+      `<div class="kv"><span>模型 / 默认并发</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel}</span></div>`+
       `<div class="kv"><span>报告重试</span><span>最多额外 ${GEN_CONFIG.max_report_retries} 次</span></div>`+
       `<div class="small mut" style="margin-top:5px">每个任务冻结完整 Skill 目录、版本和哈希，WB CLI 只执行该副本。</div>`;
   }
   const active=generationActive();
   if(parallelInput&&GEN_CONFIG){
-    parallelInput.max=GEN_CONFIG.max_parallel||GEN_CONFIG.parallel;
     if(!parallelInput.dataset.initialized){
       parallelInput.value=GEN_CONFIG.parallel;
       parallelInput.dataset.initialized='1';
@@ -284,7 +280,6 @@ function renderGenerationPanel(){
     parallelInput.disabled=active||!GEN_CONFIG.ready;
   }
   if(judgeParallelInput&&GEN_CONFIG){
-    judgeParallelInput.max=GEN_CONFIG.judge_max_parallel||GEN_CONFIG.judge_parallel;
     if(!judgeParallelInput.dataset.initialized){
       judgeParallelInput.value=GEN_CONFIG.judge_parallel;
       judgeParallelInput.dataset.initialized='1';
@@ -404,7 +399,6 @@ function renderJudgeStatus(){
   const action=STATE&&STATE.actions&&STATE.actions.run_judge;
   const parallelInput=document.getElementById('judgeParallel');
   if(parallelInput&&GEN_CONFIG){
-    parallelInput.max=GEN_CONFIG.judge_max_parallel||GEN_CONFIG.judge_parallel;
     if(!parallelInput.dataset.initialized){
       parallelInput.value=GEN_CONFIG.judge_parallel;
       parallelInput.dataset.initialized='1';

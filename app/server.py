@@ -194,23 +194,7 @@ def _extract_json(text: str):
         return None
 
 
-def _judge_max_parallelism():
-    try:
-        return max(
-            1,
-            int(
-                os.environ.get(
-                    "OPENHARNESS_JUDGE_MAX_PARALLEL",
-                    "20",
-                )
-            ),
-        )
-    except ValueError:
-        return 20
-
-
 def _judge_parallelism(requested=None):
-    maximum = _judge_max_parallelism()
     value = (
         os.environ.get("OPENHARNESS_JUDGE_PARALLEL", "20")
         if requested is None
@@ -224,12 +208,8 @@ def _judge_parallelism(requested=None):
         parallel = int(value)
     except (TypeError, ValueError) as exc:
         raise ValueError("Judge 并发必须是整数") from exc
-    if requested is None:
-        return max(1, min(parallel, maximum))
-    if not 1 <= parallel <= maximum:
-        raise ValueError(
-            "Judge 并发必须在 1-%s 之间" % maximum
-        )
+    if parallel < 1:
+        raise ValueError("Judge 并发必须至少为 1")
     return parallel
 
 
@@ -376,7 +356,6 @@ class Handler(BaseHTTPRequestHandler):
             payload.update(
                 {
                     "judge_parallel": _judge_parallelism(),
-                    "judge_max_parallel": _judge_max_parallelism(),
                 }
             )
             return self._send(200, payload)

@@ -197,7 +197,6 @@ class GenerationJobServiceTest(unittest.TestCase):
             ),
         )
         self.assertEqual(settings.parallel, 20)
-        self.assertEqual(settings.max_parallel, 60)
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
@@ -290,14 +289,11 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertEqual(done.parallel, 1)
         self.assertEqual(fake.requests[0].parallel, 1)
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "1-60",
-        ):
+        with self.assertRaisesRegex(ValueError, "至少为 1"):
             service.start(
                 "test-session",
                 "tester",
-                parallel=61,
+                parallel=0,
             )
 
     def test_partial_job_can_retry_only_failed_case(self):
