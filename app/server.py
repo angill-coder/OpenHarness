@@ -10,7 +10,7 @@ API:
   GET  /                      -> index.html
   POST /api/session           {requirement, product_id?}  -> 建会话, 生成 v0 skill+rubric
   GET  /api/session?id=       -> 当前会话完整状态
-  POST /api/data              {id, rows?, use_sample?, labels?}  -> 导入数据(或用内置样例)
+  POST /api/data              {id, rows?, use_sample?, use_configured?} -> 导入数据
   POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
   POST /api/advance           {id}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
@@ -45,6 +45,7 @@ from generation_jobs import (  # noqa: E402
     GenerationJobService,
 )
 from judge_batch import judge_cases  # noqa: E402
+from workbuddy_batch.dataset import load_openharness_rows  # noqa: E402
 # import auth as auth_mod  # [鉴权已临时关闭·本地测试] 恢复时取消注释
 
 ROOT = os.path.dirname(HERE)
@@ -122,18 +123,25 @@ def _parse_report(filename: str, raw: bytes) -> str:
     return raw.decode("utf-8", "ignore")   # md / txt / 其它当纯文本
 
 
-def _build_judge_prompt(rubric, report_text, ground_truth) -> str:
+def _build_judge_prompt(rubric, report_text, case_context) -> str:
     """组装逐 check 判分提示词:列出所有 check,要求对每条判 met/partial/miss + 理由。"""
-    L = ["你是严格的调研报告评审。给定【报告正文】+【答案键 ground_truth】+ 下面逐条 check,",
+    L = ["你是严格的调研报告评审。根据【任务信息】【报告正文】和下面逐条 check，",
          "对**每一条 check** 判 met(满足)/partial(部分)/miss(不满足)。",
-         "**凡涉及有没有编造/漏答/引噪音/口径,一律拿答案键核对——报告说的 ≠ 事实,以答案键为准。**",
+         "只能依据报告中呈现的证据、引用和内部一致性判断；"
+         "不得把未提供的信息当成已核实事实。",
          "", "## 逐条 check(每条都要打分)"]
     for d in rubric["dimensions"]:
         for c in d.get("checks", []):
             rl = " [红线]" if c.get("redline") else ""
             L.append("- %s(%s·%s%s): %s | 触发降档: %s" % (
-                c["id"], d["name_zh"], c["label"], rl, c.get("desc", ""), c.get("effect", "")))
-    L += ["", "## 答案键 ground_truth", json.dumps(ground_truth, ensure_ascii=False),
+                c["id"],
+                d.get("name_zh", d.get("name", "")),
+                c.get("label", c["id"]),
+                rl,
+                c.get("desc", ""),
+                c.get("effect", ""),
+            ))
+    L += ["", "## 任务信息", json.dumps(case_context, ensure_ascii=False),
           "", "## 报告正文", report_text or "(空)",
           "", "## 输出(只输出严格 JSON,不要多余文字):",
           '{"checks":{"T1":"met","T2":"miss", ...每条 check 都要},',
@@ -416,10 +424,38 @@ class Handler(BaseHTTPRequestHandler):
             rows = b.get("rows")
             if b.get("use_sample"):
                 rows, _legacy_labels = _load_sample(s.rubric.get("product"))
+            if b.get("use_configured"):
+                if GENERATION_SERVICE is None:
+                    return self._send(
+                        503,
+                        {"error": "GenerationJobService 尚未初始化"},
+                    )
+                try:
+                    rows = load_openharness_rows(
+                        GENERATION_SERVICE.settings.dataset_path
+                        .expanduser()
+                        .resolve()
+                    )
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    return self._send(
+                        400,
+                        {"error": "配置数据集无法导入: %s" % exc},
+                    )
             if not rows:
-                return self._send(400, {"error": "无数据行; 传 rows 或 use_sample=true"})
-            with _session_lock(s.id):
-                result = s.import_data(rows, None, account=acct)
+                return self._send(
+                    400,
+                    {
+                        "error": (
+                            "无数据行; 传 rows、use_sample=true "
+                            "或 use_configured=true"
+                        )
+                    },
+                )
+            try:
+                with _session_lock(s.id):
+                    result = s.import_data(rows, None, account=acct)
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
             return self._send(200, result)
 
         if u.path == "/api/labels":

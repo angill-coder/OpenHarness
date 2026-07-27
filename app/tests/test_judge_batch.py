@@ -15,6 +15,7 @@ for path in (str(APP), str(HARNESS)):
 
 from judge_batch import judge_cases  # noqa: E402
 import persistence as persist  # noqa: E402
+from server import _build_judge_prompt  # noqa: E402
 from session import Session  # noqa: E402
 
 
@@ -31,9 +32,9 @@ RUBRIC = {
 }
 
 
-def build_prompt(_rubric, report, ground_truth):
+def build_prompt(_rubric, report, case_context):
     return json.dumps(
-        {"report": report, "ground_truth": ground_truth},
+        {"report": report, "case_context": case_context},
         ensure_ascii=False,
     )
 
@@ -43,6 +44,16 @@ def extract_json(text):
 
 
 class JudgeBatchTest(unittest.TestCase):
+    def test_server_prompt_is_report_only(self):
+        prompt = _build_judge_prompt(
+            RUBRIC,
+            "report",
+            {"case_id": "case-a", "input": {"brief": "A"}},
+        )
+        self.assertNotIn("ground_truth", prompt)
+        self.assertNotIn("答案键", prompt)
+        self.assertIn("任务信息", prompt)
+
     def test_judges_all_cases_and_preserves_dataset_order(self):
         cases = [
             {"case_id": "case-a", "ground_truth": {"answer": "A"}},
@@ -74,6 +85,39 @@ class JudgeBatchTest(unittest.TestCase):
         )
         self.assertEqual([item["status"] for item in results], ["judged", "judged"])
         self.assertEqual(results[1]["checks"]["Q1"], "miss")
+
+    def test_prompt_context_excludes_ground_truth(self):
+        prompts = []
+
+        def call_model(prompt):
+            prompts.append(json.loads(prompt))
+            return json.dumps(
+                {
+                    "checks": {"Q1": "met", "Q2": "met"},
+                    "reasoning": {},
+                }
+            )
+
+        judge_cases(
+            [
+                {
+                    "case_id": "case-a",
+                    "input": {"brief": "A"},
+                    "ground_truth": {"secret": "answer"},
+                }
+            ],
+            {"case-a": "report-a"},
+            RUBRIC,
+            build_prompt,
+            call_model,
+            extract_json,
+        )
+
+        self.assertNotIn("ground_truth", prompts[0])
+        self.assertEqual(
+            prompts[0]["case_context"]["input"],
+            {"brief": "A"},
+        )
 
     def test_missing_report_and_model_error_do_not_abort_batch(self):
         cases = [

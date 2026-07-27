@@ -76,7 +76,12 @@ class GenerationSettings:
         dataset = Path(
             os.environ.get(
                 "OPENHARNESS_WB_DATASET",
-                str(ROOT / "data" / "data.json"),
+                str(
+                    ROOT
+                    / "data"
+                    / "20260724_test_data"
+                    / "data.json"
+                ),
             )
         )
         output = Path(
@@ -225,6 +230,14 @@ def _directory_hash(path: Optional[Path]) -> Optional[str]:
     return digest.hexdigest()
 
 
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.expanduser().resolve().open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _skill_for_version(session, version: str):
     adopted = [
         item
@@ -322,9 +335,17 @@ class GenerationJobService:
             ) from exc
         index = {}
         for case in cases:
+            is_unified = (
+                case.metadata.get("dataset_schema_version")
+                == "openharness-wb/v1"
+            )
             case_id = str(
-                case.metadata.get("openharness_case_id")
-                or case.case_id
+                case.case_id
+                if is_unified
+                else (
+                    case.metadata.get("openharness_case_id")
+                    or case.case_id
+                )
             )
             if case_id in index:
                 raise GenerationJobError(
@@ -506,6 +527,9 @@ class GenerationJobService:
             stall_timeout_seconds=self.settings.stall_timeout_seconds,
             created_at=now,
             updated_at=now,
+            dataset_sha256=_file_hash(
+                self.settings.dataset_path
+            ),
             cases=[
                 GenerationCaseState(
                     case_id=case_id,
@@ -581,7 +605,7 @@ class GenerationJobService:
 
     def _request_for(self, job: GenerationJob) -> ExternalRunRequest:
         return ExternalRunRequest(
-            case_file=self.settings.dataset_path,
+            case_file=Path(job.dataset_path),
             output_root=self.settings.output_root,
             skill_version=job.skill_version,
             session_id=job.session_id,
@@ -599,7 +623,7 @@ class GenerationJobService:
             workbuddy_home=self.settings.workbuddy_home,
             product_config=self.settings.product_config,
             allowed_material_roots=(
-                self.settings.dataset_path.expanduser().resolve().parent,
+                Path(job.dataset_path).expanduser().resolve().parent,
             ),
             openharness_case_ids=tuple(
                 item.case_id for item in job.cases
@@ -646,6 +670,14 @@ class GenerationJobService:
                     job.status = "running"
                     job.started_at = time.time()
                     self._persist(job)
+                if (
+                    job.dataset_sha256 is not None
+                    and _file_hash(Path(job.dataset_path))
+                    != job.dataset_sha256
+                ):
+                    raise GenerationJobError(
+                        "数据集在任务启动后发生变化，拒绝执行"
+                    )
 
                 result = self.runner_func(
                     self._request_for(job),
@@ -668,6 +700,14 @@ class GenerationJobService:
                 if session is None:
                     raise GenerationJobError(
                         "生成完成，但 Session 已不存在"
+                    )
+                if (
+                    job.dataset_sha256 is not None
+                    and _file_hash(Path(job.dataset_path))
+                    != job.dataset_sha256
+                ):
+                    raise GenerationJobError(
+                        "数据集在任务期间发生变化，拒绝自动导入"
                     )
                 if (
                     job.execution_skill_hash is not None

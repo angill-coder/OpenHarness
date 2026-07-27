@@ -26,6 +26,7 @@ import runner as runner_mod                         # noqa: E402
 import judge as judge_mod                           # noqa: E402
 import clustering as clustering_mod                 # noqa: E402
 import optimizer as optimizer_mod                   # noqa: E402
+from workbuddy_batch.dataset import openharness_rows  # noqa: E402
 
 import persistence as persist                        # noqa: E402
 
@@ -35,17 +36,24 @@ class SessionEval:
 
     # ---------- 数据导入 ----------
     def import_data(self, rows: List[Dict[str, Any]], labels: Optional[List[Dict]] = None, account=None):
-        # 校验最小字段(算数字型认 ground_truth_findings; 调研洞察认 ground_truth)
+        # 同一份 openharness-wb/v1 JSON 同时服务 WB 生成和平台评测。
+        # 旧数组/JSONL 在迁移期仍可读取，但不再静默跳过坏数据。
+        normalized = openharness_rows(rows)
         is_research = self.rubric.get("product") == "research_insight"
         clean = []
-        for r in rows:
-            if "case_id" not in r or "input" not in r:
-                continue
-            if is_research and "ground_truth" not in r:
-                continue
+        for source in normalized:
+            r = copy.deepcopy(source)
             if not is_research and "ground_truth_findings" not in r:
-                continue
+                raise ValueError(
+                    "算数字型 case %s 缺少 ground_truth_findings"
+                    % r["case_id"]
+                )
             r.setdefault("split", "dev")
+            if r["split"] not in {"train", "dev", "test"}:
+                raise ValueError(
+                    "case %s 的 split 非法: %s"
+                    % (r["case_id"], r["split"])
+                )
             r.setdefault("hard_case_tags", [])
             r.setdefault("required_sections", [])
             r.setdefault("audience", self.detected.get("audience", "exec"))

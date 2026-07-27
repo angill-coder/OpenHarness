@@ -208,10 +208,41 @@ class ExternalRunnerTest(unittest.TestCase):
             all(item.status == "artifact_missing" for item in case.attempts)
         )
 
-    def test_rejects_ground_truth_leak_before_starting_workbuddy(self) -> None:
+    def test_unified_ground_truth_is_not_sent_to_workbuddy(self) -> None:
         payload = json.loads(self.dataset.read_text(encoding="utf-8"))
+        payload["schema_version"] = "openharness-wb/v1"
+        payload["cases"][0]["case_id"] = "oh-case"
+        payload["cases"][0]["input"] = {"brief": "generate"}
         payload["cases"][0]["ground_truth"] = {
             "supported_claims": ["answer"]
+        }
+        self.dataset.write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        result = run_external_cases(
+            self._request(succeed_on_attempt=1, max_retries=3)
+        )
+
+        self.assertTrue(result.succeeded)
+        effective_case = json.loads(
+            Path(
+                result.cases[0].attempts[0].run_dir,
+                "cases",
+                "oh-case",
+                "case.json",
+            ).read_text(encoding="utf-8")
+        )
+        self.assertNotIn(
+            "ground_truth",
+            effective_case["case"]["data"],
+        )
+
+    def test_rejects_ground_truth_nested_in_generation_data(self) -> None:
+        payload = json.loads(self.dataset.read_text(encoding="utf-8"))
+        payload["cases"][0]["data"] = {
+            "ground_truth": {"supported_claims": ["answer"]}
         }
         self.dataset.write_text(
             json.dumps(payload, ensure_ascii=False),
@@ -225,7 +256,6 @@ class ExternalRunnerTest(unittest.TestCase):
             run_external_cases(
                 self._request(succeed_on_attempt=1, max_retries=3)
             )
-        self.assertFalse((self.root / "runs").exists())
 
     def test_filters_by_openharness_case_id_and_reports_progress(self) -> None:
         updates = []

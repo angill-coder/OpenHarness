@@ -76,11 +76,14 @@ def judge_cases(
                 "status": "missing_report",
                 "error": "当前版本尚未导入报告",
             }
-        ground_truth = case.get("ground_truth")
-        if ground_truth is None:
-            ground_truth = case.get("ground_truth_findings", {})
+        case_context = {
+            "case_id": case_id,
+            "input": case.get("input") or {},
+            "audience": case.get("audience"),
+            "required_sections": case.get("required_sections") or [],
+        }
         try:
-            raw = call_model(build_prompt(rubric, report, ground_truth))
+            raw = call_model(build_prompt(rubric, report, case_context))
             parsed = extract_json(raw)
             checks, reasoning = _validate_payload(parsed, expected)
             return index, {

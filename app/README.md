@@ -17,7 +17,7 @@ python3 server.py                 # 默认 http://127.0.0.1:8080
 默认配置已经对应当前仓库；需要覆盖时设置：
 
 ```bash
-export OPENHARNESS_WB_DATASET=../data/data.json
+export OPENHARNESS_WB_DATASET=../data/20260724_test_data/data.json
 export OPENHARNESS_WB_SKILL_PATH=../skills/research-report
 export OPENHARNESS_WB_MODEL=deepseek-v4-pro
 export OPENHARNESS_WB_PARALLEL=10
@@ -47,7 +47,7 @@ export LLM_API_STYLE=anthropic          # 第三方 OpenAI 兼容网关填 opena
 export OPENHARNESS_JUDGE_PARALLEL=3     # 默认 3，最大 8
 ```
 
-默认读取仓库内的 `data/data.json`；该文件已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查生效配置。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
+默认读取仓库内的 `data/20260724_test_data/data.json`；该文件已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查生效配置。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
 
 > 内置样例：算数字型读 `data/report_assistant/dataset.jsonl`（没有先跑 `python3 ../data/report_assistant/build_dataset.py`）；调研洞察型读 `data/research_assistant/dataset.sample.jsonl`。「用内置样例」按钮按会话产品自动选。
 
@@ -63,7 +63,7 @@ export OPENHARNESS_JUDGE_PARALLEL=3     # 默认 3，最大 8
 ## 页面输入（左列自上而下）
 
 1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。平台识别产品/受众、产出**第一版 v0 skill（结构+指令+memory）+ 一版 rubric**（directive 全关，作为优化起跑线）。
-2. **导入数据**：点「用内置样例数据集」，或粘贴 JSONL/JSON 数组。每条 case 需含 `case_id` / `input` / 答案键（算数字型 `ground_truth_findings`；调研洞察 `ground_truth`）。
+2. **导入数据**：调研报告可直接点「加载当前 WB 数据集」，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `ground_truth` 保留为空，不参与模型 Judge。
 3. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；无有效报告自动额外重试 3 次，成功报告批量导入冻结版本。
 4. **批量模型 Judge**：点击「批量 Judge 全部 case」。系统以有限并发为每个 case 单独调用模型，并把逐-check结果汇总为六维分。
 
@@ -95,7 +95,7 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 ```text
 一次点击
   → 当前 Skill 版本的全部 case
-  → 每个 case 独立 Prompt（报告 + ground_truth + rubric checks）
+  → 每个 case 独立 Prompt（任务信息 + 报告 + rubric checks）
   → 最多 OPENHARNESS_JUDGE_PARALLEL 路并发
   → 单 case 失败隔离
   → 成功结果一次性写入 Session 并重评

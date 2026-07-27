@@ -158,10 +158,18 @@ def _normalize_cases(
     for case in cases:
         metadata = dict(case.metadata)
         mapping = request.case_map.get(case.case_id, {})
+        is_unified = (
+            metadata.get("dataset_schema_version")
+            == "openharness-wb/v1"
+        )
         openharness_case_id = str(
-            metadata.get("openharness_case_id")
-            or mapping.get("openharness_case_id")
-            or case.case_id
+            case.case_id
+            if is_unified
+            else (
+                metadata.get("openharness_case_id")
+                or mapping.get("openharness_case_id")
+                or case.case_id
+            )
         )
         split = str(metadata.get("split") or mapping.get("split") or "dev")
         if openharness_case_id in seen_openharness_ids:

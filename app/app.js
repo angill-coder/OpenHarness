@@ -57,12 +57,21 @@ document.getElementById('sampleBtn').onclick=async()=>{
   const j=await api('/api/data','POST',{id:SID,use_sample:true});
   STATE=j; render(); toast('已导入内置样例：'+j.n_cases+' 条');
 };
+document.getElementById('configuredDataBtn').onclick=async()=>{
+  if(!SID){toast('请先生成 V0');return;}
+  const j=await api('/api/data','POST',{id:SID,use_configured:true});
+  STATE=j; render(); toast('已加载当前 WB 数据集：'+j.n_cases+' 条');
+};
 document.getElementById('importBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0');return;}
   const raw=document.getElementById('dataInput').value.trim();
   if(!raw){toast('请粘贴数据或用样例');return;}
   let rows;
-  try{ rows = raw[0]==='[' ? JSON.parse(raw) : raw.split('\n').filter(x=>x.trim()).map(x=>JSON.parse(x)); }
+  try{
+    rows=(raw[0]==='['||raw[0]==='{')
+      ?JSON.parse(raw)
+      :raw.split('\n').filter(x=>x.trim()).map(x=>JSON.parse(x));
+  }
   catch(e){toast('解析失败：'+e.message);return;}
   const j=await api('/api/data','POST',{id:SID,rows}); STATE=j; render(); toast('已导入 '+j.n_cases+' 条');
 };

@@ -10,6 +10,26 @@ from .models import CaseSpec, InputFile, Interaction
 
 
 MARKER = re.compile(r"{{\s*([A-Za-z0-9_.-]+)\s*}}")
+UNIFIED_SCHEMA_VERSION = "openharness-wb/v1"
+
+# These fields belong to OpenHarness evaluation.  They may coexist with WB
+# execution fields in one JSON document, but must never be copied into
+# CaseSpec.data or exposed through a generic prompt template context.
+EVALUATION_ONLY_FIELDS = {
+    "input",
+    "ground_truth",
+    "ground_truth_findings",
+    "split",
+    "hard_case_tags",
+    "required_sections",
+    "audience",
+    "key_finding_ids",
+    "human_labels",
+    "human_scores",
+    "judge_checks",
+    "judge_reasoning",
+    "report_judgments",
+}
 
 
 def _safe_id(value: Any, index: int) -> str:
@@ -133,9 +153,10 @@ def _build_case(
     index: int,
     base_dir: Path,
     fallback_prompt: str | None,
+    schema_version: str | None = None,
 ) -> CaseSpec:
     merged = _merge(defaults, raw)
-    case_id = _safe_id(merged.get("id", merged.get("case_id")), index)
+    case_id = _safe_id(merged.get("case_id", merged.get("id")), index)
     data = merged.get("data")
     if not isinstance(data, dict):
         data = {
@@ -156,10 +177,15 @@ def _build_case(
                 "input_files",
                 "artifact_globs",
                 "metadata",
+                *EVALUATION_ONLY_FIELDS,
             }
             and not key.startswith("interaction_")
         }
-    context = dict(raw)
+    context = {
+        key: value
+        for key, value in raw.items()
+        if key not in EVALUATION_ONLY_FIELDS
+    }
     context.update({"data": data, "case_id": case_id, "dataset_json": data})
     turn_values = _as_list(merged.get("turns"))
     if turn_values:
@@ -184,6 +210,16 @@ def _build_case(
                 _parse_interactions(merged.get("interactions"), raw), start=1
             )
         )
+    metadata = (
+        dict(merged.get("metadata", {}))
+        if isinstance(merged.get("metadata", {}), dict)
+        else {"value": merged.get("metadata")}
+    )
+    split = merged.get("split") or metadata.get("split") or "dev"
+    metadata["split"] = str(split)
+    if schema_version == UNIFIED_SCHEMA_VERSION:
+        metadata["openharness_case_id"] = case_id
+        metadata["dataset_schema_version"] = schema_version
     return CaseSpec(
         case_id=case_id,
         prompt=prompt,
@@ -206,19 +242,17 @@ def _build_case(
         artifact_globs=tuple(
             str(item) for item in _as_list(merged.get("artifact_globs"))
         ),
-        metadata=(
-            dict(merged.get("metadata", {}))
-            if isinstance(merged.get("metadata", {}), dict)
-            else {"value": merged.get("metadata")}
-        ),
+        metadata=metadata,
     )
 
 
-def _load_rows(path: Path) -> tuple[dict[str, Any], Iterable[dict[str, Any]]]:
+def _load_rows(
+    path: Path,
+) -> tuple[dict[str, Any], Iterable[dict[str, Any]], str | None]:
     suffix = path.suffix.lower()
     if suffix == ".csv":
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
-            return {}, list(csv.DictReader(handle))
+            return {}, list(csv.DictReader(handle)), None
     if suffix == ".jsonl":
         rows = []
         for line_number, line in enumerate(
@@ -230,26 +264,135 @@ def _load_rows(path: Path) -> tuple[dict[str, Any], Iterable[dict[str, Any]]]:
             if not isinstance(value, dict):
                 raise ValueError(f"JSONL 第 {line_number} 行不是对象")
             rows.append(value)
-        return {}, rows
+        return {}, rows, None
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if isinstance(payload, list):
-        return {}, payload
+        return {}, payload, None
     if not isinstance(payload, dict) or not isinstance(payload.get("cases"), list):
         raise ValueError("JSON 数据集必须是案例数组，或包含 cases 数组的对象")
     defaults = payload.get("defaults", {})
     if not isinstance(defaults, dict):
         raise ValueError("dataset.defaults 必须是对象")
-    return defaults, payload["cases"]
+    schema_version = payload.get("schema_version")
+    if schema_version not in (None, UNIFIED_SCHEMA_VERSION):
+        raise ValueError(f"不支持的 dataset.schema_version: {schema_version}")
+    return defaults, payload["cases"], schema_version
+
+
+def _read_payload(path: Path) -> Any:
+    suffix = path.suffix.lower()
+    if suffix == ".jsonl":
+        return [
+            json.loads(line)
+            for line in path.read_text(
+                encoding="utf-8-sig"
+            ).splitlines()
+            if line.strip()
+        ]
+    if suffix == ".csv":
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            return list(csv.DictReader(handle))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def openharness_rows(payload: Any) -> list[dict[str, Any]]:
+    """Normalize one dataset document for Session.import_data().
+
+    Unified datasets are strict.  Legacy WB datasets remain readable during
+    migration by deriving the platform ID and minimal input from metadata and
+    the first prompt.
+    """
+
+    schema_version = None
+    if isinstance(payload, dict):
+        schema_version = payload.get("schema_version")
+        rows = payload.get("cases")
+    else:
+        rows = payload
+    if schema_version not in (None, UNIFIED_SCHEMA_VERSION):
+        raise ValueError(f"不支持的 dataset.schema_version: {schema_version}")
+    if not isinstance(rows, list):
+        raise ValueError("数据集必须是案例数组，或包含 cases 数组的对象")
+
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, value in enumerate(rows, start=1):
+        if not isinstance(value, dict):
+            raise ValueError(f"第 {index} 个案例不是对象")
+        row = dict(value)
+        metadata = (
+            dict(row.get("metadata", {}))
+            if isinstance(row.get("metadata", {}), dict)
+            else {}
+        )
+        if schema_version == UNIFIED_SCHEMA_VERSION:
+            raw_case_id = row.get("case_id")
+            if not raw_case_id:
+                raise ValueError(f"统一数据集第 {index} 个案例缺少 case_id")
+        else:
+            raw_case_id = (
+                row.get("case_id")
+                or metadata.get("openharness_case_id")
+                or row.get("id")
+            )
+        case_id = str(raw_case_id or "").strip()
+        if not case_id:
+            raise ValueError(f"第 {index} 个案例缺少可用 case_id")
+        if case_id in seen:
+            raise ValueError(f"案例 ID 重复: {case_id}")
+        seen.add(case_id)
+
+        if "input" not in row:
+            turns = row.get("turns")
+            first_prompt = ""
+            if isinstance(turns, list) and turns:
+                first = turns[0]
+                if isinstance(first, dict):
+                    first_prompt = str(
+                        first.get("prompt")
+                        or first.get("input")
+                        or first.get("text")
+                        or ""
+                    )
+            if schema_version == UNIFIED_SCHEMA_VERSION:
+                raise ValueError(f"统一数据集案例 {case_id} 缺少 input")
+            row["input"] = {
+                "topic": metadata.get("topic", ""),
+                "brief": row.get("prompt") or first_prompt,
+            }
+        if not isinstance(row["input"], dict):
+            raise ValueError(f"案例 {case_id} 的 input 必须是对象")
+
+        row["case_id"] = case_id
+        row["split"] = str(
+            row.get("split") or metadata.get("split") or "dev"
+        )
+        row.setdefault("ground_truth", {})
+        normalized.append(row)
+    if not normalized:
+        raise ValueError("数据集中没有可导入案例")
+    return normalized
+
+
+def load_openharness_rows(path: Path) -> list[dict[str, Any]]:
+    return openharness_rows(_read_payload(path))
 
 
 def load_cases(path: Path, prompt_template: str | None = None) -> list[CaseSpec]:
-    defaults, rows = _load_rows(path)
+    defaults, rows, schema_version = _load_rows(path)
     cases: list[CaseSpec] = []
     seen: set[str] = set()
     for index, raw in enumerate(rows, start=1):
         if not isinstance(raw, dict):
             raise ValueError(f"第 {index} 个案例不是对象")
-        case = _build_case(raw, defaults, index, path.parent, prompt_template)
+        case = _build_case(
+            raw,
+            defaults,
+            index,
+            path.parent,
+            prompt_template,
+            schema_version,
+        )
         if case.case_id in seen:
             raise ValueError(f"案例 ID 重复: {case.case_id}")
         seen.add(case.case_id)

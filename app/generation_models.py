@@ -66,6 +66,7 @@ class GenerationJob:
     stall_timeout_seconds: float
     created_at: float
     updated_at: float
+    dataset_sha256: Optional[str] = None
     status: str = "queued"
     cases: List[GenerationCaseState] = field(default_factory=list)
     idempotency_key: Optional[str] = None
@@ -137,4 +138,5 @@ class GenerationJob:
             GenerationCaseState.from_dict(item)
             for item in payload.get("cases", [])
         ]
+        fields.setdefault("dataset_sha256", None)
         return cls(**fields)

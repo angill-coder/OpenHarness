@@ -187,7 +187,12 @@ class GenerationJobServiceTest(unittest.TestCase):
             settings = GenerationSettings.from_env()
         self.assertEqual(
             settings.dataset_path,
-            APP.parent / "data" / "data.json",
+            (
+                APP.parent
+                / "data"
+                / "20260724_test_data"
+                / "data.json"
+            ),
         )
         self.assertEqual(settings.parallel, 10)
 
