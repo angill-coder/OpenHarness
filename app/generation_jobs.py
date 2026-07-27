@@ -83,7 +83,7 @@ class GenerationSettings:
                 str(
                     ROOT
                     / "data"
-                    / "20260724_test_data"
+                    / "20260727_test_data"
                     / "data.json"
                 ),
             )

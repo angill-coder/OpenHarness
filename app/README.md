@@ -17,7 +17,7 @@ python3 server.py                 # 默认 http://127.0.0.1:8080
 默认配置已经对应当前仓库；需要覆盖时设置：
 
 ```bash
-export OPENHARNESS_WB_DATASET=../data/20260724_test_data/data.json
+export OPENHARNESS_WB_DATASET=../data/20260727_test_data/data.json
 export OPENHARNESS_WB_SKILL_PATH=../skills/research-report
 export OPENHARNESS_WB_MODEL=deepseek-v4-pro-ioa
 export OPENHARNESS_WB_PARALLEL=20
@@ -47,7 +47,7 @@ export LLM_API_STYLE=anthropic          # 第三方 OpenAI 兼容网关填 opena
 export OPENHARNESS_JUDGE_PARALLEL=20    # 默认 20；可在 Web UI 调整
 ```
 
-默认读取仓库内的 `data/20260724_test_data/data.json`；该文件已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查生效配置。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
+默认读取仓库内的 `data/20260727_test_data/data.json`；该文件已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查生效配置。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
 
 报告生成和 Judge 的默认并发均为 20。当前版本不设置人为安全上限；实际并发不会超过待处理 case 数量，并受本机资源、WB CLI 和模型服务容量约束。
 

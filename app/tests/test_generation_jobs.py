@@ -192,7 +192,7 @@ class GenerationJobServiceTest(unittest.TestCase):
             (
                 APP.parent
                 / "data"
-                / "20260724_test_data"
+                / "20260727_test_data"
                 / "data.json"
             ),
         )
