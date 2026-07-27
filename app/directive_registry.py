@@ -7,7 +7,17 @@ Rubric 只负责评测映射，不在报告生成链路中读取。
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from typing import Dict
+
+
+DIRECTIVE_MANIFEST_RE = re.compile(
+    r"<!-- OPENHARNESS_DIRECTIVES: (\[.*?\]) -->"
+)
+VERSION_RULES_START = "<!-- OPENHARNESS_VERSION_RULES_START -->"
+VERSION_RULES_END = "<!-- OPENHARNESS_VERSION_RULES_END -->"
 
 
 RESEARCH_DIRECTIVE_DEFINITIONS: Dict[str, Dict[str, object]] = {
@@ -85,6 +95,62 @@ RESEARCH_DIRECTIVE_DEFINITIONS: Dict[str, Dict[str, object]] = {
 }
 
 RESEARCH_DIRECTIVES = tuple(RESEARCH_DIRECTIVE_DEFINITIONS)
+
+
+def directive_manifest(enabled) -> str:
+    ordered = [
+        directive_id
+        for directive_id in RESEARCH_DIRECTIVES
+        if directive_id in set(enabled)
+    ]
+    return "<!-- OPENHARNESS_DIRECTIVES: %s -->" % json.dumps(
+        ordered,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def load_skill_directives(skill_path: Path) -> Dict[str, bool]:
+    root = skill_path.expanduser().resolve()
+    instructions = root / "references" / "instructions.md"
+    if not (root / "SKILL.md").is_file():
+        raise ValueError("基础 Skill 缺少 SKILL.md: %s" % root)
+    if not instructions.is_file():
+        raise ValueError(
+            "基础 Skill 缺少 references/instructions.md: %s" % root
+        )
+    text = instructions.read_text(encoding="utf-8")
+    match = DIRECTIVE_MANIFEST_RE.search(text)
+    if match is None:
+        raise ValueError(
+            "基础 Skill 未声明 OPENHARNESS_DIRECTIVES: %s"
+            % instructions
+        )
+    try:
+        declared = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "基础 Skill 的 OPENHARNESS_DIRECTIVES 不是合法 JSON"
+        ) from exc
+    if not isinstance(declared, list) or any(
+        not isinstance(item, str) for item in declared
+    ):
+        raise ValueError(
+            "基础 Skill 的 OPENHARNESS_DIRECTIVES 必须是字符串数组"
+        )
+    unknown = sorted(set(declared) - set(RESEARCH_DIRECTIVES))
+    if unknown:
+        raise ValueError(
+            "基础 Skill 声明了未知 directive: %s"
+            % ", ".join(unknown)
+        )
+    for directive_id in declared:
+        executable_directive_text(directive_id)
+    enabled = set(declared)
+    return {
+        directive_id: directive_id in enabled
+        for directive_id in RESEARCH_DIRECTIVES
+    }
 
 
 def executable_directive_text(directive_id: str) -> str:

@@ -66,7 +66,7 @@ Web UI 可为每次报告生成任务单独填写模型和最大并发；默认�
 
 ## 页面输入（左列自上而下）
 
-1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。平台识别产品/受众、产出**第一版 v0 skill（结构+指令+memory）+ 一版 rubric**（directive 全关，作为优化起跑线）。
+1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。调研洞察产品固定读取 `skills/research-report` 唯一基线，并按基线实际内容初始化已启用 directive；其它产品仍由 generator 生成 v0。
 2. **导入数据**：调研报告可直接点「加载当前 WB 数据集」，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `ground_truth` 作为评测参考：不会发送给 WB 生成模型，但会与报告、Rubric 一起发送给模型 Judge。
 3. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；无有效报告自动额外重试 3 次，成功报告批量导入冻结版本。
 4. **批量模型 Judge**：点击「批量 Judge 全部 case」。系统以有限并发为每个 case 单独调用模型，并把逐-check结果汇总为六维分。
@@ -82,7 +82,7 @@ Web UI 可为每次报告生成任务单独填写模型和最大并发；默认�
 
 - HTTP 启动立即返回，页面通过轮询更新，不会被长任务阻塞；
 - 同一个 Session 同时只允许一个真实生成任务；
-- 任务启动时把当前 Session Skill 编译为完整 Skill 目录，并冻结版本、内容 hash 和编译产物；
+- 任务启动时完整复制 `skills/research-report`，只在现有 `references/instructions.md` 中写入当前版本新增 directive，并冻结版本、基线 hash 和执行目录 hash；
 - 生成期间禁止替换数据、修改 Rubric、推进 Skill 或手工覆盖报告；
 - WorkBuddy 每个 case 的 `repetition=1`，只有没有有效报告时才重跑，最多额外 3 次；
 - 通过 `deliverables/report.md` 验收的报告才会导入；
@@ -92,7 +92,7 @@ Web UI 可为每次报告生成任务单独填写模型和最大并发；默认�
 - 部分成功会保留并导入成功报告，页面可「仅重试失败 case」；
 - 服务重启后历史任务仍可查看；执行中的任务标为 `interrupted`，不会静默重复执行。
 
-报告生成和模型 Judge 仍是两个显式步骤，不会自动推进 Skill。每次生成实际执行该任务启动时冻结的 Session Skill 副本；`skills/research-report` 只作为基础模板和配置预检依赖，不会代替当前 Session 版本。
+报告生成和模型 Judge 仍是两个显式步骤，不会自动推进 Skill。`skills/research-report` 是调研报告的唯一结构与基础指令来源；每次生成从该基线复制，并叠加当前 Session 累计打开、且基线尚未包含的 directive。
 
 ## 批量模型 Judge
 
@@ -169,8 +169,8 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 
 - **落盘持久化**：需求描述、每一版 skill/rubric、报告和模型 Judge 结果都落盘，重启自动恢复（见下）。
 - **离线确定性**：mock 后端的输出质量由 skill 的 directive 决定，judge 按 rubric 锚点对照 ground truth 打分，所以"打开正确 directive → 分数上升"是 rubric 的必然而非脚本。算数字型走 `MockBackend`，调研洞察型走 `ResearchMockBackend`（吐报告文本+signals）。
-- **Mock 无需 API key**：真实报告可手工粘贴，也可由本机 WorkBuddy CLI 生成；Judge 仍需单独配置相应 LLM key。（`generator.py` 保留一条 dormant 的 Claude 生成 v0 分支，仅在有 key + `--real` 时启用。）
-- **v0 生成用固定词汇**：需求描述影响产品/受众/权重/初始 directive，但结构与维度沿用 harness 已知词汇（保证生成物能被 loop 真正跑起来）。
+- **Mock 无需 API key**：真实报告可手工粘贴，也可由本机 WorkBuddy CLI 生成；Judge 仍需单独配置相应 LLM key。
+- **调研 v0 使用唯一基线**：`generator.py` 不再为调研产品另造 Skill 结构；v0 directive 状态直接读取 `skills/research-report/references/instructions.md` 的声明。
 - **优化目前只做 L1**（打开 directive）；L2（few-shot）/L3（memory）与结构级优化是后续。
 
 ## 落盘与恢复

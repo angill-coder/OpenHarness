@@ -294,6 +294,11 @@ class ModelOnlySessionTest(unittest.TestCase):
             "trace_fabrication",
         )
 
+        # 本用例只验证真实 failure → optimizer proposal 的状态流，
+        # 因此显式模拟一个尚未在基线启用的目标开关。
+        session._current()["skill"].directives()[
+            "verify_no_fabrication"
+        ] = False
         state = session.advance()
 
         self.assertEqual(state["advance_result"]["status"], "proposed")

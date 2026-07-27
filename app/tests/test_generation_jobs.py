@@ -146,6 +146,16 @@ class GenerationJobServiceTest(unittest.TestCase):
             "---\nname: research-report\n---\n# Test\n",
             encoding="utf-8",
         )
+        skill_references = self.skill / "references"
+        skill_references.mkdir()
+        (skill_references / "instructions.md").write_text(
+            "# Test Instructions\n\n"
+            "<!-- OPENHARNESS_DIRECTIVES: [] -->\n\n"
+            "<!-- OPENHARNESS_VERSION_RULES_START -->\n"
+            "<!-- 当前基线没有 optimizer 增量规则。 -->\n"
+            "<!-- OPENHARNESS_VERSION_RULES_END -->\n",
+            encoding="utf-8",
+        )
         self.session = Session(
             "test-session",
             "生成面向高管的调研洞察报告",
@@ -270,7 +280,8 @@ class GenerationJobServiceTest(unittest.TestCase):
                 / "instructions.md"
             ).is_file()
         )
-        self.assertEqual(done.compiler_version, "session-skill/v1")
+        self.assertEqual(done.compiler_version, "session-skill/v2")
+        self.assertIsNotNone(done.base_skill_hash)
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
 

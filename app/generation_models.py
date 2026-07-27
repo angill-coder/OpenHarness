@@ -68,6 +68,7 @@ class GenerationJob:
     updated_at: float
     dataset_sha256: Optional[str] = None
     compiler_version: Optional[str] = None
+    base_skill_hash: Optional[str] = None
     status: str = "queued"
     cases: List[GenerationCaseState] = field(default_factory=list)
     idempotency_key: Optional[str] = None
@@ -141,4 +142,5 @@ class GenerationJob:
         ]
         fields.setdefault("dataset_sha256", None)
         fields.setdefault("compiler_version", None)
+        fields.setdefault("base_skill_hash", None)
         return cls(**fields)

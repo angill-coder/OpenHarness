@@ -157,16 +157,22 @@ class GenerationSettings:
             raise GenerationJobError(
                 "WB dataset 不存在: %s" % self.dataset_path
             )
-        if bool(self.skill_path) == bool(self.skill_name):
+        if self.skill_name or not self.skill_path:
             raise GenerationJobError(
-                "WB skill_path 与 skill_name 必须且只能配置一个"
+                "Session Skill 版本演进必须配置唯一基础 skill_path"
             )
-        if self.skill_path:
-            path = self.skill_path.expanduser()
-            skill_file = path / "SKILL.md" if path.is_dir() else path
-            if not skill_file.is_file():
+        path = self.skill_path.expanduser()
+        if not path.is_dir():
+            raise GenerationJobError(
+                "基础 Skill 必须是目录: %s" % path
+            )
+        for relative in (
+            Path("SKILL.md"),
+            Path("references") / "instructions.md",
+        ):
+            if not (path / relative).is_file():
                 raise GenerationJobError(
-                    "WB Skill 缺少 SKILL.md: %s" % path
+                    "基础 Skill 缺少 %s: %s" % (relative, path)
                 )
         if self.parallel < 1:
             raise GenerationJobError("parallel 必须至少为 1")
@@ -184,7 +190,7 @@ class GenerationSettings:
             "dataset_path": str(self.dataset_path.expanduser().resolve()),
             "output_root": str(self.output_root.expanduser().resolve()),
             "skill_mode": "session_artifact",
-            "skill_ref": "运行时编译当前 Session SkillArtifact",
+            "skill_ref": "复制唯一基础 Skill，并写入当前版本 directive",
             "base_skill_ref": str(
                 self.skill_path.expanduser().resolve()
                 if self.skill_path
@@ -499,6 +505,7 @@ class GenerationJobService:
                     self.settings.output_root,
                     session_id,
                     skill,
+                    self.settings.skill_path,
                 )
             except (OSError, ValueError) as exc:
                 raise GenerationJobError(
@@ -558,6 +565,7 @@ class GenerationJobService:
                 self.settings.dataset_path
             ),
             compiler_version=frozen_skill.compiler_version,
+            base_skill_hash=frozen_skill.base_skill_hash,
             cases=[
                 GenerationCaseState(
                     case_id=case_id,

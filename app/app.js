@@ -375,7 +375,7 @@ function render(){
     <div class="small mut" style="margin:6px 0">${cv.changelog||''}</div>
     <div class="mut small">已打开的 directive（优化动作 L1）：</div><div>${onDir}</div>
     ${cv.proposal?`<details><summary>本版来自的优化提议</summary><pre>${JSON.stringify(cv.proposal,null,2)}</pre></details>`:''}
-    <details><summary>查看结构（flow / subagents，冻结）</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
+    <details><summary>查看版本结构策略</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
 
   renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard(); renderGenerationPanel();
 }
@@ -455,9 +455,12 @@ function renderJudgeStatus(){
          `<div class="mut">${esc(x.case_id)}：${esc(x.error||x.status)}</div>`).join('')
       :'');
 }
-function cv_structure(){ // 结构从 rubric 无关, 取 v0 的展示(结构冻结, 各版一致)
-  return {flow:["Intake","DataAnalyst→findings","Insight→insights","Writer→draft","Verifier(独立)","Format"],
-          subagents:["DataAnalyst","Insight","Writer","Verifier(独立对抗)"],memory:["config","facts","learned_rules"]};
+function cv_structure(){
+  return {
+    baseline:"skills/research-report",
+    policy:"SKILL.md 与目录结构保持基线不变",
+    evolution:"仅在 references/instructions.md 累积 optimizer directive"
+  };
 }
 
 function renderCurve(){
