@@ -158,8 +158,16 @@
       <h2><span class="n">▶</span>真实运行 · WB CLI</h2>
       <p class="small mut">一键执行当前 Session 的全部 case；缺失报告自动重试最多 3 次，通过验收的报告会批量导入当前冻结版本。</p>
       <div id="generationConfig" class="small mut">正在读取运行配置…</div>
-      <label for="generationParallel">报告生成最大并发</label>
-      <input id="generationParallel" type="number" min="1" step="1" style="width:110px">
+      <div class="row" style="align-items:flex-end;margin-top:8px">
+        <div style="flex:1">
+          <label for="generationModel">报告生成模型</label>
+          <input id="generationModel" type="text" placeholder="deepseek-v4-pro-ioa">
+        </div>
+        <div>
+          <label for="generationParallel">报告生成最大并发</label>
+          <input id="generationParallel" type="number" min="1" step="1" style="width:110px">
+        </div>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="ok" id="runGenerationBtn" disabled>▶ 一键生成并导入报告</button>
         <button class="ghost" id="retryGenerationBtn" style="display:none">↻ 仅重试失败 case</button>

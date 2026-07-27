@@ -24,11 +24,25 @@ from run_external import _parser
 from workbuddy_batch.models import BatchConfig
 from workbuddy_runner import (
     ExternalRunConfigurationError,
+    _case_attempt_run_id,
     run_external_cases,
 )
+from workbuddy_batch.runner import _workbuddy_session_id
 
 
 class ExternalRunnerTest(unittest.TestCase):
+    def test_internal_ids_remain_short_for_long_case_ids(self) -> None:
+        case_id = "rr-realproject-new-" + ("very-long-case-" * 20)
+        run_id = _case_attempt_run_id(case_id, 4)
+        session_id = _workbuddy_session_id(run_id, case_id)
+
+        self.assertLessEqual(len(run_id), 32)
+        self.assertLessEqual(len(session_id), 40)
+        self.assertNotEqual(
+            run_id,
+            _case_attempt_run_id(case_id, 3),
+        )
+
     def test_default_parallelism_is_twenty(self) -> None:
         request = ExternalRunRequest(
             case_file=Path("case.json"),
@@ -168,6 +182,50 @@ class ExternalRunnerTest(unittest.TestCase):
         effective_last = effective_case["case"]["turns"][-1]["prompt"]
         self.assertEqual(source_last, "这是完整 intake。")
         self.assertIn("OpenHarness 最终交付指令", effective_last)
+
+    def test_compacts_trace_and_removes_workspace(self) -> None:
+        request = self._request(
+            succeed_on_attempt=1,
+            max_retries=0,
+        )
+        request = replace(
+            request,
+            environment={
+                **request.environment,
+                "FAKE_WB_STREAM_EVENT": "1",
+            },
+        )
+
+        result = run_external_cases(request)
+
+        self.assertTrue(result.succeeded)
+        case_dir = (
+            Path(result.cases[0].attempts[0].run_dir)
+            / "cases"
+            / "wb-case"
+        )
+        self.assertFalse((case_dir / "trace" / "workspace").exists())
+        self.assertEqual(
+            list((case_dir / "trace" / "rounds").glob("*/stdout.jsonl")),
+            [],
+        )
+        events = [
+            json.loads(line)
+            for line in (
+                case_dir / "trace" / "2_events.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertTrue(events)
+        self.assertFalse(
+            any(
+                item.get("event", {}).get("type") == "stream_event"
+                for item in events
+            )
+        )
+        self.assertTrue(
+            (case_dir / "artifacts" / "report.md").is_file()
+        )
 
     def test_marks_retry_exhausted_after_max_attempts(self) -> None:
         result = run_external_cases(

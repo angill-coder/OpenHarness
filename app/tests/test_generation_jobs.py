@@ -197,6 +197,7 @@ class GenerationJobServiceTest(unittest.TestCase):
             ),
         )
         self.assertEqual(settings.parallel, 20)
+        self.assertEqual(settings.model, "deepseek-v4-pro-ioa")
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
@@ -284,16 +285,28 @@ class GenerationJobServiceTest(unittest.TestCase):
             "test-session",
             "tester",
             parallel=1,
+            model="deepseek-v4-pro-ioa",
         )
         done = service.wait(job.job_id)
         self.assertEqual(done.parallel, 1)
+        self.assertEqual(done.model, "deepseek-v4-pro-ioa")
         self.assertEqual(fake.requests[0].parallel, 1)
+        self.assertEqual(
+            fake.requests[0].model,
+            "deepseek-v4-pro-ioa",
+        )
 
         with self.assertRaisesRegex(ValueError, "至少为 1"):
             service.start(
                 "test-session",
                 "tester",
                 parallel=0,
+            )
+        with self.assertRaisesRegex(ValueError, "不能为空"):
+            service.start(
+                "test-session",
+                "tester",
+                model="  ",
             )
 
     def test_partial_job_can_retry_only_failed_case(self):
@@ -303,15 +316,30 @@ class GenerationJobServiceTest(unittest.TestCase):
             self.settings,
             fake,
         )
-        first, _ = service.start("test-session", "tester")
+        first, _ = service.start(
+            "test-session",
+            "tester",
+            model="retry-model",
+        )
         first = service.wait(first.job_id)
         self.assertEqual(first.status, "partial")
         self.assertEqual(first.failed_case_ids, ["case-b"])
 
-        retry, _ = service.retry(first.job_id, "tester")
+        retry, _ = service.retry(
+            first.job_id,
+            "tester",
+            parallel=1,
+            model="retry-override-model",
+        )
         retry = service.wait(retry.job_id)
         self.assertEqual(retry.status, "completed")
         self.assertEqual(retry.parent_job_id, first.job_id)
+        self.assertEqual(retry.parallel, 1)
+        self.assertEqual(retry.model, "retry-override-model")
+        self.assertEqual(
+            fake.requests[-1].model,
+            "retry-override-model",
+        )
         self.assertEqual(fake.calls[-1], ["case-b"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
 

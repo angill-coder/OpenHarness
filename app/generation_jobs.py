@@ -64,7 +64,7 @@ class GenerationSettings:
     output_root: Path
     skill_path: Optional[Path] = None
     skill_name: Optional[str] = None
-    model: Optional[str] = "deepseek-v4-pro"
+    model: Optional[str] = "deepseek-v4-pro-ioa"
     parallel: int = 20
     max_report_retries: int = 3
     timeout_seconds: float = 900.0
@@ -115,7 +115,7 @@ class GenerationSettings:
             skill_name=skill_name,
             model=os.environ.get(
                 "OPENHARNESS_WB_MODEL",
-                "deepseek-v4-pro",
+                "deepseek-v4-pro-ioa",
             )
             or None,
             parallel=_env_int("OPENHARNESS_WB_PARALLEL", 20),
@@ -430,6 +430,7 @@ class GenerationJobService:
         account: str,
         case_ids: Optional[Iterable[str]] = None,
         parallel: Optional[int] = None,
+        model: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         parent_job_id: Optional[str] = None,
     ) -> tuple[GenerationJob, bool]:
@@ -454,6 +455,15 @@ class GenerationJobService:
             raise GenerationJobError("报告生成并发必须是整数") from exc
         if selected_parallel < 1:
             raise GenerationJobError("报告生成并发必须至少为 1")
+        if model is not None and not isinstance(model, str):
+            raise GenerationJobError("报告生成模型必须是字符串")
+        selected_model = (
+            self.settings.model
+            if model is None
+            else model.strip()
+        )
+        if not selected_model:
+            raise GenerationJobError("报告生成模型不能为空")
 
         with self._lock:
             if idempotency_key:
@@ -537,7 +547,7 @@ class GenerationJobService:
             ),
             skill_mode="session_artifact",
             skill_ref=str(frozen_skill.path),
-            model=self.settings.model,
+            model=selected_model,
             parallel=selected_parallel,
             max_report_retries=self.settings.max_report_retries,
             timeout_seconds=self.settings.timeout_seconds,
@@ -592,6 +602,8 @@ class GenerationJobService:
         self,
         job_id: str,
         account: str,
+        parallel: Optional[int] = None,
+        model: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> tuple[GenerationJob, bool]:
         previous = self.get(job_id)
@@ -604,7 +616,12 @@ class GenerationJobService:
             previous.session_id,
             account,
             case_ids=failed_ids,
-            parallel=previous.parallel,
+            parallel=(
+                previous.parallel
+                if parallel is None
+                else parallel
+            ),
+            model=previous.model if model is None else model,
             idempotency_key=idempotency_key,
             parent_job_id=previous.job_id,
         )

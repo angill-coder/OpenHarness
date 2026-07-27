@@ -36,6 +36,11 @@ def _safe(value: str) -> str:
     return cleaned.strip("-") or "case"
 
 
+def _workbuddy_session_id(run_id: str, case_id: str) -> str:
+    identity = sha256_text(f"{run_id}\0{case_id}")[:20]
+    return f"wbb-{identity}-{uuid.uuid4().hex[:6]}"
+
+
 class BatchRunner:
     def __init__(self, config: BatchConfig) -> None:
         self.config = config
@@ -80,6 +85,20 @@ class BatchRunner:
                     }
                     failed_case_dir = run_dir / "cases" / _safe(case.case_id)
                     failed_case_dir.mkdir(parents=True, exist_ok=True)
+                workspace = (
+                    run_dir
+                    / "cases"
+                    / _safe(case.case_id)
+                    / "trace"
+                    / "workspace"
+                )
+                try:
+                    if workspace.exists():
+                        shutil.rmtree(workspace)
+                except OSError as exc:
+                    summary["workspace_cleanup_error"] = (
+                        f"{type(exc).__name__}: {exc}"
+                    )
                 summaries.append(summary)
                 duration = summary.get("duration_ms")
                 elapsed = f"{duration / 1000:.1f}s" if isinstance(duration, int) else "—"
@@ -203,7 +222,7 @@ class BatchRunner:
             if not path.exists():
                 raise FileNotFoundError(f"插件目录不存在: {path}")
         before = snapshot_workspace(workspace)
-        session_id = f"wbb-{_safe(run_id)}-{_safe(case.case_id)}-{uuid.uuid4().hex[:6]}"[:120]
+        session_id = _workbuddy_session_id(run_id, case.case_id)
         write_json(
             case_dir / "case.json",
             {
@@ -452,9 +471,10 @@ class BatchRunner:
         last_activity = time.monotonic()
         process_group_id = process.pid if os.name != "nt" else None
         parse_errors = 0
-        with (round_dir / "stdout.jsonl").open("w", encoding="utf-8") as raw_stdout, (
-            round_dir / "stderr.log"
-        ).open("w", encoding="utf-8") as raw_stderr:
+        with (round_dir / "stderr.log").open(
+            "w",
+            encoding="utf-8",
+        ) as raw_stderr:
             while open_streams or process.poll() is None:
                 case_elapsed_seconds = time.monotonic() - case_started
                 if (
@@ -558,13 +578,16 @@ class BatchRunner:
                         },
                     )
                     continue
-                raw_stdout.write(line + "\n")
-                raw_stdout.flush()
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     parse_errors += 1
                     event = {"type": "unparsed_stdout", "line": line}
+                # WorkBuddy's partial-message mode is retained as a heartbeat
+                # for stall detection, but per-token stream events have little
+                # diagnostic value and dominate trace size.
+                if event.get("type") == "stream_event":
+                    continue
                 envelope = {
                     "stream": "stdout",
                     "round_index": round_index,

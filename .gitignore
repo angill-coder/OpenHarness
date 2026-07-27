@@ -19,7 +19,3 @@ app/sessions/*/generation_jobs/
 # 本地开发设计文档（不随产品代码发布）
 WB_CLI_真实报告生成集成开发设计.md
 前端一键真实Loop_WB_CLI开发设计.md
-问题1_统一数据格式开发设计.md
-问题2_Judge与下一版Skill衔接开发设计.md
-问题3_Session_Skill冻结与WB执行开发设计.md
-问题4_WB单Case即时重试开发设计.md

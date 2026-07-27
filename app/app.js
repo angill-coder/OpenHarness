@@ -223,23 +223,37 @@ document.getElementById('runGenerationBtn').onclick=async()=>{
     '报告生成'
   );
   if(parallel==null)return;
+  const modelInput=document.getElementById('generationModel');
+  const model=(modelInput&&modelInput.value||'').trim();
+  if(!model){toast('报告生成模型不能为空');return;}
   const key='start-'+SID+'-'+STATE.current_version+'-'+Date.now();
   try{
     const j=await api('/api/generation/start','POST',{
-      id:SID,idempotency_key:key,parallel
+      id:SID,idempotency_key:key,parallel,model
     });
     GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
-    toast(j.reused?'已有任务正在执行':`WB CLI 任务已启动，并发 ${parallel}`);
+    toast(j.reused?'已有任务正在执行':`WB CLI 任务已启动：${model}，并发 ${parallel}`);
   }catch(e){renderGenerationPanel();}
 };
 document.getElementById('retryGenerationBtn').onclick=async()=>{
   if(!GEN_JOB)return;
+  const parallel=readParallel(
+    'generationParallel',
+    GEN_JOB.parallel,
+    '报告生成'
+  );
+  if(parallel==null)return;
+  const modelInput=document.getElementById('generationModel');
+  const model=(modelInput&&modelInput.value||GEN_JOB.model||'').trim();
+  if(!model){toast('报告生成模型不能为空');return;}
   try{
     const j=await api('/api/generation/retry','POST',{
-      job_id:GEN_JOB.job_id,idempotency_key:'retry-'+GEN_JOB.job_id+'-'+Date.now()
+      job_id:GEN_JOB.job_id,
+      idempotency_key:'retry-'+GEN_JOB.job_id+'-'+Date.now(),
+      parallel,model
     });
     GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
-    toast('失败 case 重试任务已启动');
+    toast(`失败 case 重试已启动：${model}，并发 ${parallel}`);
   }catch(e){renderGenerationPanel();}
 };
 document.getElementById('cancelGenerationBtn').onclick=async()=>{
@@ -258,6 +272,7 @@ function renderGenerationPanel(){
   const retry=document.getElementById('retryGenerationBtn');
   const cancel=document.getElementById('cancelGenerationBtn');
   const parallelInput=document.getElementById('generationParallel');
+  const modelInput=document.getElementById('generationModel');
   const judgeParallelInput=document.getElementById('judgeParallel');
   if(!cfg)return;
 
@@ -278,6 +293,21 @@ function renderGenerationPanel(){
       parallelInput.dataset.initialized='1';
     }
     parallelInput.disabled=active||!GEN_CONFIG.ready;
+  }
+  if(modelInput&&GEN_CONFIG){
+    if(!modelInput.dataset.initialized){
+      modelInput.value=GEN_CONFIG.model||'deepseek-v4-pro-ioa';
+      modelInput.dataset.initialized='1';
+    }
+    modelInput.disabled=active||!GEN_CONFIG.ready;
+  }
+  if(
+    GEN_JOB&&!active&&modelInput&&parallelInput
+    &&modelInput.dataset.jobId!==GEN_JOB.job_id
+  ){
+    modelInput.value=GEN_JOB.model||(GEN_CONFIG&&GEN_CONFIG.model)||'deepseek-v4-pro-ioa';
+    parallelInput.value=GEN_JOB.parallel||(GEN_CONFIG&&GEN_CONFIG.parallel)||20;
+    modelInput.dataset.jobId=GEN_JOB.job_id;
   }
   if(judgeParallelInput&&GEN_CONFIG){
     if(!judgeParallelInput.dataset.initialized){
@@ -302,6 +332,7 @@ function renderGenerationPanel(){
   const historical=STATE&&GEN_JOB.skill_version!==STATE.current_version;
   status.innerHTML=`<div class="kv"><span>状态</span><b class="${GEN_JOB.status==='completed'?'ok-txt':GEN_JOB.status==='failed'?'warn-txt':''}">${esc(GEN_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status)}</b></div>`+
     `<div class="kv"><span>实际执行版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.execution_skill_hash||'').slice(0,10))}</span></div>`+
+    `<div class="kv"><span>报告生成模型</span><span>${esc(GEN_JOB.model||'CLI 默认')}</span></div>`+
     `<div class="kv"><span>报告生成并发</span><span>${GEN_JOB.parallel}</span></div>`+
     (historical?`<div class="warn-txt" style="margin-top:5px">这是历史任务；当前 Session 已是 ${esc(STATE.current_version)}。</div>`:'')+
     `<div class="kv"><span>已导入</span><span>${imported}/${total}</span></div>`+

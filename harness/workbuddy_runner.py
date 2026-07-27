@@ -391,9 +391,11 @@ def _notify_progress(
 
 
 def _case_attempt_run_id(wb_case_id: str, attempt: int) -> str:
-    return "case-%s-%s-attempt-%02d" % (
-        _safe_id(wb_case_id)[:48],
-        sha256_text(wb_case_id)[:8],
+    # WorkBuddy derives a native project-directory component from the absolute
+    # workspace path. Long case IDs made that component exceed macOS NAME_MAX
+    # (255 bytes), so internal run directories must stay compact.
+    return "case-%s-a%02d" % (
+        sha256_text(wb_case_id)[:16],
         attempt,
     )
 

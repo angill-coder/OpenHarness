@@ -16,9 +16,9 @@ API:
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
   POST /api/run_judge_batch   {id, version?, parallel?} -> 并发 Judge 当前版本全部 case
-  POST /api/generation/start  {id, idempotency_key?, parallel?} -> 后台调用 WB 并自动批量导入
+  POST /api/generation/start  {id, idempotency_key?, parallel?, model?} -> 后台调用 WB 并自动批量导入
   GET  /api/generation?id=    -> 查询生成任务
-  POST /api/generation/retry  {job_id} -> 仅重跑未导入的 case
+  POST /api/generation/retry  {job_id, parallel?, model?} -> 仅重跑未导入的 case
   POST /api/generation/cancel {job_id} -> 请求取消
   GET  /api/sample_data       -> 返回内置样例数据集(供页面一键导入)
 """
@@ -565,6 +565,7 @@ class Handler(BaseHTTPRequestHandler):
                     acct,
                     case_ids=b.get("case_ids"),
                     parallel=b.get("parallel"),
+                    model=b.get("model"),
                     idempotency_key=(
                         b.get("idempotency_key")
                         or self.headers.get("Idempotency-Key")
@@ -587,6 +588,8 @@ class Handler(BaseHTTPRequestHandler):
                 job, reused = GENERATION_SERVICE.retry(
                     b.get("job_id") or "",
                     acct,
+                    parallel=b.get("parallel"),
+                    model=b.get("model"),
                     idempotency_key=(
                         b.get("idempotency_key")
                         or self.headers.get("Idempotency-Key")
