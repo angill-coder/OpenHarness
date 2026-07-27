@@ -126,10 +126,10 @@ def _parse_report(filename: str, raw: bytes) -> str:
 
 def _build_judge_prompt(rubric, report_text, case_context) -> str:
     """组装逐 check 判分提示词:列出所有 check,要求对每条判 met/partial/miss + 理由。"""
-    L = ["你是严格的调研报告评审。根据【任务信息】【报告正文】和下面逐条 check，",
+    L = ["你是严格的调研报告评审。根据【任务信息】【参考答案】【报告正文】和下面逐条 check，",
          "对**每一条 check** 判 met(满足)/partial(部分)/miss(不满足)。",
-         "只能依据报告中呈现的证据、引用和内部一致性判断；"
-         "不得把未提供的信息当成已核实事实。",
+         "参考答案用于核对关键事实、证据覆盖和可回溯性；"
+         "不得把报告未呈现的参考答案内容算作报告已经满足。",
          "", "## 逐条 check(每条都要打分)"]
     for d in rubric["dimensions"]:
         for c in d.get("checks", []):
@@ -142,7 +142,11 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
                 c.get("desc", ""),
                 c.get("effect", ""),
             ))
-    L += ["", "## 任务信息", json.dumps(case_context, ensure_ascii=False),
+    judge_context = dict(case_context or {})
+    ground_truth = judge_context.pop("ground_truth", {})
+    L += ["", "## 任务信息", json.dumps(judge_context, ensure_ascii=False),
+          "", "## 参考答案（ground_truth）",
+          json.dumps(ground_truth, ensure_ascii=False),
           "", "## 报告正文", report_text or "(空)",
           "", "## 输出(只输出严格 JSON,不要多余文字):",
           '{"checks":{"T1":"met","T2":"miss", ...每条 check 都要},',

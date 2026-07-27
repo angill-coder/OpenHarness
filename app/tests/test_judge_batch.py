@@ -44,14 +44,18 @@ def extract_json(text):
 
 
 class JudgeBatchTest(unittest.TestCase):
-    def test_server_prompt_is_report_only(self):
+    def test_server_prompt_includes_ground_truth_for_traceability(self):
         prompt = _build_judge_prompt(
             RUBRIC,
             "report",
-            {"case_id": "case-a", "input": {"brief": "A"}},
+            {
+                "case_id": "case-a",
+                "input": {"brief": "A"},
+                "ground_truth": {"reference_report_text": "事实 A"},
+            },
         )
-        self.assertNotIn("ground_truth", prompt)
-        self.assertNotIn("答案键", prompt)
+        self.assertIn("ground_truth", prompt)
+        self.assertIn("事实 A", prompt)
         self.assertIn("任务信息", prompt)
 
     def test_judges_all_cases_and_preserves_dataset_order(self):
@@ -86,7 +90,7 @@ class JudgeBatchTest(unittest.TestCase):
         self.assertEqual([item["status"] for item in results], ["judged", "judged"])
         self.assertEqual(results[1]["checks"]["Q1"], "miss")
 
-    def test_prompt_context_excludes_ground_truth(self):
+    def test_prompt_context_includes_ground_truth(self):
         prompts = []
 
         def call_model(prompt):
@@ -113,7 +117,10 @@ class JudgeBatchTest(unittest.TestCase):
             extract_json,
         )
 
-        self.assertNotIn("ground_truth", prompts[0])
+        self.assertEqual(
+            prompts[0]["case_context"]["ground_truth"],
+            {"secret": "answer"},
+        )
         self.assertEqual(
             prompts[0]["case_context"]["input"],
             {"brief": "A"},

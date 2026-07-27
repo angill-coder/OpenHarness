@@ -80,6 +80,8 @@ def judge_cases(
         case_context = {
             "case_id": case_id,
             "input": case.get("input") or {},
+            # ground_truth 只进入 Judge，不会经过 WB loader 发送给生成模型。
+            "ground_truth": case.get("ground_truth") or {},
             "audience": case.get("audience"),
             "required_sections": case.get("required_sections") or [],
         }
