@@ -50,6 +50,7 @@ class FakeRunner:
     def __init__(self, fail_once=()):
         self.fail_once = set(fail_once)
         self.calls = []
+        self.requests = []
         self.started = threading.Event()
         self.release = None
 
@@ -61,6 +62,7 @@ class FakeRunner:
     ):
         ids = list(request.openharness_case_ids)
         self.calls.append(ids)
+        self.requests.append(request)
         self.started.set()
         if self.release is not None:
             self.release.wait(3)
@@ -254,6 +256,20 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertEqual(done.status, "completed")
         self.assertEqual(done.imported_count, 2)
         self.assertEqual(fake.calls, [["case-a", "case-b"]])
+        self.assertEqual(done.skill_mode, "session_artifact")
+        self.assertEqual(
+            fake.requests[0].skill_path,
+            Path(done.skill_ref),
+        )
+        self.assertTrue((Path(done.skill_ref) / "SKILL.md").is_file())
+        self.assertTrue(
+            (
+                Path(done.skill_ref)
+                / "references"
+                / "instructions.md"
+            ).is_file()
+        )
+        self.assertEqual(done.compiler_version, "session-skill/v1")
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
 
@@ -305,7 +321,7 @@ class GenerationJobServiceTest(unittest.TestCase):
         )
         job, _ = service.start("test-session", "tester")
         self.assertTrue(fake.started.wait(1))
-        (self.skill / "SKILL.md").write_text(
+        (Path(job.skill_ref) / "SKILL.md").write_text(
             "---\nname: research-report\n---\n# Changed\n",
             encoding="utf-8",
         )
@@ -338,6 +354,7 @@ class GenerationJobServiceTest(unittest.TestCase):
             stall_timeout_seconds=5,
             created_at=now,
             updated_at=now,
+            compiler_version=None,
             status="running",
             cases=[GenerationCaseState("case-a", "dev")],
         )

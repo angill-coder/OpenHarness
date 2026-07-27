@@ -38,6 +38,10 @@ from generation_models import (  # noqa: E402
     GenerationJob,
 )
 import persistence as persist  # noqa: E402
+from skill_compiler import (  # noqa: E402
+    compile_session_skill,
+    directory_hash as compiled_skill_hash,
+)
 
 
 class GenerationJobError(ValueError):
@@ -179,8 +183,9 @@ class GenerationSettings:
         return {
             "dataset_path": str(self.dataset_path.expanduser().resolve()),
             "output_root": str(self.output_root.expanduser().resolve()),
-            "skill_mode": "fixed_path" if self.skill_path else "installed",
-            "skill_ref": str(
+            "skill_mode": "session_artifact",
+            "skill_ref": "运行时编译当前 Session SkillArtifact",
+            "base_skill_ref": str(
                 self.skill_path.expanduser().resolve()
                 if self.skill_path
                 else self.skill_name
@@ -193,7 +198,7 @@ class GenerationSettings:
             "stall_timeout_seconds": self.stall_timeout_seconds,
             "max_concurrent_jobs": self.max_concurrent_jobs,
             "min_report_bytes": self.min_report_bytes,
-            "versioned_skill": False,
+            "versioned_skill": True,
         }
 
 
@@ -466,7 +471,17 @@ class GenerationJobService:
             }
             version = session._current()["version"]
             skill = _skill_for_version(session, version)
-            skill_artifact_hash = _json_hash(skill.to_dict())
+            try:
+                frozen_skill = compile_session_skill(
+                    self.settings.output_root,
+                    session_id,
+                    skill,
+                )
+            except (OSError, ValueError) as exc:
+                raise GenerationJobError(
+                    "Session Skill 编译失败: %s" % exc
+                ) from exc
+            skill_artifact_hash = frozen_skill.artifact_hash
         requested = list(
             dict.fromkeys(
                 str(item)
@@ -497,29 +512,18 @@ class GenerationJobService:
             time.strftime("%Y%m%dT%H%M%S"),
             uuid.uuid4().hex[:8],
         )
-        skill_ref = str(
-            self.settings.skill_path.expanduser().resolve()
-            if self.settings.skill_path
-            else self.settings.skill_name
-        )
         job = GenerationJob(
             job_id=job_id,
             session_id=session_id,
             account=account,
             skill_version=version,
             skill_artifact_hash=skill_artifact_hash,
-            execution_skill_hash=_directory_hash(
-                self.settings.skill_path
-            ),
+            execution_skill_hash=frozen_skill.directory_hash,
             dataset_path=str(
                 self.settings.dataset_path.expanduser().resolve()
             ),
-            skill_mode=(
-                "fixed_path"
-                if self.settings.skill_path
-                else "installed"
-            ),
-            skill_ref=skill_ref,
+            skill_mode="session_artifact",
+            skill_ref=str(frozen_skill.path),
             model=self.settings.model,
             parallel=self.settings.parallel,
             max_report_retries=self.settings.max_report_retries,
@@ -530,6 +534,7 @@ class GenerationJobService:
             dataset_sha256=_file_hash(
                 self.settings.dataset_path
             ),
+            compiler_version=frozen_skill.compiler_version,
             cases=[
                 GenerationCaseState(
                     case_id=case_id,
@@ -604,13 +609,17 @@ class GenerationJobService:
             return job
 
     def _request_for(self, job: GenerationJob) -> ExternalRunRequest:
+        if job.skill_mode != "session_artifact":
+            raise GenerationJobError(
+                "生成任务未冻结 Session Skill，拒绝执行"
+            )
         return ExternalRunRequest(
             case_file=Path(job.dataset_path),
             output_root=self.settings.output_root,
             skill_version=job.skill_version,
             session_id=job.session_id,
-            skill_name=self.settings.skill_name,
-            skill_path=self.settings.skill_path,
+            skill_name=None,
+            skill_path=Path(job.skill_ref),
             model=self.settings.model,
             parallel=self.settings.parallel,
             timeout_seconds=self.settings.timeout_seconds,
@@ -711,7 +720,7 @@ class GenerationJobService:
                     )
                 if (
                     job.execution_skill_hash is not None
-                    and _directory_hash(self.settings.skill_path)
+                    and compiled_skill_hash(Path(job.skill_ref))
                     != job.execution_skill_hash
                 ):
                     raise GenerationJobError(

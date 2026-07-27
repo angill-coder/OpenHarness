@@ -20,37 +20,13 @@ import re
 import copy
 from typing import Any, Dict, List
 
+from directive_registry import RESEARCH_DIRECTIVES
+
 # harness artifacts 目录(读六维 rubric 模板)
 _ART = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     "harness", "artifacts")
 
-# 调研洞察 v0 skill 的 directive 动作空间(与 harness/backend.RESEARCH_DIRECTIVES 对齐)。
-# 这里内联一份, 避免 generator 对 harness import 的硬依赖。
-RESEARCH_DIRECTIVES = [
-    "require_source_ref",
-    "flag_source_conflict",
-    "honest_on_unsupportable",
-    "require_two_sources",
-    "summary_format",
-    "pyramid_body",
-    "mece_sections",
-    "concept_consistency",
-    "ensure_narrative_flow",
-    "require_insight_triplet",
-    "abstract_cases",
-    "drop_noise",
-    "mark_extrapolation_confidence",
-    "crosscheck_outliers",
-    "cover_key_claims",
-    "ban_bushi_ershi",
-    "require_charts",
-    "match_exec_length",
-    "require_rigorous_wording",
-    "verify_no_fabrication",
-    "note_metric_caveat",
-    "disclose_sample_bias",
-    "buzzword_emphasis",
-]
+# 调研洞察 v0 skill 的 directive 动作空间由 directive_registry 统一维护。
 RESEARCH_SECTIONS = ["核心摘要", "核心发现（含归因）", "对我们的启示与建议（含趋势）"]
 
 # harness 已知的 directive 动作空间(与 skill_v0.json 对齐)

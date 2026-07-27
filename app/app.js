@@ -239,10 +239,10 @@ function renderGenerationPanel(){
   }else if(!GEN_CONFIG.ready){
     cfg.innerHTML='<span class="warn-txt">运行配置不可用：'+esc(GEN_CONFIG.error)+'</span>';
   }else{
-    cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>${esc(GEN_CONFIG.skill_ref)}</span></div>`+
+    cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>启动时编译当前 Session 版本</span></div>`+
       `<div class="kv"><span>模型 / 并发</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel}</span></div>`+
       `<div class="kv"><span>报告重试</span><span>最多额外 ${GEN_CONFIG.max_report_retries} 次</span></div>`+
-      `<div class="small warn-txt" style="margin-top:5px">当前为固定 Skill 链路验证；任务仍冻结并记录 Session 版本与哈希。</div>`;
+      `<div class="small mut" style="margin-top:5px">每个任务冻结完整 Skill 目录、版本和哈希，WB CLI 只执行该副本。</div>`;
   }
   const active=generationActive();
   const generationAction=STATE&&STATE.actions&&STATE.actions.run_generation;
@@ -258,8 +258,10 @@ function renderGenerationPanel(){
   const total=GEN_JOB.case_count||0, imported=GEN_JOB.imported_count||0;
   const done=(GEN_JOB.cases||[]).filter(x=>x.imported||['retry_exhausted','failed','cancelled'].includes(x.status)).length;
   const pct=total?Math.round(done/total*100):0;
+  const historical=STATE&&GEN_JOB.skill_version!==STATE.current_version;
   status.innerHTML=`<div class="kv"><span>状态</span><b class="${GEN_JOB.status==='completed'?'ok-txt':GEN_JOB.status==='failed'?'warn-txt':''}">${esc(GEN_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status)}</b></div>`+
-    `<div class="kv"><span>冻结版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.skill_artifact_hash||'').slice(0,10))}</span></div>`+
+    `<div class="kv"><span>实际执行版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.execution_skill_hash||'').slice(0,10))}</span></div>`+
+    (historical?`<div class="warn-txt" style="margin-top:5px">这是历史任务；当前 Session 已是 ${esc(STATE.current_version)}。</div>`:'')+
     `<div class="kv"><span>已导入</span><span>${imported}/${total}</span></div>`+
     `<div class="barwrap" style="margin-top:7px"><div class="bar" style="width:${pct}%"></div></div>`+
     (GEN_JOB.error?`<div class="warn-txt" style="margin-top:6px">${esc(GEN_JOB.error)}</div>`:'');
