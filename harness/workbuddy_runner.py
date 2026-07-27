@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -333,7 +335,8 @@ def _build_batch_config(
         product_config=request.product_config,
         model=request.model,
         effort=request.effort,
-        parallel=request.parallel,
+        # 外层 attempt scheduler 控制全局 case 并发；单次 WB 批次只含一个 case。
+        parallel=1,
         repetition=1,
         timeout_seconds=request.timeout_seconds,
         stall_timeout_seconds=request.stall_timeout_seconds,
@@ -385,6 +388,128 @@ def _notify_progress(
     except Exception:
         # 进度上报属于旁路能力，不能反向打断真实报告生成。
         pass
+
+
+def _case_attempt_run_id(wb_case_id: str, attempt: int) -> str:
+    return "case-%s-%s-attempt-%02d" % (
+        _safe_id(wb_case_id)[:48],
+        sha256_text(wb_case_id)[:8],
+        attempt,
+    )
+
+
+def _execute_case_attempt(
+    case: CaseSpec,
+    identity: Dict[str, str],
+    attempt: int,
+    request: ExternalRunRequest,
+    batch_config: BatchConfig,
+) -> ExternalAttemptResult:
+    """执行单个 case 的一次尝试，并独立完成报告验收。"""
+
+    wb_run_id = _case_attempt_run_id(case.case_id, attempt)
+    expected_run_dir = batch_config.output_root / wb_run_id
+    try:
+        run_dir = BatchRunner(batch_config).run(
+            [case],
+            run_id=wb_run_id,
+        )
+        summaries = _read_batch_summaries(run_dir)
+        case_dir = run_dir / "cases" / _safe_id(case.case_id)
+        summary = summaries.get(
+            case.case_id,
+            {
+                "case_id": case.case_id,
+                "status": "harness_error",
+                "error": "WB 批次没有返回该 case 的机器结果",
+                "rounds": [],
+            },
+        )
+        validation = validate_report_artifact(
+            case_dir,
+            request.output_contract,
+        )
+        wb_status = str(summary.get("status") or "harness_error")
+        warning = None
+        if validation.valid and wb_status != "success":
+            warning = (
+                f"WB status={wb_status}，但报告已通过 Artifact Validator"
+            )
+        error = None
+        if not validation.valid:
+            error = " | ".join(
+                str(item)
+                for item in (summary.get("error"), validation.error)
+                if item
+            ) or "未产出有效报告"
+        return ExternalAttemptResult(
+            attempt=attempt,
+            max_attempts=request.max_attempts,
+            wb_case_id=case.case_id,
+            openharness_case_id=identity["openharness_case_id"],
+            status=(
+                "generated" if validation.valid else validation.status
+            ),
+            wb_status=wb_status,
+            wb_run_id=wb_run_id,
+            wb_session_id=_read_wb_session_id(case_dir),
+            run_dir=str(run_dir),
+            trace_path=str(case_dir / "trace"),
+            manifest_path=str(
+                case_dir / "artifacts" / "manifest.json"
+            ),
+            duration_ms=summary.get("duration_ms"),
+            configured_model=summary.get("configured_model"),
+            observed_models=tuple(
+                str(item)
+                for item in summary.get("observed_models", [])
+            ),
+            usage=_usage(summary),
+            error=error,
+            warning=warning,
+            report=validation.report,
+        )
+    except Exception as exc:
+        case_dir = expected_run_dir / "cases" / _safe_id(case.case_id)
+        return ExternalAttemptResult(
+            attempt=attempt,
+            max_attempts=request.max_attempts,
+            wb_case_id=case.case_id,
+            openharness_case_id=identity["openharness_case_id"],
+            status="harness_error",
+            wb_status="harness_error",
+            wb_run_id=wb_run_id,
+            wb_session_id=None,
+            run_dir=str(expected_run_dir),
+            trace_path=str(case_dir / "trace"),
+            manifest_path=str(
+                case_dir / "artifacts" / "manifest.json"
+            ),
+            duration_ms=None,
+            configured_model=request.model,
+            observed_models=(),
+            usage={},
+            error="%s: %s" % (type(exc).__name__, exc),
+        )
+
+
+def _snapshot_result(
+    generation_id: str,
+    request: ExternalRunRequest,
+    generation_dir: Path,
+    started_at: str,
+    case_results: Dict[str, ExternalCaseResult],
+) -> ExternalBatchResult:
+    return ExternalBatchResult(
+        generation_id=generation_id,
+        session_id=request.session_id,
+        skill_version=request.skill_version,
+        status=_batch_status(list(case_results.values())),
+        output_dir=str(generation_dir),
+        created_at=started_at,
+        finished_at=_iso_now(),
+        cases=list(case_results.values()),
+    )
 
 
 def run_external_cases(
@@ -474,7 +599,6 @@ def run_external_cases(
         for case in cases
     }
     case_by_id = {case.case_id: case for case in cases}
-    pending = list(case_by_id)
     batch_config = _build_batch_config(
         request,
         generation_dir,
@@ -493,121 +617,73 @@ def run_external_cases(
     _persist_result(generation_dir, initial)
     _notify_progress(progress_callback, initial)
 
-    for attempt in range(1, request.max_attempts + 1):
-        if not pending:
-            break
-        if should_cancel and should_cancel():
-            for wb_case_id in pending:
-                case_results[wb_case_id].status = "cancelled"
-            pending = []
-            break
-        wb_run_id = f"attempt-{attempt:02d}"
-        attempt_cases = [case_by_id[item] for item in pending]
-        run_dir = BatchRunner(batch_config).run(
-            attempt_cases,
-            run_id=wb_run_id,
-        )
-        summaries = _read_batch_summaries(run_dir)
-        retry_ids: list[str] = []
+    # 只保留最多 parallel 个在途 attempt。某 case 失败后，其下一次尝试
+    # 立即放到 ready 队首，无需等待其他 case 的本轮执行结束。
+    ready = deque((wb_case_id, 1) for wb_case_id in case_by_id)
+    in_flight = {}
+    with ThreadPoolExecutor(max_workers=request.parallel) as executor:
+        while ready or in_flight:
+            cancelled = bool(should_cancel and should_cancel())
+            if cancelled:
+                while ready:
+                    wb_case_id, _ = ready.popleft()
+                    case_results[wb_case_id].status = "cancelled"
 
-        for wb_case_id in pending:
-            case_dir = run_dir / "cases" / _safe_id(wb_case_id)
-            summary = summaries.get(
-                wb_case_id,
-                {
-                    "case_id": wb_case_id,
-                    "status": "harness_error",
-                    "error": "WB 批次没有返回该 case 的机器结果",
-                    "rounds": [],
-                },
-            )
-            validation = validate_report_artifact(
-                case_dir,
-                request.output_contract,
-            )
-            wb_status = str(summary.get("status") or "harness_error")
-            warning = None
-            if validation.valid and wb_status != "success":
-                warning = (
-                    f"WB status={wb_status}，但报告已通过 Artifact Validator"
-                )
-            status = "generated" if validation.valid else validation.status
-            error = None
-            if not validation.valid:
-                wb_error = summary.get("error")
-                parts = [
-                    str(item)
-                    for item in (wb_error, validation.error)
-                    if item
-                ]
-                error = " | ".join(parts) or "未产出有效报告"
-
-            attempt_result = ExternalAttemptResult(
-                attempt=attempt,
-                max_attempts=request.max_attempts,
-                wb_case_id=wb_case_id,
-                openharness_case_id=case_results[
-                    wb_case_id
-                ].openharness_case_id,
-                status=status,
-                wb_status=wb_status,
-                wb_run_id=wb_run_id,
-                wb_session_id=_read_wb_session_id(case_dir),
-                run_dir=str(run_dir),
-                trace_path=str(case_dir / "trace"),
-                manifest_path=str(
-                    case_dir / "artifacts" / "manifest.json"
-                ),
-                duration_ms=summary.get("duration_ms"),
-                configured_model=summary.get("configured_model"),
-                observed_models=tuple(
-                    str(item)
-                    for item in summary.get("observed_models", [])
-                ),
-                usage=_usage(summary),
-                error=error,
-                warning=warning,
-                report=validation.report,
-            )
-            case_result = case_results[wb_case_id]
-            case_result.attempts.append(attempt_result)
-            if validation.valid:
-                case_result.status = "generated"
-                case_result.report = validation.report
-            elif (
-                attempt < request.max_attempts
-                and not (should_cancel and should_cancel())
+            while (
+                ready
+                and len(in_flight) < request.parallel
+                and not cancelled
             ):
-                case_result.status = "retrying"
-                retry_ids.append(wb_case_id)
-            elif should_cancel and should_cancel():
-                case_result.status = "cancelled"
-            else:
-                case_result.status = "retry_exhausted"
+                wb_case_id, attempt = ready.popleft()
+                case_results[wb_case_id].status = "running"
+                future = executor.submit(
+                    _execute_case_attempt,
+                    case_by_id[wb_case_id],
+                    identities[wb_case_id],
+                    attempt,
+                    request,
+                    batch_config,
+                )
+                in_flight[future] = (wb_case_id, attempt)
 
-        pending = retry_ids
-        snapshot = ExternalBatchResult(
-            generation_id=generation_id,
-            session_id=request.session_id,
-            skill_version=request.skill_version,
-            status=_batch_status(list(case_results.values())),
-            output_dir=str(generation_dir),
-            created_at=started_at,
-            finished_at=_iso_now(),
-            cases=list(case_results.values()),
-        )
-        _persist_result(generation_dir, snapshot)
-        _notify_progress(progress_callback, snapshot)
+            if not in_flight:
+                break
+            completed, _ = wait(
+                tuple(in_flight),
+                return_when=FIRST_COMPLETED,
+            )
+            for future in completed:
+                wb_case_id, attempt = in_flight.pop(future)
+                attempt_result = future.result()
+                case_result = case_results[wb_case_id]
+                case_result.attempts.append(attempt_result)
+                if attempt_result.has_valid_report:
+                    case_result.status = "generated"
+                    case_result.report = attempt_result.report
+                elif should_cancel and should_cancel():
+                    case_result.status = "cancelled"
+                elif attempt < request.max_attempts:
+                    case_result.status = "retrying"
+                    ready.appendleft((wb_case_id, attempt + 1))
+                else:
+                    case_result.status = "retry_exhausted"
 
-    result = ExternalBatchResult(
-        generation_id=generation_id,
-        session_id=request.session_id,
-        skill_version=request.skill_version,
-        status=_batch_status(list(case_results.values())),
-        output_dir=str(generation_dir),
-        created_at=started_at,
-        finished_at=_iso_now(),
-        cases=list(case_results.values()),
+            snapshot = _snapshot_result(
+                generation_id,
+                request,
+                generation_dir,
+                started_at,
+                case_results,
+            )
+            _persist_result(generation_dir, snapshot)
+            _notify_progress(progress_callback, snapshot)
+
+    result = _snapshot_result(
+        generation_id,
+        request,
+        generation_dir,
+        started_at,
+        case_results,
     )
     _persist_result(generation_dir, result)
     _notify_progress(progress_callback, result)

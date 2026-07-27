@@ -4,15 +4,22 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 HARNESS_DIR = Path(__file__).resolve().parents[1]
 if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
-from external_run_models import ExternalRunRequest, ReportOutputContract
+from external_run_models import (
+    ExternalAttemptResult,
+    ExternalRunRequest,
+    ReportArtifact,
+    ReportOutputContract,
+)
 from run_external import _parser
 from workbuddy_batch.models import BatchConfig
 from workbuddy_runner import (
@@ -175,6 +182,95 @@ class ExternalRunnerTest(unittest.TestCase):
         self.assertTrue(
             all(item.status == "artifact_missing" for item in case.attempts)
         )
+
+    def test_failed_case_retries_before_other_case_finishes(self) -> None:
+        payload = json.loads(self.dataset.read_text(encoding="utf-8"))
+        second = dict(payload["cases"][0])
+        second["id"] = "wb-slow"
+        second["metadata"] = {
+            "openharness_case_id": "oh-slow",
+            "split": "dev",
+        }
+        payload["cases"].append(second)
+        self.dataset.write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        retry_started = threading.Event()
+        slow_observations = []
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def execute(case, identity, attempt, request, batch_config):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                if case.case_id == "wb-slow":
+                    retry_started.wait(1)
+                    slow_observations.append(retry_started.is_set())
+                if case.case_id == "wb-case" and attempt == 2:
+                    retry_started.set()
+                generated = not (
+                    case.case_id == "wb-case" and attempt == 1
+                )
+                report = (
+                    ReportArtifact(
+                        original_workspace_path="deliverables/report.md",
+                        captured_path="/tmp/report.md",
+                        sha256="a" * 64,
+                        size=200,
+                        mime_type="text/markdown",
+                        text="有效报告" * 100,
+                    )
+                    if generated
+                    else None
+                )
+                return ExternalAttemptResult(
+                    attempt=attempt,
+                    max_attempts=request.max_attempts,
+                    wb_case_id=case.case_id,
+                    openharness_case_id=identity[
+                        "openharness_case_id"
+                    ],
+                    status=(
+                        "generated" if generated else "artifact_missing"
+                    ),
+                    wb_status="success",
+                    wb_run_id="%s-%s" % (case.case_id, attempt),
+                    wb_session_id=None,
+                    run_dir="/tmp/run",
+                    trace_path="/tmp/run/trace",
+                    manifest_path="/tmp/run/manifest.json",
+                    duration_ms=1,
+                    configured_model=request.model,
+                    observed_models=(),
+                    usage={},
+                    error=None if generated else "missing",
+                    report=report,
+                )
+            finally:
+                with lock:
+                    active -= 1
+
+        request = replace(
+            self._request(succeed_on_attempt=1, max_retries=2),
+            parallel=2,
+        )
+        with patch(
+            "workbuddy_runner._execute_case_attempt",
+            side_effect=execute,
+        ):
+            result = run_external_cases(request)
+
+        by_case = {item.wb_case_id: item for item in result.cases}
+        self.assertTrue(result.succeeded)
+        self.assertEqual(len(by_case["wb-case"].attempts), 2)
+        self.assertEqual(len(by_case["wb-slow"].attempts), 1)
+        self.assertEqual(slow_observations, [True])
+        self.assertLessEqual(max_active, request.parallel)
 
     def test_rejects_missing_material_before_starting_workbuddy(self) -> None:
         (self.materials / "source.txt").unlink()
