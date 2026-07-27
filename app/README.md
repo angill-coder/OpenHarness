@@ -44,7 +44,7 @@ export ANTHROPIC_API_KEY=...
 export ANTHROPIC_BASE_URL=https://api.anthropic.com
 export ANTHROPIC_JUDGE_MODEL=claude-opus-4-8
 export LLM_API_STYLE=anthropic          # 第三方 OpenAI 兼容网关填 openai
-export OPENHARNESS_JUDGE_PARALLEL=3     # 默认 3，最大 8
+export OPENHARNESS_JUDGE_PARALLEL=20    # 默认 20，最大 20
 ```
 
 默认读取仓库内的 `data/20260724_test_data/data.json`；该文件已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查生效配置。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。

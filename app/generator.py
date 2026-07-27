@@ -17,6 +17,7 @@ generator.py — 从「需求描述」生成 v0 skill + rubric
 import json
 import os
 import re
+import copy
 from typing import Any, Dict, List
 
 # harness artifacts 目录(读六维 rubric 模板)
@@ -286,6 +287,30 @@ def _build_rubric_research() -> Dict[str, Any]:
     """六维 rubric = harness/artifacts/rubric_research.json 的副本(避免锚点重复维护)。"""
     with open(os.path.join(_ART, "rubric_research.json"), encoding="utf-8") as f:
         return json.load(f)
+
+
+def hydrate_research_optimizer_metadata(
+    rubric: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Backfill optimizer metadata for snapshots created before this contract."""
+
+    if rubric.get("product") != "research_insight":
+        return rubric
+    canonical = _build_rubric_research()
+    optimizer_by_check = {
+        str(check["id"]): copy.deepcopy(check.get("optimizer"))
+        for dimension in canonical.get("dimensions", [])
+        for check in dimension.get("checks", [])
+        if check.get("id") and "optimizer" in check
+    }
+    for dimension in rubric.get("dimensions", []):
+        for check in dimension.get("checks", []):
+            check_id = str(check.get("id") or "")
+            if "optimizer" not in check and check_id in optimizer_by_check:
+                check["optimizer"] = copy.deepcopy(
+                    optimizer_by_check[check_id]
+                )
+    return rubric
 
 
 def _build_rubric(product_id: str, weights: Dict[str, float]) -> Dict[str, Any]:

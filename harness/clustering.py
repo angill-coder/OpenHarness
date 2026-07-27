@@ -7,9 +7,10 @@ directive_hint, severity, exemplars}。optimizer 只吃这个结构。
 
 两个产品两套特征规则, 由 product 派发:
   · report-assistant  (算数字型): 读 rec.output 的 flag 字段
-  · research_insight  (调研洞察): 读 rec.output["signals"]
+  · research_insight  (调研洞察): 真实链路直接读逐 check Judge，mock
+    链路读 rec.output["signals"]
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from collections import defaultdict
 
 
@@ -40,6 +41,7 @@ RESEARCH_PATTERN_RULES = [
     ("struct_summary", "摘要是背景铺陈而非结论", ["structure"], "summary_format"),
     ("struct_pyramid", "正文非金字塔(支撑先于论点)", ["structure"], "pyramid_body"),
     ("struct_mece", "章节非MECE/缺段/交叉", ["structure", "coverage"], "mece_sections"),
+    ("struct_summary_body", "摘要与正文没有严格对应", ["structure"], "summary_format"),
     ("narr_flow", "无清晰主线/章节并列拼接缺推进", ["narrative"], "ensure_narrative_flow"),
     ("narr_drift", "概念漂移/口径前后不一致", ["narrative"], "concept_consistency"),
     ("insight_restate", "素材复述,缺归因/趋势/建议", ["insight"], "require_insight_triplet"),
@@ -48,9 +50,11 @@ RESEARCH_PATTERN_RULES = [
     ("insight_overclaim", "趋势过度外推未标置信", ["insight"], "mark_extrapolation_confidence"),
     ("insight_outlier", "把一次性异常当趋势/错误归因", ["insight"], "crosscheck_outliers"),
     ("cover_key_missed", "关键claim/可答问题未覆盖全", ["coverage"], "cover_key_claims"),
+    ("cover_section_missed", "必需段落缺失或内容空泛", ["coverage"], "mece_sections"),
     ("expr_bushi", "'不是,而是'句式/术语注水", ["expression"], "ban_bushi_ershi"),
     ("expr_nochart", "关键数据未结构化呈现(表/图)", ["expression"], "require_charts"),
     ("expr_length", "长度不匹配高管受众", ["expression"], "match_exec_length"),
+    ("expr_rigorous", "结论不够先行或措辞不够严谨", ["expression"], "require_rigorous_wording"),
     ("expr_style_exemplar", "措辞/风格待打磨,需注入风格范例(L2, 无指令级修法)", ["expression"], None),
     ("reward_hacking_suspected", "术语堆砌,疑似讨好裁判", ["expression"], None),
 ]
@@ -76,6 +80,154 @@ _RESEARCH_SIG_TO_FEAT = {
     "length_mismatch": "expr_length",
     "buzzword": "reward_hacking_suspected",
 }
+
+
+class FailureMappingError(ValueError):
+    def __init__(self, check_ids: List[str]):
+        self.check_ids = sorted(set(check_ids))
+        super().__init__(
+            "这些失败 check 未声明 optimizer 映射: "
+            + ", ".join(self.check_ids)
+        )
+
+
+def _check_value(value: Any) -> float:
+    if isinstance(value, str):
+        mapping = {"met": 1.0, "partial": 0.5, "miss": 0.0}
+        if value not in mapping:
+            raise ValueError("未知 Judge check 值: %s" % value)
+        return mapping[value]
+    number = float(value)
+    if number not in {0.0, 0.5, 1.0}:
+        raise ValueError("Judge check 数值必须为 0/0.5/1: %s" % value)
+    return number
+
+
+def validate_optimizer_mappings(rubric: Dict[str, Any]) -> None:
+    """Research rubric 的每条 check 必须明确声明映射或 ``null``。"""
+
+    if rubric.get("product") != "research_insight":
+        return
+    invalid = []
+    for dimension in rubric.get("dimensions", []):
+        for check in dimension.get("checks", []):
+            check_id = str(check.get("id") or "")
+            if "optimizer" not in check:
+                invalid.append(check_id or "<missing-id>")
+                continue
+            mapping = check.get("optimizer")
+            if mapping is None:
+                continue
+            if not isinstance(mapping, dict) or not mapping.get("pattern_id"):
+                invalid.append(check_id or "<missing-id>")
+    if invalid:
+        raise FailureMappingError(invalid)
+
+
+def analyze_real_judgments(
+    judge_checks: Dict[str, Dict[str, Any]],
+    rubric: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Build optimizer input directly from every non-met real Judge check."""
+
+    check_index = {}
+    rule_map = {item[0]: item for item in RESEARCH_PATTERN_RULES}
+    for dimension in rubric.get("dimensions", []):
+        for check in dimension.get("checks", []):
+            if check.get("id"):
+                check_index[str(check["id"])] = (dimension, check)
+
+    buckets: Dict[str, Dict[str, Any]] = {}
+    unmapped = []
+    for case_id, judgment in (judge_checks or {}).items():
+        checks = (judgment or {}).get("checks") or {}
+        reasoning = (judgment or {}).get("reasoning") or {}
+        for check_id, raw_value in checks.items():
+            value = _check_value(raw_value)
+            if value >= 1.0:
+                continue
+            indexed = check_index.get(str(check_id))
+            if indexed is None:
+                unmapped.append(str(check_id))
+                continue
+            dimension, check = indexed
+            if "optimizer" not in check:
+                unmapped.append(str(check_id))
+                continue
+            mapping = check.get("optimizer")
+            if mapping is None:
+                continue
+            pattern_id = str(mapping.get("pattern_id") or "")
+            if not pattern_id:
+                unmapped.append(str(check_id))
+                continue
+            rule = rule_map.get(pattern_id)
+            description = (
+                rule[1]
+                if rule
+                else check.get("label", pattern_id)
+            )
+            affected_dims = (
+                list(rule[2])
+                if rule
+                else [str(dimension.get("name") or "")]
+            )
+            bucket = buckets.setdefault(
+                pattern_id,
+                {
+                    "pattern_id": pattern_id,
+                    "pattern": description,
+                    "affected_dims": affected_dims,
+                    "directive_hint": mapping.get("directive_hint"),
+                    "fewshot_hint": mapping.get("fewshot_hint"),
+                    "priority": int(mapping.get("priority", 100)),
+                    "severity": (
+                        "high"
+                        if check.get("redline")
+                        or dimension.get("name") == "traceability"
+                        else "medium"
+                    ),
+                    "case_ids": [],
+                    "evidence": [],
+                },
+            )
+            if case_id not in bucket["case_ids"]:
+                bucket["case_ids"].append(case_id)
+            bucket["evidence"].append(
+                {
+                    "case_id": case_id,
+                    "check_id": str(check_id),
+                    "value": value,
+                    "reasoning": str(reasoning.get(check_id, "")),
+                }
+            )
+    if unmapped:
+        raise FailureMappingError(unmapped)
+
+    report = []
+    for item in buckets.values():
+        item["hit_count"] = len(item["case_ids"])
+        item["exemplars"] = item["case_ids"][:2]
+        report.append(item)
+    report.sort(
+        key=lambda item: (
+            item["priority"],
+            item["severity"] != "high",
+            -item["hit_count"],
+            item["pattern_id"],
+        )
+    )
+    return report
+
+
+def analyze_mock_records(
+    records,
+    low_score_threshold: int = 4,
+    product: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Legacy deterministic failure clustering used by demos and smoke tests."""
+
+    return _cluster_mock(records, low_score_threshold, product)
 
 
 def _biz_features(rec) -> List[str]:
@@ -165,8 +317,8 @@ def _research_features(rec) -> List[str]:
     return feats
 
 
-def cluster(records, low_score_threshold=4, product: str = None) -> List[Dict[str, Any]]:
-    """把'任一维度 <= 阈值'的 case 归入失败模式。"""
+def _cluster_mock(records, low_score_threshold=4, product: str = None) -> List[Dict[str, Any]]:
+    """把 mock 记录中任一维度低于阈值的 case 归入失败模式。"""
     if product == "research_insight":
         rules, feat_fn, high_dim = RESEARCH_PATTERN_RULES, _research_features, "traceability"
     else:
@@ -195,6 +347,20 @@ def cluster(records, low_score_threshold=4, product: str = None) -> List[Dict[st
     report.sort(key=lambda p: (p["severity"] != "high", _PRIORITY.get(p["pattern_id"], 1),
                                -p["hit_count"]))
     return report
+
+
+def cluster(records, low_score_threshold=4, product: str = None) -> List[Dict[str, Any]]:
+    """Legacy/mock compatibility entry.
+
+    The formal real-Judge Session path calls ``analyze_real_judgments`` with
+    the rubric explicitly, so it never passes through the rounded score gate.
+    """
+
+    return _cluster_mock(
+        list(records),
+        low_score_threshold,
+        product,
+    )
 
 
 # pattern_id -> 修复优先级(数字小者先)。红线(冲突/硬答)必须在'无出处/单一信源'之前修好,

@@ -22,6 +22,7 @@ if HARNESS not in sys.path:
 
 from schemas import SkillArtifact, EvalRecord   # noqa: E402,F401
 import backend as backend_mod                    # noqa: E402
+import clustering as clustering_mod              # noqa: E402
 
 import generator as generator_mod                 # noqa: E402
 import persistence as persist                      # noqa: E402
@@ -66,6 +67,8 @@ class SessionCore:
 
         gen = generator_mod.generate_v0(requirement, product_id, prefer_real=prefer_real)
         self.rubric = gen["rubric"]
+        generator_mod.hydrate_research_optimizer_metadata(self.rubric)
+        clustering_mod.validate_optimizer_mappings(self.rubric)
         self.gen_rationale = gen["rationale"]
         self.detected = gen["detected"]
         self.dims, self.dim_zh = _dims_from_rubric(self.rubric)
@@ -105,6 +108,8 @@ class SessionCore:
             "skill": skill, "version": skill.version, "parent": skill.parent_version,
             "changelog": skill.changelog, "adopted": adopted, "proposal": proposal,
             "dev": None, "test": None, "eval": None, "failures": None, "calib": None,
+            "failure_report": None, "failure_mapping_error": [],
+            "workflow_block": None,
         })
 
     def _current(self):
@@ -138,7 +143,15 @@ class SessionCore:
             "human_labels": self.human_labels,
             "generation_imports": self.generation_imports,
             "versions": [{
-                "skill": v["skill"].to_dict(), "adopted": v["adopted"], "proposal": v["proposal"],
+                "skill": v["skill"].to_dict(),
+                "adopted": v["adopted"],
+                "proposal": v["proposal"],
+                "failure_report": v.get("failure_report"),
+                "failure_mapping_error": v.get(
+                    "failure_mapping_error",
+                    [],
+                ),
+                "workflow_block": v.get("workflow_block"),
             } for v in self.versions],
         }
 
@@ -150,7 +163,10 @@ class SessionCore:
         self.requirement = snap["requirement"]
         self.product_id = snap["product_id"]
         self._persist = False          # 重建期间不写盘
-        self.rubric = snap["rubric"]
+        self.rubric = generator_mod.hydrate_research_optimizer_metadata(
+            snap["rubric"]
+        )
+        clustering_mod.validate_optimizer_mappings(self.rubric)
         self.gen_rationale = snap.get("gen_rationale", "")
         self.detected = snap.get("detected", {})
         self.dims, self.dim_zh = _dims_from_rubric(self.rubric)
@@ -172,6 +188,12 @@ class SessionCore:
                 "changelog": vd["skill"].get("changelog", ""),
                 "adopted": vd["adopted"], "proposal": vd["proposal"],
                 "dev": None, "test": None, "eval": None, "failures": None, "calib": None,
+                "failure_report": vd.get("failure_report"),
+                "failure_mapping_error": vd.get(
+                    "failure_mapping_error",
+                    [],
+                ),
+                "workflow_block": vd.get("workflow_block"),
             })
         self.current_idx = snap.get("current_idx", 0)
         if self.cases:                 # 有数据则重算每个采纳版本的派生量(恢复分数曲线)
@@ -220,6 +242,13 @@ class SessionCore:
             "missing_report_case_ids": sorted(case_ids - reports_ready),
             "pending_judge_case_ids": sorted(case_ids - judged),
         }
+        version_status, actions = self._workflow_state(
+            cur,
+            case_ids,
+            reports_ready,
+            judged,
+            requires_model_judge,
+        )
         return {
             "session_id": self.id,
             "requirement": self.requirement,
@@ -233,20 +262,39 @@ class SessionCore:
             "current_version": cur["version"],
             "rubric": self.rubric,
             "versions": [self._version_view(v) for v in self.versions],
-            "curve": [{"version": v["version"], "dev": v["dev"], "test": v["test"]}
-                      for v in adopted],
+            "curve": [
+                {
+                    "version": v["version"],
+                    "dev": v["dev"],
+                    "test": v["test"],
+                }
+                for v in adopted
+                if (
+                    not requires_model_judge
+                    or self._version_real_judge_complete(v["version"])
+                )
+            ],
             "current_eval": current_eval,
-            "current_failures": cur["failures"],
+            "current_failures": (
+                cur.get("failure_report")
+                if requires_model_judge
+                else cur["failures"]
+            ),
+            "failure_report": cur.get("failure_report"),
+            "failure_mapping_error": cur.get(
+                "failure_mapping_error",
+                [],
+            ),
             "evaluation_mode": "model_only",
+            "version_status": version_status,
+            "actions": actions,
             "judge_progress": judge_progress,
             # 保留字段形状，避免旧客户端崩溃；人工校准能力已停用。
             "calib": None,
             "check_calib": None,
             "dims": self.dims, "dim_zh": self.dim_zh,
             "target": self.rubric["target"],
-            "can_advance": bool(self.cases) and (
-                not requires_model_judge or judge_complete
-            ),
+            "can_advance": actions["advance"]["enabled"],
             "opt_history": self.opt_history,
             "history": persist.load_events(self.id),
         }
@@ -259,6 +307,113 @@ class SessionCore:
             "directives_on": [k for k, on in sk.directives().items() if on],
             "dev": v["dev"], "test": v["test"],
             "proposal": v["proposal"],
+            "evaluation_status": self._version_status(v),
+        }
+
+    def _version_real_judge_complete(self, version):
+        case_ids = {str(case["case_id"]) for case in self.cases}
+        if not case_ids:
+            return False
+        checks = self.judge_checks.get(version, {})
+        direct = self.report_judgments.get(version, {})
+        judged = {
+            case_id
+            for case_id in case_ids
+            if (checks.get(case_id) or {}).get("checks")
+            or case_id in direct
+        }
+        return judged == case_ids
+
+    def _version_status(self, version_entry):
+        version = version_entry["version"]
+        case_ids = {str(case["case_id"]) for case in self.cases}
+        reports = self.report_outputs.get(version, {})
+        ready = {
+            case_id
+            for case_id in case_ids
+            if (reports.get(case_id) or "").strip()
+        }
+        checks = self.judge_checks.get(version, {})
+        direct = self.report_judgments.get(version, {})
+        judged = {
+            case_id
+            for case_id in case_ids
+            if (checks.get(case_id) or {}).get("checks")
+            or case_id in direct
+        }
+        status, _actions = self._workflow_state(
+            version_entry,
+            case_ids,
+            ready,
+            judged,
+            self.rubric.get("product") == "research_insight",
+        )
+        return status
+
+    def _workflow_state(
+        self,
+        version_entry,
+        case_ids,
+        reports_ready,
+        judged,
+        requires_model_judge,
+    ):
+        block = version_entry.get("workflow_block")
+        mapping_error = version_entry.get("failure_mapping_error") or []
+        if block or mapping_error:
+            status = "blocked"
+        elif case_ids and not requires_model_judge:
+            status = "optimizable"
+        elif not case_ids or reports_ready != case_ids:
+            status = "awaiting_generation"
+        elif requires_model_judge and judged != case_ids:
+            status = "reports_ready"
+        else:
+            status = "optimizable"
+
+        missing_reports = len(case_ids - reports_ready)
+        pending_judge = len(case_ids - judged)
+        generation_reason = None
+        judge_reason = None
+        advance_reason = None
+        if not case_ids:
+            generation_reason = "尚未导入 case"
+        elif reports_ready == case_ids:
+            generation_reason = "当前版本已有完整报告"
+        if reports_ready != case_ids:
+            judge_reason = "尚缺 %d 份报告" % missing_reports
+        elif requires_model_judge and judged == case_ids:
+            judge_reason = "当前版本已完成全部 Judge"
+        if status != "optimizable":
+            if status == "blocked":
+                advance_reason = block or (
+                    "存在未映射 Judge check: "
+                    + ", ".join(mapping_error)
+                )
+            elif pending_judge:
+                advance_reason = "尚有 %d 个 case 未完成 Judge" % pending_judge
+            else:
+                advance_reason = "当前版本报告尚未就绪"
+        return status, {
+            "run_generation": {
+                "enabled": bool(case_ids) and reports_ready != case_ids,
+                "reason": generation_reason,
+            },
+            "run_judge": {
+                "enabled": (
+                    bool(case_ids)
+                    and reports_ready == case_ids
+                    and (
+                        not requires_model_judge
+                        or judged != case_ids
+                    )
+                ),
+                "reason": judge_reason,
+            },
+            "advance": {
+                "enabled": status == "optimizable",
+                "reason": advance_reason,
+            },
         }
 
     def _split_counts(self):

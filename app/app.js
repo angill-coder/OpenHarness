@@ -149,7 +149,9 @@ document.getElementById('advanceBtn').onclick=async()=>{
   if(r){ toast(r.message, 4200);
     document.getElementById('advanceMsg').innerHTML =
       (r.status==='adopted'?'<span class="ok-txt">✅ 采纳</span> ':
+       r.status==='proposed'?'<span class="warn-txt">🧪 待真实验证</span> ':
        r.status==='rejected'?'<span class="warn-txt">❌ 被 gate 拒绝</span> ':
+       r.status==='blocked'?'<span class="warn-txt">⚠️ 无法推进</span> ':
        '<span class="mut">■ 收敛</span> ')+r.message;
   }
 };
@@ -243,10 +245,12 @@ function renderGenerationPanel(){
       `<div class="small warn-txt" style="margin-top:5px">当前为固定 Skill 链路验证；任务仍冻结并记录 Session 版本与哈希。</div>`;
   }
   const active=generationActive();
-  run.disabled=!STATE||!STATE.n_cases||active||!GEN_CONFIG||!GEN_CONFIG.ready;
+  const generationAction=STATE&&STATE.actions&&STATE.actions.run_generation;
+  run.disabled=!STATE||!(generationAction?generationAction.enabled:STATE.n_cases)||active||!GEN_CONFIG||!GEN_CONFIG.ready;
   retry.style.display=GEN_JOB&&!active&&GEN_JOB.failed_case_ids&&GEN_JOB.failed_case_ids.length?'':'none';
   cancel.style.display=active?'':'none';
-  document.getElementById('advanceBtn').disabled=!STATE||!STATE.can_advance||active||JUDGE_RUNNING;
+  const advanceAction=STATE&&STATE.actions&&STATE.actions.advance;
+  document.getElementById('advanceBtn').disabled=!STATE||!(advanceAction?advanceAction.enabled:STATE.can_advance)||active||JUDGE_RUNNING;
   if(!GEN_JOB){
     status.innerHTML='<span class="mut">尚未运行。报告导入后，请在下方一键批量 Judge 全部 case。</span>';
     cases.innerHTML='';return;
@@ -284,7 +288,8 @@ function render(){
   }).join('');
   document.getElementById('versionPills').innerHTML = pills +
     `<div class="small mut" style="margin-top:6px">数据 ${STATE.n_cases} 条 ${JSON.stringify(STATE.splits)}</div>`;
-  document.getElementById('advanceBtn').disabled=!STATE.can_advance||generationActive()||JUDGE_RUNNING;
+  const advanceAction=STATE.actions&&STATE.actions.advance;
+  document.getElementById('advanceBtn').disabled=!(advanceAction?advanceAction.enabled:STATE.can_advance)||generationActive()||JUDGE_RUNNING;
 
   // 当前 skill
   const cv=STATE.versions.find(v=>v.version===STATE.current_version);
@@ -347,8 +352,11 @@ function renderJudgeStatus(){
   if(!el||!btn)return;
   const p=STATE&&STATE.judge_progress;
   const allReports=!!(p&&p.total_cases&&p.reports_ready===p.total_cases);
-  btn.disabled=!allReports||generationActive()||JUDGE_RUNNING;
-  btn.textContent=JUDGE_RUNNING?'批量 Judge 执行中…':'▶ 批量 Judge 全部 case';
+  const action=STATE&&STATE.actions&&STATE.actions.run_judge;
+  btn.disabled=!(action?action.enabled:allReports)||generationActive()||JUDGE_RUNNING;
+  btn.textContent=JUDGE_RUNNING
+    ?'批量 Judge 执行中…'
+    :(p&&p.judged_cases?'▶ 继续 Judge 未完成 case':'▶ 批量 Judge 全部 case');
   if(!p){
     el.innerHTML='<span class="mut">导入数据后显示 Judge 状态。</span>';return;
   }
@@ -357,6 +365,7 @@ function renderJudgeStatus(){
     `<div class="kv"><span>模型 Judge</span><b class="${complete?'ok-txt':p.judged_cases?'warn-txt':'mut'}">${p.judged_cases}/${p.total_cases}</b></div>`+
     (!allReports?`<div class="warn-txt" style="margin-top:5px">仍缺 ${p.total_cases-p.reports_ready} 份报告，请先重试 WB CLI 或手工补齐。</div>`:'')+
     (complete?'<div class="ok-txt" style="margin-top:5px">全部 case 已完成模型 Judge，可以生成下一版 Skill。</div>':'')+
+    (action&&!action.enabled&&action.reason&&!complete?`<div class="small mut" style="margin-top:5px">${esc(action.reason)}</div>`:'')+
     (JUDGE_SUMMARY&&JUDGE_SUMMARY.failed_cases
       ?`<div class="warn-txt" style="margin-top:5px">最近一次批量 Judge 有 ${JUDGE_SUMMARY.failed_cases} 个 case 未成功，可再次点击整批重跑。</div>`+
        JUDGE_RESULTS.filter(x=>x.status!=='judged').map(x=>

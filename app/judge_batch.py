@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Dict, Iterable, List
+from typing import Callable, Dict, Iterable, List, Optional
 
 
 _VALID_CHECK_VALUES = {"met", "partial", "miss", 1, 1.0, 0.5, 0, 0.0}
@@ -55,6 +55,7 @@ def judge_cases(
     call_model: Callable[[str], str],
     extract_json: Callable[[str], Dict | None],
     parallel: int = 3,
+    on_result: Optional[Callable[[Dict], Optional[Dict]]] = None,
 ) -> List[Dict]:
     """批量 Judge，返回与输入 case 顺序一致的逐 case 结果。
 
@@ -101,7 +102,7 @@ def judge_cases(
 
     if not case_list:
         return []
-    workers = max(1, min(int(parallel or 1), len(case_list), 8))
+    workers = max(1, min(int(parallel or 1), len(case_list), 20))
     ordered = [None] * len(case_list)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
@@ -110,5 +111,9 @@ def judge_cases(
         }
         for future in as_completed(futures):
             index, result = future.result()
+            if on_result is not None:
+                replacement = on_result(result)
+                if replacement is not None:
+                    result = replacement
             ordered[index] = result
     return ordered

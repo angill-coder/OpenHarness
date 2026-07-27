@@ -77,6 +77,7 @@ class EvalRecord:
     output: Dict[str, Any]
     scores: Dict[str, int] = field(default_factory=dict)
     judge_reasoning: Dict[str, str] = field(default_factory=dict)
+    judge_checks: Dict[str, float] = field(default_factory=dict)
     flagged: List[str] = field(default_factory=list)
     case_failed_gate: bool = False         # 命中红线
     human_label: Optional[Dict[str, int]] = None

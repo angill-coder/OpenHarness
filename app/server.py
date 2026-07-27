@@ -25,6 +25,7 @@ API:
 import argparse
 import base64
 from contextlib import nullcontext
+import hashlib
 import io
 import json
 import os
@@ -191,9 +192,20 @@ def _extract_json(text: str):
 
 def _judge_parallelism():
     try:
-        return max(1, min(int(os.environ.get("OPENHARNESS_JUDGE_PARALLEL", "3")), 8))
+        return max(
+            1,
+            min(
+                int(
+                    os.environ.get(
+                        "OPENHARNESS_JUDGE_PARALLEL",
+                        "20",
+                    )
+                ),
+                20,
+            ),
+        )
     except ValueError:
-        return 3
+        return 20
 
 
 def _judge_summary(results):
@@ -222,6 +234,20 @@ def _judge_summary(results):
         "model": os.environ.get("ANTHROPIC_JUDGE_MODEL", "claude-opus-4-8"),
         "parallel": _judge_parallelism(),
     }
+
+
+def _text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _json_sha256(value) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return _text_sha256(raw)
 
 
 def _restore_all():
@@ -684,6 +710,7 @@ class Handler(BaseHTTPRequestHandler):
                     cases = [dict(case) for case in s.cases]
                     reports = dict(s.report_outputs.get(ver, {}))
                     rubric = dict(s.rubric)
+                    existing = dict(s.judge_checks.get(ver, {}))
                 if not cases:
                     return self._send(400, {"error": "尚未导入评测 case"})
                 missing_reports = [
@@ -700,6 +727,84 @@ class Handler(BaseHTTPRequestHandler):
                         },
                     )
 
+                rubric_sha256 = _json_sha256(rubric)
+                force_all = bool(b.get("force_all"))
+                if not force_all:
+                    cases = [
+                        case
+                        for case in cases
+                        if case["case_id"] not in existing
+                    ]
+                if not cases:
+                    with _session_lock(s.id):
+                        state = s.view(acct)
+                    return self._send(
+                        200,
+                        {
+                            "summary": {
+                                **_judge_summary([]),
+                                "status": "completed",
+                                "total_cases": 0,
+                                "judged_cases": 0,
+                                "failed_cases": 0,
+                                "remaining_cases": 0,
+                            },
+                            "results": [],
+                            "state": state,
+                        },
+                    )
+
+                def persist_result(item):
+                    if item.get("status") != "judged":
+                        return item
+                    case_id = item["case_id"]
+                    with _session_lock(s.id):
+                        if s._current()["version"] != ver:
+                            return {
+                                **item,
+                                "status": "stale_report",
+                                "error": (
+                                    "Judge 期间 Skill 版本已变化，结果未写入"
+                                ),
+                            }
+                        current_report = (
+                            s.report_outputs.get(ver, {}).get(case_id)
+                        )
+                        if current_report != reports.get(case_id):
+                            return {
+                                **item,
+                                "status": "stale_report",
+                                "error": (
+                                    "Judge 期间报告已变化，结果未写入"
+                                ),
+                            }
+                        if _json_sha256(s.rubric) != rubric_sha256:
+                            return {
+                                **item,
+                                "status": "stale_report",
+                                "error": (
+                                    "Judge 期间 Rubric 已变化，结果未写入"
+                                ),
+                            }
+                        s.set_judge_checks_batch(
+                            {
+                                case_id: {
+                                    "checks": item["checks"],
+                                    "reasoning": (
+                                        item.get("reasoning") or {}
+                                    ),
+                                    "report_sha256": _text_sha256(
+                                        current_report
+                                    ),
+                                    "rubric_sha256": rubric_sha256,
+                                }
+                            },
+                            ver,
+                            account=acct,
+                            evaluate_now=False,
+                        )
+                    return item
+
                 results = judge_cases(
                     cases,
                     reports,
@@ -708,43 +813,22 @@ class Handler(BaseHTTPRequestHandler):
                     _call_opus,
                     _extract_json,
                     parallel=_judge_parallelism(),
+                    on_result=persist_result,
                 )
                 with _session_lock(s.id):
-                    if s._current()["version"] != ver:
-                        for item in results:
-                            if item["status"] == "judged":
-                                item["status"] = "stale_report"
-                                item["error"] = "Judge 期间 Skill 版本已变化，结果未写入"
-                    else:
-                        current_reports = s.report_outputs.get(ver, {})
-                        for item in results:
-                            case_id = item["case_id"]
-                            if (
-                                item["status"] == "judged"
-                                and current_reports.get(case_id) != reports.get(case_id)
-                            ):
-                                item["status"] = "stale_report"
-                                item["error"] = "Judge 期间报告已变化，结果未写入"
-                    judgments = {
-                        item["case_id"]: {
-                            "checks": item["checks"],
-                            "reasoning": item.get("reasoning") or {},
-                        }
-                        for item in results
-                        if item["status"] == "judged"
-                    }
-                    if judgments:
-                        state = s.set_judge_checks_batch(
-                            judgments,
-                            ver,
-                            account=acct,
-                        )
-                    else:
-                        state = s.view(acct)
+                    s.evaluate(acct)
+                    s._save()
+                    state = s.view(acct)
+                summary = _judge_summary(results)
+                summary["remaining_cases"] = len(
+                    state["judge_progress"]["pending_judge_case_ids"]
+                )
+                if summary["remaining_cases"] == 0:
+                    summary["status"] = "completed"
                 return self._send(
                     200,
                     {
-                        "summary": _judge_summary(results),
+                        "summary": summary,
                         "results": results,
                         "state": state,
                     },

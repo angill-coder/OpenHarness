@@ -148,8 +148,41 @@ def append_check_judgments(sid: str, version: str, judgments: Dict[str, Dict]):
                 "case_id": case_id,
                 "checks": judgment.get("checks", {}),
                 "reasoning": judgment.get("reasoning", {}),
+                "report_sha256": judgment.get("report_sha256"),
+                "rubric_sha256": judgment.get("rubric_sha256"),
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def invalidate_check_judgments(
+    sid: str,
+    version: str,
+    case_ids: List[str],
+    reason: str,
+):
+    if not case_ids:
+        return
+    d = _ensure(sid)
+    now = _now()
+    with open(
+        os.path.join(d, "check_judgments.jsonl"),
+        "a",
+        encoding="utf-8",
+    ) as f:
+        for case_id in case_ids:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": now,
+                        "version": version,
+                        "case_id": case_id,
+                        "invalidated": True,
+                        "reason": reason,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
 
 # ---------------- 读 ----------------
@@ -222,8 +255,18 @@ def _load_check_jsonl(sid: str, fname: str) -> Dict[str, Dict[str, Dict[str, Any
             if not l.strip():
                 continue
             rec = json.loads(l)
+            if rec.get("invalidated"):
+                out.setdefault(rec["version"], {}).pop(
+                    rec["case_id"],
+                    None,
+                )
+                continue
             out.setdefault(rec["version"], {})[rec["case_id"]] = {
-                "checks": rec.get("checks", {}), "reasoning": rec.get("reasoning", {})}
+                "checks": rec.get("checks", {}),
+                "reasoning": rec.get("reasoning", {}),
+                "report_sha256": rec.get("report_sha256"),
+                "rubric_sha256": rec.get("rubric_sha256"),
+            }
     return out
 
 

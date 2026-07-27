@@ -20,3 +20,15 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("use_configured:true", source)
         self.assertIn("configuredDataBtn", html)
         self.assertIn("JSON.parse(raw)", source)
+
+    def test_frontend_uses_backend_actions_for_loop_buttons(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        self.assertIn("STATE.actions&&STATE.actions.advance", source)
+        self.assertIn(
+            "STATE&&STATE.actions&&STATE.actions.run_judge",
+            source,
+        )
+        self.assertIn(
+            "STATE&&STATE.actions&&STATE.actions.run_generation",
+            source,
+        )
