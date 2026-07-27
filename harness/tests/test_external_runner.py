@@ -29,24 +29,24 @@ from workbuddy_runner import (
 
 
 class ExternalRunnerTest(unittest.TestCase):
-    def test_default_parallelism_is_ten(self) -> None:
+    def test_default_parallelism_is_twenty(self) -> None:
         request = ExternalRunRequest(
             case_file=Path("case.json"),
             output_root=Path("generation_runs"),
             skill_version="test-v1",
             skill_name="research-report",
         )
-        self.assertEqual(request.parallel, 10)
+        self.assertEqual(request.parallel, 20)
         self.assertEqual(
             BatchConfig(
                 command=("workbuddy",),
                 output_root=Path("generation_runs"),
             ).parallel,
-            10,
+            20,
         )
         self.assertEqual(
             _parser().parse_args(["--dataset", "case.json"]).parallel,
-            10,
+            20,
         )
 
     def setUp(self) -> None:

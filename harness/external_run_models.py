@@ -47,7 +47,7 @@ class ExternalRunRequest:
     skill_path: Optional[Path] = None
     model: Optional[str] = None
     effort: Optional[str] = None
-    parallel: int = 10
+    parallel: int = 20
     timeout_seconds: float = 900.0
     stall_timeout_seconds: float = 180.0
     max_report_retries: int = 3

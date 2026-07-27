@@ -69,7 +69,7 @@ class BatchConfig:
     product_config: Path | None = None
     model: str | None = None
     effort: str | None = None
-    parallel: int = 10
+    parallel: int = 20
     repetition: int = 1
     timeout_seconds: float = 900.0
     stall_timeout_seconds: float = 180.0

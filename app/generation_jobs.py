@@ -65,7 +65,7 @@ class GenerationSettings:
     skill_path: Optional[Path] = None
     skill_name: Optional[str] = None
     model: Optional[str] = "deepseek-v4-pro"
-    parallel: int = 10
+    parallel: int = 20
     max_parallel: int = 60
     max_report_retries: int = 3
     timeout_seconds: float = 900.0
@@ -119,7 +119,7 @@ class GenerationSettings:
                 "deepseek-v4-pro",
             )
             or None,
-            parallel=_env_int("OPENHARNESS_WB_PARALLEL", 10),
+            parallel=_env_int("OPENHARNESS_WB_PARALLEL", 20),
             max_parallel=_env_int(
                 "OPENHARNESS_WB_MAX_PARALLEL",
                 60,

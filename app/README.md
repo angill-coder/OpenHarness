@@ -20,7 +20,7 @@ python3 server.py                 # 默认 http://127.0.0.1:8080
 export OPENHARNESS_WB_DATASET=../data/20260724_test_data/data.json
 export OPENHARNESS_WB_SKILL_PATH=../skills/research-report
 export OPENHARNESS_WB_MODEL=deepseek-v4-pro
-export OPENHARNESS_WB_PARALLEL=10
+export OPENHARNESS_WB_PARALLEL=20
 export OPENHARNESS_WB_MAX_REPORT_RETRIES=3
 export OPENHARNESS_WB_OUTPUT=../generation_runs
 

@@ -34,7 +34,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model")
     parser.add_argument("--effort")
-    parser.add_argument("--parallel", type=int, default=10)
+    parser.add_argument("--parallel", type=int, default=20)
     parser.add_argument(
         "--repetition",
         type=int,
