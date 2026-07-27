@@ -15,8 +15,8 @@ API:
   POST /api/advance           {id}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
-  POST /api/run_judge_batch   {id, version?} -> 并发 Judge 当前版本全部 case
-  POST /api/generation/start  {id, idempotency_key?} -> 后台调用 WB 并自动批量导入
+  POST /api/run_judge_batch   {id, version?, parallel?} -> 并发 Judge 当前版本全部 case
+  POST /api/generation/start  {id, idempotency_key?, parallel?} -> 后台调用 WB 并自动批量导入
   GET  /api/generation?id=    -> 查询生成任务
   POST /api/generation/retry  {job_id} -> 仅重跑未导入的 case
   POST /api/generation/cancel {job_id} -> 请求取消
@@ -194,25 +194,46 @@ def _extract_json(text: str):
         return None
 
 
-def _judge_parallelism():
+def _judge_max_parallelism():
     try:
         return max(
             1,
-            min(
-                int(
-                    os.environ.get(
-                        "OPENHARNESS_JUDGE_PARALLEL",
-                        "20",
-                    )
-                ),
-                20,
+            int(
+                os.environ.get(
+                    "OPENHARNESS_JUDGE_MAX_PARALLEL",
+                    "20",
+                )
             ),
         )
     except ValueError:
         return 20
 
 
-def _judge_summary(results):
+def _judge_parallelism(requested=None):
+    maximum = _judge_max_parallelism()
+    value = (
+        os.environ.get("OPENHARNESS_JUDGE_PARALLEL", "20")
+        if requested is None
+        else requested
+    )
+    if isinstance(value, bool) or (
+        isinstance(value, float) and not value.is_integer()
+    ):
+        raise ValueError("Judge 并发必须是整数")
+    try:
+        parallel = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Judge 并发必须是整数") from exc
+    if requested is None:
+        return max(1, min(parallel, maximum))
+    if not 1 <= parallel <= maximum:
+        raise ValueError(
+            "Judge 并发必须在 1-%s 之间" % maximum
+        )
+    return parallel
+
+
+def _judge_summary(results, parallel=None):
     counts = {
         "judged": 0,
         "failed": 0,
@@ -236,7 +257,7 @@ def _judge_summary(results):
         "missing_report_cases": counts["missing_report"],
         "stale_report_cases": counts["stale_report"],
         "model": os.environ.get("ANTHROPIC_JUDGE_MODEL", "claude-opus-4-8"),
-        "parallel": _judge_parallelism(),
+        "parallel": _judge_parallelism(parallel),
     }
 
 
@@ -351,10 +372,14 @@ class Handler(BaseHTTPRequestHandler):
                     503,
                     {"error": "GenerationJobService 尚未初始化"},
                 )
-            return self._send(
-                200,
-                GENERATION_SERVICE.configuration(),
+            payload = GENERATION_SERVICE.configuration()
+            payload.update(
+                {
+                    "judge_parallel": _judge_parallelism(),
+                    "judge_max_parallel": _judge_max_parallelism(),
+                }
             )
+            return self._send(200, payload)
         if u.path == "/api/generation":
             if GENERATION_SERVICE is None:
                 return self._send(
@@ -560,6 +585,7 @@ class Handler(BaseHTTPRequestHandler):
                     s.id,
                     acct,
                     case_ids=b.get("case_ids"),
+                    parallel=b.get("parallel"),
                     idempotency_key=(
                         b.get("idempotency_key")
                         or self.headers.get("Idempotency-Key")
@@ -699,6 +725,12 @@ class Handler(BaseHTTPRequestHandler):
             s = self._sess(b.get("id"))
             if not s:
                 return
+            try:
+                judge_parallel = _judge_parallelism(
+                    b.get("parallel")
+                )
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
             ver = b.get("version") or s._current()["version"]
             if ver != s._current()["version"]:
                 return self._send(409, {"error": "只能批量 Judge 当前 Skill 版本"})
@@ -746,7 +778,7 @@ class Handler(BaseHTTPRequestHandler):
                         200,
                         {
                             "summary": {
-                                **_judge_summary([]),
+                                **_judge_summary([], judge_parallel),
                                 "status": "completed",
                                 "total_cases": 0,
                                 "judged_cases": 0,
@@ -816,14 +848,14 @@ class Handler(BaseHTTPRequestHandler):
                     _build_judge_prompt,
                     _call_opus,
                     _extract_json,
-                    parallel=_judge_parallelism(),
+                    parallel=judge_parallel,
                     on_result=persist_result,
                 )
                 with _session_lock(s.id):
                     s.evaluate(acct)
                     s._save()
                     state = s.view(acct)
-                summary = _judge_summary(results)
+                summary = _judge_summary(results, judge_parallel)
                 summary["remaining_cases"] = len(
                     state["judge_progress"]["pending_judge_case_ids"]
                 )

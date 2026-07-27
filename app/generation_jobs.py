@@ -66,6 +66,7 @@ class GenerationSettings:
     skill_name: Optional[str] = None
     model: Optional[str] = "deepseek-v4-pro"
     parallel: int = 10
+    max_parallel: int = 60
     max_report_retries: int = 3
     timeout_seconds: float = 900.0
     stall_timeout_seconds: float = 180.0
@@ -119,6 +120,10 @@ class GenerationSettings:
             )
             or None,
             parallel=_env_int("OPENHARNESS_WB_PARALLEL", 10),
+            max_parallel=_env_int(
+                "OPENHARNESS_WB_MAX_PARALLEL",
+                60,
+            ),
             max_report_retries=_env_int(
                 "OPENHARNESS_WB_MAX_REPORT_RETRIES",
                 3,
@@ -170,6 +175,13 @@ class GenerationSettings:
                 )
         if self.parallel < 1:
             raise GenerationJobError("parallel 必须至少为 1")
+        if self.max_parallel < 1:
+            raise GenerationJobError("max_parallel 必须至少为 1")
+        if self.parallel > self.max_parallel:
+            raise GenerationJobError(
+                "默认 parallel 不能超过 max_parallel=%s"
+                % self.max_parallel
+            )
         if self.max_report_retries < 0:
             raise GenerationJobError(
                 "max_report_retries 不能小于 0"
@@ -192,6 +204,7 @@ class GenerationSettings:
             ),
             "model": self.model,
             "parallel": self.parallel,
+            "max_parallel": self.max_parallel,
             "max_report_retries": self.max_report_retries,
             "max_attempts": self.max_report_retries + 1,
             "timeout_seconds": self.timeout_seconds,
@@ -429,6 +442,7 @@ class GenerationJobService:
         session_id: str,
         account: str,
         case_ids: Optional[Iterable[str]] = None,
+        parallel: Optional[int] = None,
         idempotency_key: Optional[str] = None,
         parent_job_id: Optional[str] = None,
     ) -> tuple[GenerationJob, bool]:
@@ -441,6 +455,21 @@ class GenerationJobService:
             (list, tuple, set),
         ):
             raise GenerationJobError("case_ids 必须是数组")
+        if isinstance(parallel, bool) or (
+            isinstance(parallel, float) and not parallel.is_integer()
+        ):
+            raise GenerationJobError("报告生成并发必须是整数")
+        try:
+            selected_parallel = int(
+                self.settings.parallel if parallel is None else parallel
+            )
+        except (TypeError, ValueError) as exc:
+            raise GenerationJobError("报告生成并发必须是整数") from exc
+        if not 1 <= selected_parallel <= self.settings.max_parallel:
+            raise GenerationJobError(
+                "报告生成并发必须在 1-%s 之间"
+                % self.settings.max_parallel
+            )
 
         with self._lock:
             if idempotency_key:
@@ -525,7 +554,7 @@ class GenerationJobService:
             skill_mode="session_artifact",
             skill_ref=str(frozen_skill.path),
             model=self.settings.model,
-            parallel=self.settings.parallel,
+            parallel=selected_parallel,
             max_report_retries=self.settings.max_report_retries,
             timeout_seconds=self.settings.timeout_seconds,
             stall_timeout_seconds=self.settings.stall_timeout_seconds,
@@ -591,6 +620,7 @@ class GenerationJobService:
             previous.session_id,
             account,
             case_ids=failed_ids,
+            parallel=previous.parallel,
             idempotency_key=idempotency_key,
             parent_job_id=previous.job_id,
         )
@@ -620,11 +650,11 @@ class GenerationJobService:
             session_id=job.session_id,
             skill_name=None,
             skill_path=Path(job.skill_ref),
-            model=self.settings.model,
-            parallel=self.settings.parallel,
-            timeout_seconds=self.settings.timeout_seconds,
-            stall_timeout_seconds=self.settings.stall_timeout_seconds,
-            max_report_retries=self.settings.max_report_retries,
+            model=job.model,
+            parallel=job.parallel,
+            timeout_seconds=job.timeout_seconds,
+            stall_timeout_seconds=job.stall_timeout_seconds,
+            max_report_retries=job.max_report_retries,
             output_contract=ReportOutputContract(
                 min_bytes=self.settings.min_report_bytes,
             ),

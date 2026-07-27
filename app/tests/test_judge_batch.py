@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -15,7 +16,7 @@ for path in (str(APP), str(HARNESS)):
 
 from judge_batch import judge_cases  # noqa: E402
 import persistence as persist  # noqa: E402
-from server import _build_judge_prompt  # noqa: E402
+from server import _build_judge_prompt, _judge_parallelism  # noqa: E402
 from session import Session  # noqa: E402
 
 
@@ -44,6 +45,26 @@ def extract_json(text):
 
 
 class JudgeBatchTest(unittest.TestCase):
+    def test_judge_parallel_override_respects_backend_limit(self):
+        old = os.environ.get("OPENHARNESS_JUDGE_MAX_PARALLEL")
+        os.environ["OPENHARNESS_JUDGE_MAX_PARALLEL"] = "20"
+        try:
+            self.assertEqual(_judge_parallelism(7), 7)
+            with self.assertRaisesRegex(ValueError, "1-20"):
+                _judge_parallelism(21)
+            with self.assertRaisesRegex(ValueError, "整数"):
+                _judge_parallelism(1.5)
+        finally:
+            if old is None:
+                os.environ.pop(
+                    "OPENHARNESS_JUDGE_MAX_PARALLEL",
+                    None,
+                )
+            else:
+                os.environ[
+                    "OPENHARNESS_JUDGE_MAX_PARALLEL"
+                ] = old
+
     def test_server_prompt_includes_ground_truth_for_traceability(self):
         prompt = _build_judge_prompt(
             RUBRIC,

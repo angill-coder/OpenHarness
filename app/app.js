@@ -116,10 +116,19 @@ document.getElementById('runJudgeBtn').onclick=async()=>{
   if(!progress||progress.reports_ready!==progress.total_cases){
     toast('请先生成或补齐当前版本全部 case 的报告');return;
   }
+  const parallel=readParallel(
+    'judgeParallel',
+    GEN_CONFIG&&GEN_CONFIG.judge_parallel,
+    GEN_CONFIG&&GEN_CONFIG.judge_max_parallel,
+    'Judge'
+  );
+  if(parallel==null)return;
   JUDGE_RUNNING=true;renderJudgeStatus();
-  toast(`正在批量 Judge ${progress.reports_ready}/${progress.total_cases} 份报告…`,9000);
+  toast(`正在以并发 ${parallel} Judge ${progress.reports_ready}/${progress.total_cases} 份报告…`,9000);
   try{
-    const j=await api('/api/run_judge_batch','POST',{id:SID,version:STATE.current_version});
+    const j=await api('/api/run_judge_batch','POST',{
+      id:SID,version:STATE.current_version,parallel
+    });
     STATE=j.state;JUDGE_SUMMARY=j.summary;JUDGE_RESULTS=j.results||[];render();
     const s=j.summary;
     toast(
@@ -166,6 +175,16 @@ const GEN_STATUS_ZH={
 function generationActive(){
   return !!(GEN_JOB&&GEN_JOB.active);
 }
+function readParallel(id,fallback,maximum,label){
+  const input=document.getElementById(id);
+  const value=Number(input&&input.value||fallback);
+  const max=Number(maximum)||value;
+  if(!Number.isInteger(value)||value<1||value>max){
+    toast(`${label}并发必须是 1-${max} 的整数`);
+    return null;
+  }
+  return value;
+}
 function scheduleGenerationPoll(){
   clearTimeout(GEN_POLL);
   if(!GEN_JOB||!GEN_JOB.active)return;
@@ -200,11 +219,20 @@ async function loadLatestGeneration(){
 }
 document.getElementById('runGenerationBtn').onclick=async()=>{
   if(!SID||!STATE||!STATE.n_cases){toast('请先导入评测数据');return;}
+  const parallel=readParallel(
+    'generationParallel',
+    GEN_CONFIG&&GEN_CONFIG.parallel,
+    GEN_CONFIG&&GEN_CONFIG.max_parallel,
+    '报告生成'
+  );
+  if(parallel==null)return;
   const key='start-'+SID+'-'+STATE.current_version+'-'+Date.now();
   try{
-    const j=await api('/api/generation/start','POST',{id:SID,idempotency_key:key});
+    const j=await api('/api/generation/start','POST',{
+      id:SID,idempotency_key:key,parallel
+    });
     GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
-    toast(j.reused?'已有任务正在执行':'WB CLI 任务已启动');
+    toast(j.reused?'已有任务正在执行':`WB CLI 任务已启动，并发 ${parallel}`);
   }catch(e){renderGenerationPanel();}
 };
 document.getElementById('retryGenerationBtn').onclick=async()=>{
@@ -232,6 +260,8 @@ function renderGenerationPanel(){
   const run=document.getElementById('runGenerationBtn');
   const retry=document.getElementById('retryGenerationBtn');
   const cancel=document.getElementById('cancelGenerationBtn');
+  const parallelInput=document.getElementById('generationParallel');
+  const judgeParallelInput=document.getElementById('judgeParallel');
   if(!cfg)return;
 
   if(!GEN_CONFIG){
@@ -240,11 +270,27 @@ function renderGenerationPanel(){
     cfg.innerHTML='<span class="warn-txt">运行配置不可用：'+esc(GEN_CONFIG.error)+'</span>';
   }else{
     cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>启动时编译当前 Session 版本</span></div>`+
-      `<div class="kv"><span>模型 / 并发</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel}</span></div>`+
+      `<div class="kv"><span>模型 / 默认并发 / 上限</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel} / ${GEN_CONFIG.max_parallel}</span></div>`+
       `<div class="kv"><span>报告重试</span><span>最多额外 ${GEN_CONFIG.max_report_retries} 次</span></div>`+
       `<div class="small mut" style="margin-top:5px">每个任务冻结完整 Skill 目录、版本和哈希，WB CLI 只执行该副本。</div>`;
   }
   const active=generationActive();
+  if(parallelInput&&GEN_CONFIG){
+    parallelInput.max=GEN_CONFIG.max_parallel||GEN_CONFIG.parallel;
+    if(!parallelInput.dataset.initialized){
+      parallelInput.value=GEN_CONFIG.parallel;
+      parallelInput.dataset.initialized='1';
+    }
+    parallelInput.disabled=active||!GEN_CONFIG.ready;
+  }
+  if(judgeParallelInput&&GEN_CONFIG){
+    judgeParallelInput.max=GEN_CONFIG.judge_max_parallel||GEN_CONFIG.judge_parallel;
+    if(!judgeParallelInput.dataset.initialized){
+      judgeParallelInput.value=GEN_CONFIG.judge_parallel;
+      judgeParallelInput.dataset.initialized='1';
+    }
+    judgeParallelInput.disabled=active||JUDGE_RUNNING;
+  }
   const generationAction=STATE&&STATE.actions&&STATE.actions.run_generation;
   run.disabled=!STATE||!(generationAction?generationAction.enabled:STATE.n_cases)||active||!GEN_CONFIG||!GEN_CONFIG.ready;
   retry.style.display=GEN_JOB&&!active&&GEN_JOB.failed_case_ids&&GEN_JOB.failed_case_ids.length?'':'none';
@@ -261,6 +307,7 @@ function renderGenerationPanel(){
   const historical=STATE&&GEN_JOB.skill_version!==STATE.current_version;
   status.innerHTML=`<div class="kv"><span>状态</span><b class="${GEN_JOB.status==='completed'?'ok-txt':GEN_JOB.status==='failed'?'warn-txt':''}">${esc(GEN_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status)}</b></div>`+
     `<div class="kv"><span>实际执行版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.execution_skill_hash||'').slice(0,10))}</span></div>`+
+    `<div class="kv"><span>报告生成并发</span><span>${GEN_JOB.parallel}</span></div>`+
     (historical?`<div class="warn-txt" style="margin-top:5px">这是历史任务；当前 Session 已是 ${esc(STATE.current_version)}。</div>`:'')+
     `<div class="kv"><span>已导入</span><span>${imported}/${total}</span></div>`+
     `<div class="barwrap" style="margin-top:7px"><div class="bar" style="width:${pct}%"></div></div>`+
@@ -355,6 +402,15 @@ function renderJudgeStatus(){
   const p=STATE&&STATE.judge_progress;
   const allReports=!!(p&&p.total_cases&&p.reports_ready===p.total_cases);
   const action=STATE&&STATE.actions&&STATE.actions.run_judge;
+  const parallelInput=document.getElementById('judgeParallel');
+  if(parallelInput&&GEN_CONFIG){
+    parallelInput.max=GEN_CONFIG.judge_max_parallel||GEN_CONFIG.judge_parallel;
+    if(!parallelInput.dataset.initialized){
+      parallelInput.value=GEN_CONFIG.judge_parallel;
+      parallelInput.dataset.initialized='1';
+    }
+    parallelInput.disabled=generationActive()||JUDGE_RUNNING;
+  }
   btn.disabled=!(action?action.enabled:allReports)||generationActive()||JUDGE_RUNNING;
   btn.textContent=JUDGE_RUNNING
     ?'批量 Judge 执行中…'

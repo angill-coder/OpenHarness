@@ -32,3 +32,17 @@ class FrontendContractTest(unittest.TestCase):
             "STATE&&STATE.actions&&STATE.actions.run_generation",
             source,
         )
+
+    def test_frontend_sends_generation_and_judge_parallelism(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="generationParallel"', html)
+        self.assertIn('id="judgeParallel"', html)
+        self.assertIn(
+            "'/api/generation/start','POST',{\n      id:SID,idempotency_key:key,parallel",
+            source,
+        )
+        self.assertIn(
+            "id:SID,version:STATE.current_version,parallel",
+            source,
+        )

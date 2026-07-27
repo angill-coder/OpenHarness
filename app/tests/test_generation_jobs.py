@@ -197,6 +197,7 @@ class GenerationJobServiceTest(unittest.TestCase):
             ),
         )
         self.assertEqual(settings.parallel, 10)
+        self.assertEqual(settings.max_parallel, 60)
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
@@ -272,6 +273,32 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertEqual(done.compiler_version, "session-skill/v1")
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
+
+    def test_job_uses_requested_parallel_with_backend_limit(self):
+        fake = FakeRunner()
+        service = GenerationJobService(
+            {"test-session": self.session},
+            self.settings,
+            fake,
+        )
+        job, _ = service.start(
+            "test-session",
+            "tester",
+            parallel=1,
+        )
+        done = service.wait(job.job_id)
+        self.assertEqual(done.parallel, 1)
+        self.assertEqual(fake.requests[0].parallel, 1)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "1-60",
+        ):
+            service.start(
+                "test-session",
+                "tester",
+                parallel=61,
+            )
 
     def test_partial_job_can_retry_only_failed_case(self):
         fake = FakeRunner(fail_once={"case-b"})

@@ -104,7 +104,7 @@ def judge_cases(
 
     if not case_list:
         return []
-    workers = max(1, min(int(parallel or 1), len(case_list), 20))
+    workers = max(1, min(int(parallel or 1), len(case_list)))
     ordered = [None] * len(case_list)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
