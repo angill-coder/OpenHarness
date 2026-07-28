@@ -525,7 +525,7 @@ function renderRubricEditor(){
   const erb=document.getElementById('editorRubricBody'); if(erb)erb.innerHTML=rubricDimsHtml(rb);
 }
 
-const EV_ZH={created:"生成 V0",import_data:"导入数据",submit_labels:"历史人工标注",
+const EV_ZH={created:"生成 V0",import_data:"导入数据",
   edit_rubric:"编辑 rubric",version_adopted:"采纳新版",version_rejected:"版本被拒",
   converged:"收敛/平台期",import_output:"导入报告文本",import_judgment:"导入LLM评分",
   generation_import:"WB 批量导入",run_judge_batch:"批量模型 Judge"};
@@ -580,7 +580,6 @@ function renderHistory(){
       const t=new Date(e.ts*1000);const hh=('0'+t.getHours()).slice(-2)+':'+('0'+t.getMinutes()).slice(-2)+':'+('0'+t.getSeconds()).slice(-2);
       let detail='';const p=e.payload||{};
       if(e.type==='import_data')detail=p.n_cases+' 条 '+JSON.stringify(p.splits);
-      else if(e.type==='submit_labels')detail=p.version+' · '+p.n_cases_labeled+' case';
       else if(e.type==='edit_rubric')detail='→ '+p.new_version;
       else if(e.type==='version_adopted')detail=p.version+' ('+(p.directives_on||[]).slice(-1)+')';
       else if(e.type==='version_rejected')detail=p.version+' · '+p.reason;

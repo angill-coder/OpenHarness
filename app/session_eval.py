@@ -3,19 +3,19 @@
 session_eval.py — 评估 / 记录叠加 / 失败聚类 / rubric 编辑 / 推进 (SessionEval mixin)
 
 由 session.py 组合进 class Session。本文件负责「跑分与推进」:
-  import_data   —— 导入数据集(校验最小字段) + 可选初始人工标注, 触发首次评估
+  import_data   —— 导入数据集(校验最小字段), 触发首次评估
   evaluate      —— 用当前版本 skill 跑分, 叠加真实产物, 聚类失败, 算 dev/test 均分
   _apply_recorded —— 把平台真实报告/评分覆盖 mock(有则真实, 无则占位)
   _rec_view / _output_summary —— 组装单条 case 的可呈现视图
   edit_rubric   —— 改权重/阈值, 存为新 rubric 版本并重评
   advance       —— optimizer 提候选 -> dev gate -> 采纳/拒绝
 
-依赖 SessionCore 的 _current/_human_for/_human_checks_for/view/_save 等。
+依赖 SessionCore 的 _current/view/_save 等。
 """
 import copy
 import sys
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 HARNESS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "harness")
 if HARNESS not in sys.path:
@@ -35,7 +35,7 @@ class SessionEval:
     """评估与推进 mixin。"""
 
     # ---------- 数据导入 ----------
-    def import_data(self, rows: List[Dict[str, Any]], labels: Optional[List[Dict]] = None, account=None):
+    def import_data(self, rows: List[Dict[str, Any]], account=None):
         # 同一份 openharness-wb/v1 JSON 同时服务 WB 生成和平台评测。
         # 旧数组/JSONL 在迁移期仍可读取，但不再静默跳过坏数据。
         normalized = openharness_rows(rows)
@@ -60,16 +60,8 @@ class SessionEval:
             r.setdefault("key_finding_ids", [])
             clean.append(r)
         self.cases = clean
-        # 可选: 导入初始人工标注(作用于 v0)
-        if labels:
-            v0 = self.versions[0]["version"]
-            store = self._human_for(v0, account)
-            for l in labels:
-                if "case_id" in l and "human_scores" in l:
-                    store[l["case_id"]] = l["human_scores"]
         persist.append_event(self.id, "import_data", {
             "n_cases": len(clean), "splits": self._split_counts(),
-            "with_initial_labels": bool(labels),
         })
         # 重新评估当前版本
         r = self.evaluate(account)
@@ -78,8 +70,7 @@ class SessionEval:
 
     # ---------- 评估当前版本 ----------
     def evaluate(self, account=None):
-        """计算与账号无关的基础量(judge/mock 分、失败聚类、dev/test 均分)并暂存基础记录;
-        人工标注叠加与校准是按账号的, 放到 view(account) 时再算(线程安全: 不把账号数据写进共享缓存)。"""
+        """计算模型 Judge/mock 分、失败聚类和 dev/test 均分，并暂存基础记录。"""
         if not self.cases:
             return {"error": "尚未导入数据"}
         cur = self._current()
@@ -92,8 +83,7 @@ class SessionEval:
         dev = [c for c in self.cases if c["split"] == "dev"]
         test = [c for c in self.cases if c["split"] == "test"]
 
-        # 基础评估与账号无关: 不注入人工分(人工 overlay 在 view 时按账号叠加)
-        recs_all = runner_mod.run_split(skill, self.cases, self.rubric, self.backend, ver, {})
+        recs_all = runner_mod.run_split(skill, self.cases, self.rubric, self.backend, ver)
         # 用平台真实报告 + LLM-judge 评分覆盖 mock(有则真实, 无则保留 mock 作占位)
         self._apply_recorded(recs_all, ver)
         dev_recs = [r for r in recs_all if r.dataset_split == "dev"]
@@ -124,7 +114,7 @@ class SessionEval:
             )
             cur["failure_report"] = cur["failures"]
             cur["failure_mapping_error"] = []
-        cur["_recs"] = recs_all         # 暂存基础记录(账号无关), 供 view(account) 叠加人工分
+        cur["_recs"] = recs_all
 
         # 记录失败历史(用于看板消长)
         if len(self.failure_history) <= self.current_idx:
@@ -137,8 +127,7 @@ class SessionEval:
         """把平台真实产物叠加到 mock 记录上:
           · report_outputs -> 记录的 output 换成真实报告文本(标 recorded)
           · judge 分(优先逐 check 派生, 其次旧 import_judgment) -> 覆盖 mock 六维分并重算红线
-        无真实评分的 case 保留 mock 分(占位/自测), 由 score_source 区分。
-        人工分(逐 check 派生的 human_label)与账号相关, 不在此叠加, 由 view(account) 时按账号算。"""
+        无真实评分的 case 保留 mock 分(占位/自测), 由 score_source 区分。"""
         outs = self.report_outputs.get(version, {})
         juds = self.report_judgments.get(version, {})
         jchecks = self.judge_checks.get(version, {})
@@ -169,28 +158,20 @@ class SessionEval:
                 if r.case_failed_gate and not any(str(f).startswith("RED_LINE") for f in r.flagged):
                     r.flagged.append("RED_LINE:traceability<%d" % floor)
 
-    def _rec_view(self, r: EvalRecord, account=None) -> Dict[str, Any]:
-        # 平台真实报告文本(当前版本已粘贴的), 供人工按 rubric 逐维标注时对照阅读
+    def _rec_view(self, r: EvalRecord) -> Dict[str, Any]:
         ver = self._current()["version"]
         real_report = self.report_outputs.get(ver, {}).get(r.case_id)
-        hc = self._human_checks_for(ver, account).get(r.case_id, {})      # 当前账号的逐 check 标注
         jc = (self.judge_checks.get(ver, {}).get(r.case_id) or {}).get("checks", {})
         jr = (self.judge_checks.get(ver, {}).get(r.case_id) or {}).get("reasoning", {})
-        human_label = judge_mod.dim_from_checks(hc, self.rubric) if hc \
-            else self._human_for(ver, account).get(r.case_id)
         return {
             "case_id": r.case_id, "split": r.dataset_split,
             "scores": r.scores, "judge_reasoning": r.judge_reasoning,
             "flagged": r.flagged, "red_line": r.case_failed_gate,
-            "human_label": human_label,
             "output_summary": self._output_summary(r.output),
             "report_text": real_report,          # None 表示该 case 尚未导入真实报告
             "score_source": getattr(r, "score_source", "mock"),  # recorded=平台LLM-judge真实分 / mock=占位
-            # 逐 check 层(真实标注/校准线)
-            "check_human": hc,                    # {check_id: 1/0.5/0} 当前账号
             "check_judge": jc,                    # {check_id: 1/0.5/0} Opus judge
             "check_judge_reason": jr,
-            "dims_human": judge_mod.dim_from_checks(hc, self.rubric) if hc else {},
             "dims_judge": judge_mod.dim_from_checks(jc, self.rubric) if jc else {},
         }
 
@@ -372,14 +353,13 @@ class SessionEval:
             view["advance_result"] = result
             return view
 
-        # dev gate(与账号无关: gate 用 judge/mock 分, 不用人工分)
+        # dev gate 使用模型 Judge/mock 分。
         dev = [c for c in self.cases if c["split"] == "dev"] or self.cases
-        human = {}
-        cand_recs = runner_mod.run_split(candidate, dev, self.rubric, self.backend, cand_ver, human)
+        cand_recs = runner_mod.run_split(candidate, dev, self.rubric, self.backend, cand_ver)
         cand_dev = runner_mod.mean_scores(cand_recs, self.rubric)
 
         cur_dev = cur["dev"] or runner_mod.mean_scores(
-            runner_mod.run_split(skill, dev, self.rubric, self.backend, skill.version, human), self.rubric)
+            runner_mod.run_split(skill, dev, self.rubric, self.backend, skill.version), self.rubric)
 
         target_dims = proposal["affected_dims"]
         tol = next(g["drop_tolerance"] for g in self.rubric["gates"] if g["id"] == "no_regression")

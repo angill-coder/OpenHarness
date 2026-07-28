@@ -10,8 +10,6 @@ loop.py — 优化闭环编排 (对应架构文档「优化闭环的一次迭代
   ⑤ Gate: 候选在 dev 重跑; 目标维度↑ 且 其它维度不塌 且 不引入红线 -> 采纳
        (每 K 轮在 test 上验证防过拟合)
   ⑥ 收敛判定: A 达 target / B 连续无提升(平台期) / C 预算上限
-
-先决条件: judge 校准一致率 >= 0.85, 否则拒绝开优化(机制4第一道防线)。
 """
 from typing import Any, Dict, List
 import runner as runner_mod
@@ -33,7 +31,7 @@ def _dim_regressed(new_scores, old_scores, dims_to_watch, tolerance, all_dims):
     return None
 
 
-def run_loop(skill0, cases, rubric, backend, human_labels, store, calib,
+def run_loop(skill0, cases, rubric, backend, store,
              max_rounds=12, plateau_patience=2, test_every=1, verbose=True):
     log = []
     def say(s):
@@ -41,25 +39,19 @@ def run_loop(skill0, cases, rubric, backend, human_labels, store, calib,
         if verbose:
             print(s)
 
-    # 先决条件: 校准 gate
-    if not calib["passes_gate"]:
-        say("[loop] judge 校准未过 (%.3f < %.2f), 拒绝开优化。" % (calib["overall"], calib["gate"]))
-        return store, [], log
-
     train_dev = _split(cases, "train") + _split(cases, "dev")
     dev = _split(cases, "dev")
     test = _split(cases, "test")
-    hl = human_labels
     no_reg_tol = next((g["drop_tolerance"] for g in rubric["gates"] if g["id"] == "no_regression"), 0.15)
     target = rubric["target"]
     product = rubric.get("product")
     all_dims = [d["name"] for d in rubric["dimensions"]]
 
     # v0 基线
-    recs0 = runner_mod.run_split(skill0, train_dev, rubric, backend, "v0", hl)
+    recs0 = runner_mod.run_split(skill0, train_dev, rubric, backend, "v0")
     dev0 = runner_mod.mean_scores([r for r in recs0 if r.dataset_split == "dev"], rubric)
     test0 = runner_mod.mean_scores(
-        runner_mod.run_split(skill0, test, rubric, backend, "v0", hl), rubric)
+        runner_mod.run_split(skill0, test, rubric, backend, "v0"), rubric)
     store.add(skill0, dev0, test0, adopted=True, proposal=None)
     failure_history = [clustering_mod.cluster(recs0, product=product)]
     say("[loop] v0 基线: dev overall=%.2f, test overall=%.2f" % (dev0["overall"], test0["overall"]))
@@ -72,7 +64,7 @@ def run_loop(skill0, cases, rubric, backend, human_labels, store, calib,
 
     for rnd in range(1, max_rounds + 1):
         # ③ 聚类当前失败
-        recs = runner_mod.run_split(current, train_dev, rubric, backend, current.version, hl)
+        recs = runner_mod.run_split(current, train_dev, rubric, backend, current.version)
         failures = clustering_mod.cluster(recs, product=product)
 
         # ④ 提议
@@ -90,7 +82,7 @@ def run_loop(skill0, cases, rubric, backend, human_labels, store, calib,
             rnd, cand_ver, proposal["change"], proposal["hypothesis"]))
 
         # ⑤ Gate: dev 重跑
-        cand_recs = runner_mod.run_split(candidate, dev, rubric, backend, cand_ver, hl)
+        cand_recs = runner_mod.run_split(candidate, dev, rubric, backend, cand_ver)
         cand_dev = runner_mod.mean_scores(cand_recs, rubric)
 
         target_dims = proposal["affected_dims"]
@@ -105,7 +97,7 @@ def run_loop(skill0, cases, rubric, backend, human_labels, store, calib,
             cand_test = None
             if vnum % test_every == 0:
                 cand_test = runner_mod.mean_scores(
-                    runner_mod.run_split(candidate, test, rubric, backend, cand_ver, hl), rubric)
+                    runner_mod.run_split(candidate, test, rubric, backend, cand_ver), rubric)
             store.add(candidate, cand_dev, cand_test, adopted=True, proposal=proposal)
             history.append({**_hkey(proposal), "result": "adopted",
                             "delta": round(cand_dev["overall"] - cur_dev["overall"], 3)})

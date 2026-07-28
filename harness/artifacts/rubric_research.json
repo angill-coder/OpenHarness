@@ -342,27 +342,6 @@
       "type": "no_regression",
       "drop_tolerance": 0.15,
       "rule": "候选版本采纳条件:目标维度↑ 且 其它维度均不塌(分维度看)"
-    },
-    {
-      "id": "structure_guard",
-      "type": "human_review",
-      "dimension": "structure",
-      "floor": 3,
-      "rule": "structure < 3 -> 人工复检"
-    },
-    {
-      "id": "narrative_guard",
-      "type": "human_review",
-      "dimension": "narrative",
-      "floor": 3,
-      "rule": "narrative < 3 -> 人工复检"
-    },
-    {
-      "id": "hack_guard",
-      "type": "human_review",
-      "dimension": "expression",
-      "floor": 3,
-      "rule": "expression < 3 -> 触发人工复检(疑似 reward hacking / 违禁句式)"
     }
   ],
   "target": {
@@ -372,7 +351,6 @@
     "insight": 3.6,
     "coverage": 4.0,
     "expression": 3.8,
-    "overall": 4.0,
-    "judge_human_agreement": 0.85
+    "overall": 4.0
   }
 }

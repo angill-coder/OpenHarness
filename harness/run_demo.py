@@ -6,11 +6,10 @@ run_demo.py — 一键跑通 Phase 0 MVP 优化闭环 (离线, 确定性)
   python3 run_demo.py            # 用 MockBackend, 无需 API
   python3 run_demo.py --real     # 若有 ANTHROPIC_API_KEY + sdk, 用真实 Claude(本环境不可用)
 
-它做完整闭环: 载入 v0 skill + rubric + dataset + 人工标注 -> 校准 judge ->
-(过则)开优化循环 -> 打印回归看板 -> 落盘 artifacts + 看板 markdown。
+它做完整闭环: 载入 v0 skill + rubric + dataset -> 开优化循环 ->
+打印回归看板 -> 落盘 artifacts + 看板 markdown。
 
-验收(对应 Rubric 文档 §6 + 架构文档 MVP 验收标准):
-  · judge↔人工 一致率 >= 0.85
+验收:
   · skill 分数在 dev 上随版本上升、在 test 上不塌
   · 编造/漏报/口径 等失败模式随版本消退
   · keyword_emphasis 这类讨好裁判的杠杆被 gate 拒绝(演示见 optimizer 不提议它)
@@ -26,7 +25,6 @@ sys.path.insert(0, HERE)   # 让模块可直接 import
 from schemas import SkillArtifact
 import backend as backend_mod
 import runner as runner_mod
-import calibration as calibration_mod
 import loop as loop_mod
 import dashboard as dashboard_mod
 
@@ -54,35 +52,27 @@ def main():
         print("未找到 dataset.jsonl, 先运行: python3 %s/build_dataset.py" % DATA_DIR)
         sys.exit(1)
     cases = _load_jsonl(os.path.join(DATA_DIR, "dataset.jsonl"))
-    labels_rows = _load_jsonl(os.path.join(DATA_DIR, "human_labels.jsonl"))
-    human_labels = {r["case_id"]: r["human_scores"] for r in labels_rows}
 
     backend = backend_mod.get_backend(prefer_real=args.real)
     print("[demo] backend = %s | %d cases (train/dev/test)" % (backend.name, len(cases)))
 
-    # ---- Step A: 先跑 v0 全量, 用于 judge 校准(§6) ----
-    all_recs = runner_mod.run_split(skill0, cases, rubric, backend, "v0-calib", human_labels)
-    calib = calibration_mod.agreement(all_recs, rubric)
-    print("[demo] judge 校准: overall 一致率 = %.3f (门槛 %.2f) -> %s" % (
-        calib["overall"], calib["gate"], "PASS" if calib["passes_gate"] else "FAIL"))
-
-    # ---- Step B: 优化闭环 ----
+    # ---- Step A: 优化闭环 ----
     from store import ArtifactStore
     store = ArtifactStore()
     store, failure_history, _log = loop_mod.run_loop(
-        skill0, cases, rubric, backend, human_labels, store, calib)
+        skill0, cases, rubric, backend, store)
 
-    # ---- Step C: 看板 ----
-    console = dashboard_mod.render_console(store, calib, failure_history, rubric["target"])
+    # ---- Step B: 看板 ----
+    console = dashboard_mod.render_console(store, failure_history, rubric["target"])
     print(console)
 
-    # ---- Step D: 显式演示 reward-hacking 被 gate 拒绝 ----
-    _demo_reward_hacking(store, cases, rubric, backend, human_labels)
+    # ---- Step C: 显式演示 reward-hacking 被 gate 拒绝 ----
+    _demo_reward_hacking(store, cases, rubric, backend)
 
     # ---- 落盘 ----
     out_store = os.path.join(ART_DIR, "versions.json")
     store.dump(out_store)
-    md = dashboard_mod.render_markdown(store, calib, rubric["target"])
+    md = dashboard_mod.render_markdown(store, rubric["target"])
     out_md = os.path.join(HERE, "dashboard.md")
     with open(out_md, "w", encoding="utf-8") as f:
         f.write(md)
@@ -94,7 +84,7 @@ def main():
         print("[demo] 已写出: %s, %s" % (os.path.relpath(out_store), os.path.relpath(out_md)))
 
 
-def _demo_reward_hacking(store, cases, rubric, backend, human_labels):
+def _demo_reward_hacking(store, cases, rubric, backend):
     """取收敛后的最优版, 强行套用 keyword_emphasis(讨好裁判杠杆), 跑 gate, 演示被拒。
 
     这证明: 优化器不会提议它(在 FORBIDDEN 里), 且即便有人手动尝试, 简洁性维度 +
@@ -110,7 +100,7 @@ def _demo_reward_hacking(store, cases, rubric, backend, human_labels):
 
     hacked = base_skill.clone_with_directive("keyword_emphasis", True, "v-hack",
                                              "手动尝试: 打开 keyword_emphasis 堆术语讨好裁判")
-    hrecs = runner_mod.run_split(hacked, dev, rubric, backend, "v-hack", human_labels)
+    hrecs = runner_mod.run_split(hacked, dev, rubric, backend, "v-hack")
     hdev = runner_mod.mean_scores(hrecs, rubric)
     tol = next(g["drop_tolerance"] for g in rubric["gates"] if g["id"] == "no_regression")
     conc_drop = base_dev.get("conciseness", 0) - hdev.get("conciseness", 0)
