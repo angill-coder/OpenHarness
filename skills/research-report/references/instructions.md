@@ -1,5 +1,7 @@
 # 调研洞察汇报报告 · 写作规则与结构（产出前必读）
 
+<!-- OPENHARNESS_DIRECTIVES: ["require_source_ref","flag_source_conflict","honest_on_unsupportable","require_two_sources","summary_format","pyramid_body","mece_sections","concept_consistency","ensure_narrative_flow","require_insight_triplet","abstract_cases","drop_noise","mark_extrapolation_confidence","crosscheck_outliers","cover_key_claims","ban_bushi_ershi","require_charts","match_exec_length","require_rigorous_wording","verify_no_fabrication","note_metric_caveat","disclose_sample_bias"] -->
+
 本文件是 `research-report` skill 的核心指令，对应 OpenHarness 平台六维 rubric。产出报告时**逐条遵守**。
 
 ## 三项开场输入怎么用（第 0 步拿到的）
@@ -66,3 +68,7 @@
 - ✅ "人均日时长 Q2 达 27 分钟，较 Q1 +50%；竞品口径为去重会话时长，不可直接比较。投放方向素材无数据，建议补充后再定。"（每条都有素材支撑，但正文不印来源号）
 - ❌ "增长并非来自拉新，而是来自留存加深；这是数据驱动、闭环赋能的范式重构。"（命中"不是,而是"+ 注水）
 - ❌ 把 6 人访谈的说法写成"全体用户已把产品当工作台"（孤证当定论，未降级"待验证"）。
+
+<!-- OPENHARNESS_VERSION_RULES_START -->
+<!-- 当前基线没有 optimizer 增量规则。 -->
+<!-- OPENHARNESS_VERSION_RULES_END -->

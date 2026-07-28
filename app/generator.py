@@ -6,8 +6,10 @@ generator.py — 从「需求描述」生成 v0 skill + rubric
 和一版 rubric(维度+权重+锚点+gate)。
 
 两条路径:
+  - 调研洞察产品: 固定读取仓库 `skills/research-report` 唯一基线，只生成
+    与基线一致的 directive 版本状态和 rubric，不生成另一套 Skill 结构。
   - 离线启发式(默认): 关键词 -> 报告类型/受众 -> 套用「结构设计文档」的 v0 结构骨架,
-    生成兼容 harness 词汇(directives/dimensions)的 v0。保证生成物能被 loop 真正跑起来。
+    用于其它产品。
   - Claude(有 ANTHROPIC_API_KEY + sdk 时): 让模型按结构/rubric 方法论产出, 再对齐词汇。
 
 设计约束: harness 的 MockBackend 只认一组固定 directive, judge 只认 4 个维度。所以生成器
@@ -17,40 +19,18 @@ generator.py — 从「需求描述」生成 v0 skill + rubric
 import json
 import os
 import re
+import copy
+from pathlib import Path
 from typing import Any, Dict, List
 
-# harness artifacts 目录(读六维 rubric 模板)
-_ART = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "harness", "artifacts")
+from directive_registry import (
+    RESEARCH_DIRECTIVES,
+    load_skill_directives,
+)
 
-# 调研洞察 v0 skill 的 directive 动作空间(与 harness/backend.RESEARCH_DIRECTIVES 对齐)。
-# 这里内联一份, 避免 generator 对 harness import 的硬依赖。
-RESEARCH_DIRECTIVES = [
-    "require_source_ref",
-    "flag_source_conflict",
-    "honest_on_unsupportable",
-    "require_two_sources",
-    "summary_format",
-    "pyramid_body",
-    "mece_sections",
-    "concept_consistency",
-    "ensure_narrative_flow",
-    "require_insight_triplet",
-    "abstract_cases",
-    "drop_noise",
-    "mark_extrapolation_confidence",
-    "crosscheck_outliers",
-    "cover_key_claims",
-    "ban_bushi_ershi",
-    "require_charts",
-    "match_exec_length",
-    "require_rigorous_wording",
-    "verify_no_fabrication",
-    "note_metric_caveat",
-    "disclose_sample_bias",
-    "buzzword_emphasis",
-]
-RESEARCH_SECTIONS = ["核心摘要", "核心发现（含归因）", "对我们的启示与建议（含趋势）"]
+# harness artifacts 目录(读六维 rubric 模板)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ART = os.path.join(_ROOT, "harness", "artifacts")
 
 # harness 已知的 directive 动作空间(与 skill_v0.json 对齐)
 KNOWN_DIRECTIVES = [
@@ -152,13 +132,13 @@ def _is_research_insight(text: str) -> bool:
 def generate_v0(requirement: str, product_id: str = "custom-skill",
                 prefer_real: bool = False) -> Dict[str, Any]:
     """返回 {skill, rubric, rationale, detected}。"""
+    if product_id == "research_insight" or _is_research_insight(requirement):
+        return _generate_research(requirement, "research_insight")
     if prefer_real and os.environ.get("ANTHROPIC_API_KEY"):
         try:
             return _generate_via_claude(requirement, product_id)
         except Exception as e:
             print("[generator] Claude 生成失败(%s), 回退启发式" % e)
-    if product_id == "research_insight" or _is_research_insight(requirement):
-        return _generate_research(requirement, "research_insight")
     return _generate_heuristic(requirement, product_id)
 
 
@@ -230,54 +210,32 @@ def _generate_heuristic(requirement: str, product_id: str) -> Dict[str, Any]:
 
 
 def _generate_research(requirement: str, product_id: str) -> Dict[str, Any]:
-    """调研洞察汇报助手 v0: 6步 flow skill + 六维 rubric(读 rubric_research.json)。"""
-    directives = {k: False for k in RESEARCH_DIRECTIVES}
+    """调研洞察 v0: 唯一基线的开关状态 + 六维 rubric。"""
+    base_skill = os.environ.get(
+        "OPENHARNESS_WB_SKILL_PATH",
+        os.path.join(_ROOT, "skills", "research-report"),
+    )
+    directives = load_skill_directives(Path(base_skill))
     skill = {
         "id": product_id, "version": "v0", "parent_version": None,
-        "structure": {
-            "flow": [
-                {"step": 0, "name": "Intake & Scoping（开场三轮交互）",
-                 "produces": "report_spec{背景, hypothesis, 重点素材}",
-                 "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材(已提供的不重复问);三项都用进报告;hypothesis只验证/证伪、不迎合"},
-                {"step": 1, "name": "Source Curation", "subagent": "SourceCurator",
-                 "produces": "source_slices", "rule": "素材切片配 S-xxx ID"},
-                {"step": 2, "name": "Claim Analysis", "subagent": "Analyst",
-                 "produces": "claims", "rule": "抽 claim 挂 source_ids, 强制标冲突"},
-                {"step": 3, "name": "Insight Extraction", "subagent": "Insight",
-                 "produces": "insights", "rule": "案例提炼成规律, 只在 claims 内推理"},
-                {"step": 4, "name": "Narrative Composition", "subagent": "Writer",
-                 "produces": "draft_report", "rule": "论断携带 [S-xxx]/[C-xxx]"},
-                {"step": 5, "name": "Verification", "subagent": "Verifier",
-                 "produces": "verification_report", "rule": "独立对抗, 查编造/混用/剔噪", "loop_back_to": 4},
-                {"step": 6, "name": "Deliver", "produces": "final_doc"},
-            ],
-            "subagents": [
-                {"name": "SourceCurator", "responsibility": "素材切片、配 ID、去重"},
-                {"name": "Analyst", "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"},
-                {"name": "Insight", "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"},
-                {"name": "Writer", "responsibility": "金字塔组织、携带引用、结构化呈现"},
-                {"name": "Verifier", "responsibility": "对抗查错(编造/混用/噪音/越界)", "independent": True},
-            ],
-            "memory_schema": ["config", "facts", "learned_rules"],
-        },
+        "structure": {},
         "instructions": {
-            "prose": "你是调研洞察汇报助手。基于给定异构素材(doc/pdf/excel/访谈), 为最高管理层"
-                     "产出可编辑的调研报告。可回溯性是生命线, 素材不足处诚实留白。",
+            "prose": "执行内容以 skills/research-report 唯一基线为准。",
             "directives": directives,
         },
         "few_shots": [],
         "memory_content": {
-            "config": {"required_sections": list(RESEARCH_SECTIONS),
-                       "audience_profiles": {"exec": {"length": "<=1.5页", "focus": ["结论", "决策项"]}}},
-            "facts": {}, "learned_rules": [],
+            "config": {"base_skill": "research-report"},
+            "facts": {},
+            "learned_rules": [],
         },
-        "changelog": "v0 调研洞察: 6步 flow + 六维 directive 全关, 作为优化起跑线(结构定上限)。",
+        "changelog": "v0 读取 skills/research-report 唯一基线及其已启用 directive。",
     }
     rubric = _build_rubric_research()
     rationale = ("识别为**调研洞察汇报**(基于异构素材的提炼+写作, 非算数字型)。\n"
-                 "结构: Intake→SourceCurator→Analyst→Insight→Writer→独立Verifier→交付。\n"
+                 "Skill: 固定使用 skills/research-report 唯一基线。\n"
                  "六维 rubric(可回溯性0.28红线/结构0.15/逻辑0.12/洞察0.22/覆盖0.08/表达0.15)。\n"
-                 "v0 directives 全关 —— 结构定上限, 由优化闭环逐个打开逼近上限。")
+                 "v0 directive 状态直接读取基线，优化器只打开尚未生效的规则。")
     return {"skill": skill, "rubric": rubric, "rationale": rationale,
             "detected": {"report_type": "research_insight", "audience": "exec"}}
 
@@ -286,6 +244,30 @@ def _build_rubric_research() -> Dict[str, Any]:
     """六维 rubric = harness/artifacts/rubric_research.json 的副本(避免锚点重复维护)。"""
     with open(os.path.join(_ART, "rubric_research.json"), encoding="utf-8") as f:
         return json.load(f)
+
+
+def hydrate_research_optimizer_metadata(
+    rubric: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Backfill optimizer metadata for snapshots created before this contract."""
+
+    if rubric.get("product") != "research_insight":
+        return rubric
+    canonical = _build_rubric_research()
+    optimizer_by_check = {
+        str(check["id"]): copy.deepcopy(check.get("optimizer"))
+        for dimension in canonical.get("dimensions", [])
+        for check in dimension.get("checks", [])
+        if check.get("id") and "optimizer" in check
+    }
+    for dimension in rubric.get("dimensions", []):
+        for check in dimension.get("checks", []):
+            check_id = str(check.get("id") or "")
+            if "optimizer" not in check and check_id in optimizer_by_check:
+                check["optimizer"] = copy.deepcopy(
+                    optimizer_by_check[check_id]
+                )
+    return rubric
 
 
 def _build_rubric(product_id: str, weights: Dict[str, float]) -> Dict[str, Any]:

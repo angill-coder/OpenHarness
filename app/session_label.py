@@ -34,6 +34,13 @@ class SessionLabel:
         report_text = (report_text or "").strip()
         if not case_id or not report_text:
             return {"error": "缺少 case_id 或 report_text"}
+        previous = self.report_outputs.get(version, {}).get(case_id)
+        if previous is not None and previous != report_text:
+            self._invalidate_judge_checks(
+                version,
+                [case_id],
+                "report_changed",
+            )
         self.report_outputs.setdefault(version, {})[case_id] = report_text
         persist.append_output(self.id, version, case_id, report_text)
         persist.append_event(self.id, "import_output", {
@@ -106,7 +113,13 @@ class SessionLabel:
         self._save()
         return self.view(account)
 
-    def set_judge_checks_batch(self, judgments, version=None, account=None):
+    def set_judge_checks_batch(
+        self,
+        judgments,
+        version=None,
+        account=None,
+        evaluate_now=True,
+    ):
         """批量存模型逐-check判分，只重评和落盘一次。
 
         ``judgments`` 形如
@@ -125,6 +138,12 @@ class SessionLabel:
             clean_batch[case_id] = {
                 "checks": clean,
                 "reasoning": (judgment or {}).get("reasoning") or {},
+                "report_sha256": (judgment or {}).get(
+                    "report_sha256"
+                ),
+                "rubric_sha256": (judgment or {}).get(
+                    "rubric_sha256"
+                ),
             }
         if not clean_batch:
             return {"error": "批量 Judge 未产出有效评分"}
@@ -139,9 +158,37 @@ class SessionLabel:
                 "n_cases": len(clean_batch),
             },
         )
-        self.evaluate(account)
-        self._save()
-        return self.view(account)
+        if evaluate_now:
+            self.evaluate(account)
+            self._save()
+            return self.view(account)
+        return None
+
+    def _invalidate_judge_checks(self, version, case_ids, reason):
+        existing = self.judge_checks.setdefault(version, {})
+        invalidated = [
+            case_id
+            for case_id in case_ids
+            if case_id in existing
+        ]
+        for case_id in invalidated:
+            existing.pop(case_id, None)
+        persist.invalidate_check_judgments(
+            self.id,
+            version,
+            invalidated,
+            reason,
+        )
+        if invalidated:
+            persist.append_event(
+                self.id,
+                "invalidate_judge_checks",
+                {
+                    "version": version,
+                    "case_ids": sorted(invalidated),
+                    "reason": reason,
+                },
+            )
 
     def _check_calibration(self, version, account=None):
         """逐 check 一致率:同 case 上 当前账号人工 vs judge 每条 check 桶匹配(完全一致=agree)。"""

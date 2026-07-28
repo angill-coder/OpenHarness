@@ -41,7 +41,7 @@ cd harness && python3 run_demo.py            # 旧算数字产品, 防回归: 2.
 1. 改 `rubric_research.json` / `sessions/*/state.json` 后**必须重启 server** 才生效。
 2. 改 `app/app.js` 后先 `node --check app/app.js`。
 3. mock vs recorded 泾渭分明：Web UI 在模型 Judge 未覆盖全部 case 前不展示 mock 占位曲线，也不允许推进真实调研版本。
-4. 当前一键 WB 运行使用固定 `skills/research-report`，已冻结 Session 版本/hash，但尚未把每版 `SkillArtifact` 渲染为可执行 Skill；因此只用于生成导入链路，不可作为真实版本 Gate。
+4. 调研 Session 以 `skills/research-report` 为唯一基线；每版只在其现有 `references/instructions.md` 中叠加新 directive，再冻结执行目录和 hash。
 
 ## 注意
 

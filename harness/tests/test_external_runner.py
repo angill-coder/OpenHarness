@@ -4,42 +4,63 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 HARNESS_DIR = Path(__file__).resolve().parents[1]
 if str(HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(HARNESS_DIR))
 
-from external_run_models import ExternalRunRequest, ReportOutputContract
+from external_run_models import (
+    ExternalAttemptResult,
+    ExternalRunRequest,
+    ReportArtifact,
+    ReportOutputContract,
+)
 from run_external import _parser
 from workbuddy_batch.models import BatchConfig
 from workbuddy_runner import (
     ExternalRunConfigurationError,
+    _case_attempt_run_id,
     run_external_cases,
 )
+from workbuddy_batch.runner import _workbuddy_session_id
 
 
 class ExternalRunnerTest(unittest.TestCase):
-    def test_default_parallelism_is_ten(self) -> None:
+    def test_internal_ids_remain_short_for_long_case_ids(self) -> None:
+        case_id = "rr-realproject-new-" + ("very-long-case-" * 20)
+        run_id = _case_attempt_run_id(case_id, 4)
+        session_id = _workbuddy_session_id(run_id, case_id)
+
+        self.assertLessEqual(len(run_id), 32)
+        self.assertLessEqual(len(session_id), 40)
+        self.assertNotEqual(
+            run_id,
+            _case_attempt_run_id(case_id, 3),
+        )
+
+    def test_default_parallelism_is_twenty(self) -> None:
         request = ExternalRunRequest(
             case_file=Path("case.json"),
             output_root=Path("generation_runs"),
             skill_version="test-v1",
             skill_name="research-report",
         )
-        self.assertEqual(request.parallel, 10)
+        self.assertEqual(request.parallel, 20)
         self.assertEqual(
             BatchConfig(
                 command=("workbuddy",),
                 output_root=Path("generation_runs"),
             ).parallel,
-            10,
+            20,
         )
         self.assertEqual(
             _parser().parse_args(["--dataset", "case.json"]).parallel,
-            10,
+            20,
         )
 
     def setUp(self) -> None:
@@ -162,6 +183,50 @@ class ExternalRunnerTest(unittest.TestCase):
         self.assertEqual(source_last, "这是完整 intake。")
         self.assertIn("OpenHarness 最终交付指令", effective_last)
 
+    def test_compacts_trace_and_removes_workspace(self) -> None:
+        request = self._request(
+            succeed_on_attempt=1,
+            max_retries=0,
+        )
+        request = replace(
+            request,
+            environment={
+                **request.environment,
+                "FAKE_WB_STREAM_EVENT": "1",
+            },
+        )
+
+        result = run_external_cases(request)
+
+        self.assertTrue(result.succeeded)
+        case_dir = (
+            Path(result.cases[0].attempts[0].run_dir)
+            / "cases"
+            / "wb-case"
+        )
+        self.assertFalse((case_dir / "trace" / "workspace").exists())
+        self.assertEqual(
+            list((case_dir / "trace" / "rounds").glob("*/stdout.jsonl")),
+            [],
+        )
+        events = [
+            json.loads(line)
+            for line in (
+                case_dir / "trace" / "2_events.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertTrue(events)
+        self.assertFalse(
+            any(
+                item.get("event", {}).get("type") == "stream_event"
+                for item in events
+            )
+        )
+        self.assertTrue(
+            (case_dir / "artifacts" / "report.md").is_file()
+        )
+
     def test_marks_retry_exhausted_after_max_attempts(self) -> None:
         result = run_external_cases(
             self._request(succeed_on_attempt=0, max_retries=2)
@@ -175,6 +240,95 @@ class ExternalRunnerTest(unittest.TestCase):
         self.assertTrue(
             all(item.status == "artifact_missing" for item in case.attempts)
         )
+
+    def test_failed_case_retries_before_other_case_finishes(self) -> None:
+        payload = json.loads(self.dataset.read_text(encoding="utf-8"))
+        second = dict(payload["cases"][0])
+        second["id"] = "wb-slow"
+        second["metadata"] = {
+            "openharness_case_id": "oh-slow",
+            "split": "dev",
+        }
+        payload["cases"].append(second)
+        self.dataset.write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        retry_started = threading.Event()
+        slow_observations = []
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def execute(case, identity, attempt, request, batch_config):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                if case.case_id == "wb-slow":
+                    retry_started.wait(1)
+                    slow_observations.append(retry_started.is_set())
+                if case.case_id == "wb-case" and attempt == 2:
+                    retry_started.set()
+                generated = not (
+                    case.case_id == "wb-case" and attempt == 1
+                )
+                report = (
+                    ReportArtifact(
+                        original_workspace_path="deliverables/report.md",
+                        captured_path="/tmp/report.md",
+                        sha256="a" * 64,
+                        size=200,
+                        mime_type="text/markdown",
+                        text="有效报告" * 100,
+                    )
+                    if generated
+                    else None
+                )
+                return ExternalAttemptResult(
+                    attempt=attempt,
+                    max_attempts=request.max_attempts,
+                    wb_case_id=case.case_id,
+                    openharness_case_id=identity[
+                        "openharness_case_id"
+                    ],
+                    status=(
+                        "generated" if generated else "artifact_missing"
+                    ),
+                    wb_status="success",
+                    wb_run_id="%s-%s" % (case.case_id, attempt),
+                    wb_session_id=None,
+                    run_dir="/tmp/run",
+                    trace_path="/tmp/run/trace",
+                    manifest_path="/tmp/run/manifest.json",
+                    duration_ms=1,
+                    configured_model=request.model,
+                    observed_models=(),
+                    usage={},
+                    error=None if generated else "missing",
+                    report=report,
+                )
+            finally:
+                with lock:
+                    active -= 1
+
+        request = replace(
+            self._request(succeed_on_attempt=1, max_retries=2),
+            parallel=2,
+        )
+        with patch(
+            "workbuddy_runner._execute_case_attempt",
+            side_effect=execute,
+        ):
+            result = run_external_cases(request)
+
+        by_case = {item.wb_case_id: item for item in result.cases}
+        self.assertTrue(result.succeeded)
+        self.assertEqual(len(by_case["wb-case"].attempts), 2)
+        self.assertEqual(len(by_case["wb-slow"].attempts), 1)
+        self.assertEqual(slow_observations, [True])
+        self.assertLessEqual(max_active, request.parallel)
 
     def test_rejects_missing_material_before_starting_workbuddy(self) -> None:
         (self.materials / "source.txt").unlink()
@@ -208,10 +362,41 @@ class ExternalRunnerTest(unittest.TestCase):
             all(item.status == "artifact_missing" for item in case.attempts)
         )
 
-    def test_rejects_ground_truth_leak_before_starting_workbuddy(self) -> None:
+    def test_unified_ground_truth_is_not_sent_to_workbuddy(self) -> None:
         payload = json.loads(self.dataset.read_text(encoding="utf-8"))
+        payload["schema_version"] = "openharness-wb/v1"
+        payload["cases"][0]["case_id"] = "oh-case"
+        payload["cases"][0]["input"] = {"brief": "generate"}
         payload["cases"][0]["ground_truth"] = {
             "supported_claims": ["answer"]
+        }
+        self.dataset.write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        result = run_external_cases(
+            self._request(succeed_on_attempt=1, max_retries=3)
+        )
+
+        self.assertTrue(result.succeeded)
+        effective_case = json.loads(
+            Path(
+                result.cases[0].attempts[0].run_dir,
+                "cases",
+                "oh-case",
+                "case.json",
+            ).read_text(encoding="utf-8")
+        )
+        self.assertNotIn(
+            "ground_truth",
+            effective_case["case"]["data"],
+        )
+
+    def test_rejects_ground_truth_nested_in_generation_data(self) -> None:
+        payload = json.loads(self.dataset.read_text(encoding="utf-8"))
+        payload["cases"][0]["data"] = {
+            "ground_truth": {"supported_claims": ["answer"]}
         }
         self.dataset.write_text(
             json.dumps(payload, ensure_ascii=False),
@@ -225,7 +410,6 @@ class ExternalRunnerTest(unittest.TestCase):
             run_external_cases(
                 self._request(succeed_on_attempt=1, max_retries=3)
             )
-        self.assertFalse((self.root / "runs").exists())
 
     def test_filters_by_openharness_case_id_and_reports_progress(self) -> None:
         updates = []

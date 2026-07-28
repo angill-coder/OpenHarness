@@ -50,6 +50,7 @@ class FakeRunner:
     def __init__(self, fail_once=()):
         self.fail_once = set(fail_once)
         self.calls = []
+        self.requests = []
         self.started = threading.Event()
         self.release = None
 
@@ -61,6 +62,7 @@ class FakeRunner:
     ):
         ids = list(request.openharness_case_ids)
         self.calls.append(ids)
+        self.requests.append(request)
         self.started.set()
         if self.release is not None:
             self.release.wait(3)
@@ -144,6 +146,16 @@ class GenerationJobServiceTest(unittest.TestCase):
             "---\nname: research-report\n---\n# Test\n",
             encoding="utf-8",
         )
+        skill_references = self.skill / "references"
+        skill_references.mkdir()
+        (skill_references / "instructions.md").write_text(
+            "# Test Instructions\n\n"
+            "<!-- OPENHARNESS_DIRECTIVES: [] -->\n\n"
+            "<!-- OPENHARNESS_VERSION_RULES_START -->\n"
+            "<!-- 当前基线没有 optimizer 增量规则。 -->\n"
+            "<!-- OPENHARNESS_VERSION_RULES_END -->\n",
+            encoding="utf-8",
+        )
         self.session = Session(
             "test-session",
             "生成面向高管的调研洞察报告",
@@ -187,9 +199,15 @@ class GenerationJobServiceTest(unittest.TestCase):
             settings = GenerationSettings.from_env()
         self.assertEqual(
             settings.dataset_path,
-            APP.parent / "data" / "data.json",
+            (
+                APP.parent
+                / "data"
+                / "20260727_test_data"
+                / "data.json"
+            ),
         )
-        self.assertEqual(settings.parallel, 10)
+        self.assertEqual(settings.parallel, 20)
+        self.assertEqual(settings.model, "deepseek-v4-pro-ioa")
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
@@ -249,8 +267,58 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertEqual(done.status, "completed")
         self.assertEqual(done.imported_count, 2)
         self.assertEqual(fake.calls, [["case-a", "case-b"]])
+        self.assertEqual(done.skill_mode, "session_artifact")
+        self.assertEqual(
+            fake.requests[0].skill_path,
+            Path(done.skill_ref),
+        )
+        self.assertTrue((Path(done.skill_ref) / "SKILL.md").is_file())
+        self.assertTrue(
+            (
+                Path(done.skill_ref)
+                / "references"
+                / "instructions.md"
+            ).is_file()
+        )
+        self.assertEqual(done.compiler_version, "session-skill/v2")
+        self.assertIsNotNone(done.base_skill_hash)
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
+
+    def test_job_uses_requested_parallel_with_backend_limit(self):
+        fake = FakeRunner()
+        service = GenerationJobService(
+            {"test-session": self.session},
+            self.settings,
+            fake,
+        )
+        job, _ = service.start(
+            "test-session",
+            "tester",
+            parallel=1,
+            model="deepseek-v4-pro-ioa",
+        )
+        done = service.wait(job.job_id)
+        self.assertEqual(done.parallel, 1)
+        self.assertEqual(done.model, "deepseek-v4-pro-ioa")
+        self.assertEqual(fake.requests[0].parallel, 1)
+        self.assertEqual(
+            fake.requests[0].model,
+            "deepseek-v4-pro-ioa",
+        )
+
+        with self.assertRaisesRegex(ValueError, "至少为 1"):
+            service.start(
+                "test-session",
+                "tester",
+                parallel=0,
+            )
+        with self.assertRaisesRegex(ValueError, "不能为空"):
+            service.start(
+                "test-session",
+                "tester",
+                model="  ",
+            )
 
     def test_partial_job_can_retry_only_failed_case(self):
         fake = FakeRunner(fail_once={"case-b"})
@@ -259,15 +327,30 @@ class GenerationJobServiceTest(unittest.TestCase):
             self.settings,
             fake,
         )
-        first, _ = service.start("test-session", "tester")
+        first, _ = service.start(
+            "test-session",
+            "tester",
+            model="retry-model",
+        )
         first = service.wait(first.job_id)
         self.assertEqual(first.status, "partial")
         self.assertEqual(first.failed_case_ids, ["case-b"])
 
-        retry, _ = service.retry(first.job_id, "tester")
+        retry, _ = service.retry(
+            first.job_id,
+            "tester",
+            parallel=1,
+            model="retry-override-model",
+        )
         retry = service.wait(retry.job_id)
         self.assertEqual(retry.status, "completed")
         self.assertEqual(retry.parent_job_id, first.job_id)
+        self.assertEqual(retry.parallel, 1)
+        self.assertEqual(retry.model, "retry-override-model")
+        self.assertEqual(
+            fake.requests[-1].model,
+            "retry-override-model",
+        )
         self.assertEqual(fake.calls[-1], ["case-b"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
 
@@ -300,7 +383,7 @@ class GenerationJobServiceTest(unittest.TestCase):
         )
         job, _ = service.start("test-session", "tester")
         self.assertTrue(fake.started.wait(1))
-        (self.skill / "SKILL.md").write_text(
+        (Path(job.skill_ref) / "SKILL.md").write_text(
             "---\nname: research-report\n---\n# Changed\n",
             encoding="utf-8",
         )
@@ -333,6 +416,7 @@ class GenerationJobServiceTest(unittest.TestCase):
             stall_timeout_seconds=5,
             created_at=now,
             updated_at=now,
+            compiler_version=None,
             status="running",
             cases=[GenerationCaseState("case-a", "dev")],
         )

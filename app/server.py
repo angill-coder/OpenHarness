@@ -10,21 +10,22 @@ API:
   GET  /                      -> index.html
   POST /api/session           {requirement, product_id?}  -> 建会话, 生成 v0 skill+rubric
   GET  /api/session?id=       -> 当前会话完整状态
-  POST /api/data              {id, rows?, use_sample?, labels?}  -> 导入数据(或用内置样例)
+  POST /api/data              {id, rows?, use_sample?, use_configured?} -> 导入数据
   POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
   POST /api/advance           {id}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
-  POST /api/run_judge_batch   {id, version?} -> 并发 Judge 当前版本全部 case
-  POST /api/generation/start  {id, idempotency_key?} -> 后台调用 WB 并自动批量导入
+  POST /api/run_judge_batch   {id, version?, parallel?} -> 并发 Judge 当前版本全部 case
+  POST /api/generation/start  {id, idempotency_key?, parallel?, model?} -> 后台调用 WB 并自动批量导入
   GET  /api/generation?id=    -> 查询生成任务
-  POST /api/generation/retry  {job_id} -> 仅重跑未导入的 case
+  POST /api/generation/retry  {job_id, parallel?, model?} -> 仅重跑未导入的 case
   POST /api/generation/cancel {job_id} -> 请求取消
   GET  /api/sample_data       -> 返回内置样例数据集(供页面一键导入)
 """
 import argparse
 import base64
 from contextlib import nullcontext
+import hashlib
 import io
 import json
 import os
@@ -45,6 +46,7 @@ from generation_jobs import (  # noqa: E402
     GenerationJobService,
 )
 from judge_batch import judge_cases  # noqa: E402
+from workbuddy_batch.dataset import load_openharness_rows  # noqa: E402
 # import auth as auth_mod  # [鉴权已临时关闭·本地测试] 恢复时取消注释
 
 ROOT = os.path.dirname(HERE)
@@ -122,18 +124,29 @@ def _parse_report(filename: str, raw: bytes) -> str:
     return raw.decode("utf-8", "ignore")   # md / txt / 其它当纯文本
 
 
-def _build_judge_prompt(rubric, report_text, ground_truth) -> str:
+def _build_judge_prompt(rubric, report_text, case_context) -> str:
     """组装逐 check 判分提示词:列出所有 check,要求对每条判 met/partial/miss + 理由。"""
-    L = ["你是严格的调研报告评审。给定【报告正文】+【答案键 ground_truth】+ 下面逐条 check,",
+    L = ["你是严格的调研报告评审。根据【任务信息】【参考答案】【报告正文】和下面逐条 check，",
          "对**每一条 check** 判 met(满足)/partial(部分)/miss(不满足)。",
-         "**凡涉及有没有编造/漏答/引噪音/口径,一律拿答案键核对——报告说的 ≠ 事实,以答案键为准。**",
+         "参考答案用于核对关键事实、证据覆盖和可回溯性；"
+         "不得把报告未呈现的参考答案内容算作报告已经满足。",
          "", "## 逐条 check(每条都要打分)"]
     for d in rubric["dimensions"]:
         for c in d.get("checks", []):
             rl = " [红线]" if c.get("redline") else ""
             L.append("- %s(%s·%s%s): %s | 触发降档: %s" % (
-                c["id"], d["name_zh"], c["label"], rl, c.get("desc", ""), c.get("effect", "")))
-    L += ["", "## 答案键 ground_truth", json.dumps(ground_truth, ensure_ascii=False),
+                c["id"],
+                d.get("name_zh", d.get("name", "")),
+                c.get("label", c["id"]),
+                rl,
+                c.get("desc", ""),
+                c.get("effect", ""),
+            ))
+    judge_context = dict(case_context or {})
+    ground_truth = judge_context.pop("ground_truth", {})
+    L += ["", "## 任务信息", json.dumps(judge_context, ensure_ascii=False),
+          "", "## 参考答案（ground_truth）",
+          json.dumps(ground_truth, ensure_ascii=False),
           "", "## 报告正文", report_text or "(空)",
           "", "## 输出(只输出严格 JSON,不要多余文字):",
           '{"checks":{"T1":"met","T2":"miss", ...每条 check 都要},',
@@ -181,14 +194,26 @@ def _extract_json(text: str):
         return None
 
 
-def _judge_parallelism():
+def _judge_parallelism(requested=None):
+    value = (
+        os.environ.get("OPENHARNESS_JUDGE_PARALLEL", "20")
+        if requested is None
+        else requested
+    )
+    if isinstance(value, bool) or (
+        isinstance(value, float) and not value.is_integer()
+    ):
+        raise ValueError("Judge 并发必须是整数")
     try:
-        return max(1, min(int(os.environ.get("OPENHARNESS_JUDGE_PARALLEL", "3")), 8))
-    except ValueError:
-        return 3
+        parallel = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Judge 并发必须是整数") from exc
+    if parallel < 1:
+        raise ValueError("Judge 并发必须至少为 1")
+    return parallel
 
 
-def _judge_summary(results):
+def _judge_summary(results, parallel=None):
     counts = {
         "judged": 0,
         "failed": 0,
@@ -212,8 +237,22 @@ def _judge_summary(results):
         "missing_report_cases": counts["missing_report"],
         "stale_report_cases": counts["stale_report"],
         "model": os.environ.get("ANTHROPIC_JUDGE_MODEL", "claude-opus-4-8"),
-        "parallel": _judge_parallelism(),
+        "parallel": _judge_parallelism(parallel),
     }
+
+
+def _text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _json_sha256(value) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return _text_sha256(raw)
 
 
 def _restore_all():
@@ -313,10 +352,13 @@ class Handler(BaseHTTPRequestHandler):
                     503,
                     {"error": "GenerationJobService 尚未初始化"},
                 )
-            return self._send(
-                200,
-                GENERATION_SERVICE.configuration(),
+            payload = GENERATION_SERVICE.configuration()
+            payload.update(
+                {
+                    "judge_parallel": _judge_parallelism(),
+                }
             )
+            return self._send(200, payload)
         if u.path == "/api/generation":
             if GENERATION_SERVICE is None:
                 return self._send(
@@ -416,10 +458,38 @@ class Handler(BaseHTTPRequestHandler):
             rows = b.get("rows")
             if b.get("use_sample"):
                 rows, _legacy_labels = _load_sample(s.rubric.get("product"))
+            if b.get("use_configured"):
+                if GENERATION_SERVICE is None:
+                    return self._send(
+                        503,
+                        {"error": "GenerationJobService 尚未初始化"},
+                    )
+                try:
+                    rows = load_openharness_rows(
+                        GENERATION_SERVICE.settings.dataset_path
+                        .expanduser()
+                        .resolve()
+                    )
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    return self._send(
+                        400,
+                        {"error": "配置数据集无法导入: %s" % exc},
+                    )
             if not rows:
-                return self._send(400, {"error": "无数据行; 传 rows 或 use_sample=true"})
-            with _session_lock(s.id):
-                result = s.import_data(rows, None, account=acct)
+                return self._send(
+                    400,
+                    {
+                        "error": (
+                            "无数据行; 传 rows、use_sample=true "
+                            "或 use_configured=true"
+                        )
+                    },
+                )
+            try:
+                with _session_lock(s.id):
+                    result = s.import_data(rows, None, account=acct)
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
             return self._send(200, result)
 
         if u.path == "/api/labels":
@@ -494,6 +564,8 @@ class Handler(BaseHTTPRequestHandler):
                     s.id,
                     acct,
                     case_ids=b.get("case_ids"),
+                    parallel=b.get("parallel"),
+                    model=b.get("model"),
                     idempotency_key=(
                         b.get("idempotency_key")
                         or self.headers.get("Idempotency-Key")
@@ -516,6 +588,8 @@ class Handler(BaseHTTPRequestHandler):
                 job, reused = GENERATION_SERVICE.retry(
                     b.get("job_id") or "",
                     acct,
+                    parallel=b.get("parallel"),
+                    model=b.get("model"),
                     idempotency_key=(
                         b.get("idempotency_key")
                         or self.headers.get("Idempotency-Key")
@@ -633,6 +707,12 @@ class Handler(BaseHTTPRequestHandler):
             s = self._sess(b.get("id"))
             if not s:
                 return
+            try:
+                judge_parallel = _judge_parallelism(
+                    b.get("parallel")
+                )
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
             ver = b.get("version") or s._current()["version"]
             if ver != s._current()["version"]:
                 return self._send(409, {"error": "只能批量 Judge 当前 Skill 版本"})
@@ -648,6 +728,7 @@ class Handler(BaseHTTPRequestHandler):
                     cases = [dict(case) for case in s.cases]
                     reports = dict(s.report_outputs.get(ver, {}))
                     rubric = dict(s.rubric)
+                    existing = dict(s.judge_checks.get(ver, {}))
                 if not cases:
                     return self._send(400, {"error": "尚未导入评测 case"})
                 missing_reports = [
@@ -664,6 +745,84 @@ class Handler(BaseHTTPRequestHandler):
                         },
                     )
 
+                rubric_sha256 = _json_sha256(rubric)
+                force_all = bool(b.get("force_all"))
+                if not force_all:
+                    cases = [
+                        case
+                        for case in cases
+                        if case["case_id"] not in existing
+                    ]
+                if not cases:
+                    with _session_lock(s.id):
+                        state = s.view(acct)
+                    return self._send(
+                        200,
+                        {
+                            "summary": {
+                                **_judge_summary([], judge_parallel),
+                                "status": "completed",
+                                "total_cases": 0,
+                                "judged_cases": 0,
+                                "failed_cases": 0,
+                                "remaining_cases": 0,
+                            },
+                            "results": [],
+                            "state": state,
+                        },
+                    )
+
+                def persist_result(item):
+                    if item.get("status") != "judged":
+                        return item
+                    case_id = item["case_id"]
+                    with _session_lock(s.id):
+                        if s._current()["version"] != ver:
+                            return {
+                                **item,
+                                "status": "stale_report",
+                                "error": (
+                                    "Judge 期间 Skill 版本已变化，结果未写入"
+                                ),
+                            }
+                        current_report = (
+                            s.report_outputs.get(ver, {}).get(case_id)
+                        )
+                        if current_report != reports.get(case_id):
+                            return {
+                                **item,
+                                "status": "stale_report",
+                                "error": (
+                                    "Judge 期间报告已变化，结果未写入"
+                                ),
+                            }
+                        if _json_sha256(s.rubric) != rubric_sha256:
+                            return {
+                                **item,
+                                "status": "stale_report",
+                                "error": (
+                                    "Judge 期间 Rubric 已变化，结果未写入"
+                                ),
+                            }
+                        s.set_judge_checks_batch(
+                            {
+                                case_id: {
+                                    "checks": item["checks"],
+                                    "reasoning": (
+                                        item.get("reasoning") or {}
+                                    ),
+                                    "report_sha256": _text_sha256(
+                                        current_report
+                                    ),
+                                    "rubric_sha256": rubric_sha256,
+                                }
+                            },
+                            ver,
+                            account=acct,
+                            evaluate_now=False,
+                        )
+                    return item
+
                 results = judge_cases(
                     cases,
                     reports,
@@ -671,44 +830,23 @@ class Handler(BaseHTTPRequestHandler):
                     _build_judge_prompt,
                     _call_opus,
                     _extract_json,
-                    parallel=_judge_parallelism(),
+                    parallel=judge_parallel,
+                    on_result=persist_result,
                 )
                 with _session_lock(s.id):
-                    if s._current()["version"] != ver:
-                        for item in results:
-                            if item["status"] == "judged":
-                                item["status"] = "stale_report"
-                                item["error"] = "Judge 期间 Skill 版本已变化，结果未写入"
-                    else:
-                        current_reports = s.report_outputs.get(ver, {})
-                        for item in results:
-                            case_id = item["case_id"]
-                            if (
-                                item["status"] == "judged"
-                                and current_reports.get(case_id) != reports.get(case_id)
-                            ):
-                                item["status"] = "stale_report"
-                                item["error"] = "Judge 期间报告已变化，结果未写入"
-                    judgments = {
-                        item["case_id"]: {
-                            "checks": item["checks"],
-                            "reasoning": item.get("reasoning") or {},
-                        }
-                        for item in results
-                        if item["status"] == "judged"
-                    }
-                    if judgments:
-                        state = s.set_judge_checks_batch(
-                            judgments,
-                            ver,
-                            account=acct,
-                        )
-                    else:
-                        state = s.view(acct)
+                    s.evaluate(acct)
+                    s._save()
+                    state = s.view(acct)
+                summary = _judge_summary(results, judge_parallel)
+                summary["remaining_cases"] = len(
+                    state["judge_progress"]["pending_judge_case_ids"]
+                )
+                if summary["remaining_cases"] == 0:
+                    summary["status"] = "completed"
                 return self._send(
                     200,
                     {
-                        "summary": _judge_summary(results),
+                        "summary": summary,
                         "results": results,
                         "state": state,
                     },

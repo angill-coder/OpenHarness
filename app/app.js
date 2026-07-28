@@ -57,12 +57,21 @@ document.getElementById('sampleBtn').onclick=async()=>{
   const j=await api('/api/data','POST',{id:SID,use_sample:true});
   STATE=j; render(); toast('已导入内置样例：'+j.n_cases+' 条');
 };
+document.getElementById('configuredDataBtn').onclick=async()=>{
+  if(!SID){toast('请先生成 V0');return;}
+  const j=await api('/api/data','POST',{id:SID,use_configured:true});
+  STATE=j; render(); toast('已加载当前 WB 数据集：'+j.n_cases+' 条');
+};
 document.getElementById('importBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0');return;}
   const raw=document.getElementById('dataInput').value.trim();
   if(!raw){toast('请粘贴数据或用样例');return;}
   let rows;
-  try{ rows = raw[0]==='[' ? JSON.parse(raw) : raw.split('\n').filter(x=>x.trim()).map(x=>JSON.parse(x)); }
+  try{
+    rows=(raw[0]==='['||raw[0]==='{')
+      ?JSON.parse(raw)
+      :raw.split('\n').filter(x=>x.trim()).map(x=>JSON.parse(x));
+  }
   catch(e){toast('解析失败：'+e.message);return;}
   const j=await api('/api/data','POST',{id:SID,rows}); STATE=j; render(); toast('已导入 '+j.n_cases+' 条');
 };
@@ -107,10 +116,18 @@ document.getElementById('runJudgeBtn').onclick=async()=>{
   if(!progress||progress.reports_ready!==progress.total_cases){
     toast('请先生成或补齐当前版本全部 case 的报告');return;
   }
+  const parallel=readParallel(
+    'judgeParallel',
+    GEN_CONFIG&&GEN_CONFIG.judge_parallel,
+    'Judge'
+  );
+  if(parallel==null)return;
   JUDGE_RUNNING=true;renderJudgeStatus();
-  toast(`正在批量 Judge ${progress.reports_ready}/${progress.total_cases} 份报告…`,9000);
+  toast(`正在以并发 ${parallel} Judge ${progress.reports_ready}/${progress.total_cases} 份报告…`,9000);
   try{
-    const j=await api('/api/run_judge_batch','POST',{id:SID,version:STATE.current_version});
+    const j=await api('/api/run_judge_batch','POST',{
+      id:SID,version:STATE.current_version,parallel
+    });
     STATE=j.state;JUDGE_SUMMARY=j.summary;JUDGE_RESULTS=j.results||[];render();
     const s=j.summary;
     toast(
@@ -140,7 +157,9 @@ document.getElementById('advanceBtn').onclick=async()=>{
   if(r){ toast(r.message, 4200);
     document.getElementById('advanceMsg').innerHTML =
       (r.status==='adopted'?'<span class="ok-txt">✅ 采纳</span> ':
+       r.status==='proposed'?'<span class="warn-txt">🧪 待真实验证</span> ':
        r.status==='rejected'?'<span class="warn-txt">❌ 被 gate 拒绝</span> ':
+       r.status==='blocked'?'<span class="warn-txt">⚠️ 无法推进</span> ':
        '<span class="mut">■ 收敛</span> ')+r.message;
   }
 };
@@ -154,6 +173,15 @@ const GEN_STATUS_ZH={
 };
 function generationActive(){
   return !!(GEN_JOB&&GEN_JOB.active);
+}
+function readParallel(id,fallback,label){
+  const input=document.getElementById(id);
+  const value=Number(input&&input.value||fallback);
+  if(!Number.isInteger(value)||value<1){
+    toast(`${label}并发必须是大于等于 1 的整数`);
+    return null;
+  }
+  return value;
 }
 function scheduleGenerationPoll(){
   clearTimeout(GEN_POLL);
@@ -189,21 +217,43 @@ async function loadLatestGeneration(){
 }
 document.getElementById('runGenerationBtn').onclick=async()=>{
   if(!SID||!STATE||!STATE.n_cases){toast('请先导入评测数据');return;}
+  const parallel=readParallel(
+    'generationParallel',
+    GEN_CONFIG&&GEN_CONFIG.parallel,
+    '报告生成'
+  );
+  if(parallel==null)return;
+  const modelInput=document.getElementById('generationModel');
+  const model=(modelInput&&modelInput.value||'').trim();
+  if(!model){toast('报告生成模型不能为空');return;}
   const key='start-'+SID+'-'+STATE.current_version+'-'+Date.now();
   try{
-    const j=await api('/api/generation/start','POST',{id:SID,idempotency_key:key});
+    const j=await api('/api/generation/start','POST',{
+      id:SID,idempotency_key:key,parallel,model
+    });
     GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
-    toast(j.reused?'已有任务正在执行':'WB CLI 任务已启动');
+    toast(j.reused?'已有任务正在执行':`WB CLI 任务已启动：${model}，并发 ${parallel}`);
   }catch(e){renderGenerationPanel();}
 };
 document.getElementById('retryGenerationBtn').onclick=async()=>{
   if(!GEN_JOB)return;
+  const parallel=readParallel(
+    'generationParallel',
+    GEN_JOB.parallel,
+    '报告生成'
+  );
+  if(parallel==null)return;
+  const modelInput=document.getElementById('generationModel');
+  const model=(modelInput&&modelInput.value||GEN_JOB.model||'').trim();
+  if(!model){toast('报告生成模型不能为空');return;}
   try{
     const j=await api('/api/generation/retry','POST',{
-      job_id:GEN_JOB.job_id,idempotency_key:'retry-'+GEN_JOB.job_id+'-'+Date.now()
+      job_id:GEN_JOB.job_id,
+      idempotency_key:'retry-'+GEN_JOB.job_id+'-'+Date.now(),
+      parallel,model
     });
     GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
-    toast('失败 case 重试任务已启动');
+    toast(`失败 case 重试已启动：${model}，并发 ${parallel}`);
   }catch(e){renderGenerationPanel();}
 };
 document.getElementById('cancelGenerationBtn').onclick=async()=>{
@@ -221,6 +271,9 @@ function renderGenerationPanel(){
   const run=document.getElementById('runGenerationBtn');
   const retry=document.getElementById('retryGenerationBtn');
   const cancel=document.getElementById('cancelGenerationBtn');
+  const parallelInput=document.getElementById('generationParallel');
+  const modelInput=document.getElementById('generationModel');
+  const judgeParallelInput=document.getElementById('judgeParallel');
   if(!cfg)return;
 
   if(!GEN_CONFIG){
@@ -228,16 +281,47 @@ function renderGenerationPanel(){
   }else if(!GEN_CONFIG.ready){
     cfg.innerHTML='<span class="warn-txt">运行配置不可用：'+esc(GEN_CONFIG.error)+'</span>';
   }else{
-    cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>${esc(GEN_CONFIG.skill_ref)}</span></div>`+
-      `<div class="kv"><span>模型 / 并发</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel}</span></div>`+
+    cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>启动时编译当前 Session 版本</span></div>`+
+      `<div class="kv"><span>模型 / 默认并发</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel}</span></div>`+
       `<div class="kv"><span>报告重试</span><span>最多额外 ${GEN_CONFIG.max_report_retries} 次</span></div>`+
-      `<div class="small warn-txt" style="margin-top:5px">当前为固定 Skill 链路验证；任务仍冻结并记录 Session 版本与哈希。</div>`;
+      `<div class="small mut" style="margin-top:5px">每个任务冻结完整 Skill 目录、版本和哈希，WB CLI 只执行该副本。</div>`;
   }
   const active=generationActive();
-  run.disabled=!STATE||!STATE.n_cases||active||!GEN_CONFIG||!GEN_CONFIG.ready;
+  if(parallelInput&&GEN_CONFIG){
+    if(!parallelInput.dataset.initialized){
+      parallelInput.value=GEN_CONFIG.parallel;
+      parallelInput.dataset.initialized='1';
+    }
+    parallelInput.disabled=active||!GEN_CONFIG.ready;
+  }
+  if(modelInput&&GEN_CONFIG){
+    if(!modelInput.dataset.initialized){
+      modelInput.value=GEN_CONFIG.model||'deepseek-v4-pro-ioa';
+      modelInput.dataset.initialized='1';
+    }
+    modelInput.disabled=active||!GEN_CONFIG.ready;
+  }
+  if(
+    GEN_JOB&&!active&&modelInput&&parallelInput
+    &&modelInput.dataset.jobId!==GEN_JOB.job_id
+  ){
+    modelInput.value=GEN_JOB.model||(GEN_CONFIG&&GEN_CONFIG.model)||'deepseek-v4-pro-ioa';
+    parallelInput.value=GEN_JOB.parallel||(GEN_CONFIG&&GEN_CONFIG.parallel)||20;
+    modelInput.dataset.jobId=GEN_JOB.job_id;
+  }
+  if(judgeParallelInput&&GEN_CONFIG){
+    if(!judgeParallelInput.dataset.initialized){
+      judgeParallelInput.value=GEN_CONFIG.judge_parallel;
+      judgeParallelInput.dataset.initialized='1';
+    }
+    judgeParallelInput.disabled=active||JUDGE_RUNNING;
+  }
+  const generationAction=STATE&&STATE.actions&&STATE.actions.run_generation;
+  run.disabled=!STATE||!(generationAction?generationAction.enabled:STATE.n_cases)||active||!GEN_CONFIG||!GEN_CONFIG.ready;
   retry.style.display=GEN_JOB&&!active&&GEN_JOB.failed_case_ids&&GEN_JOB.failed_case_ids.length?'':'none';
   cancel.style.display=active?'':'none';
-  document.getElementById('advanceBtn').disabled=!STATE||!STATE.can_advance||active||JUDGE_RUNNING;
+  const advanceAction=STATE&&STATE.actions&&STATE.actions.advance;
+  document.getElementById('advanceBtn').disabled=!STATE||!(advanceAction?advanceAction.enabled:STATE.can_advance)||active||JUDGE_RUNNING;
   if(!GEN_JOB){
     status.innerHTML='<span class="mut">尚未运行。报告导入后，请在下方一键批量 Judge 全部 case。</span>';
     cases.innerHTML='';return;
@@ -245,8 +329,12 @@ function renderGenerationPanel(){
   const total=GEN_JOB.case_count||0, imported=GEN_JOB.imported_count||0;
   const done=(GEN_JOB.cases||[]).filter(x=>x.imported||['retry_exhausted','failed','cancelled'].includes(x.status)).length;
   const pct=total?Math.round(done/total*100):0;
+  const historical=STATE&&GEN_JOB.skill_version!==STATE.current_version;
   status.innerHTML=`<div class="kv"><span>状态</span><b class="${GEN_JOB.status==='completed'?'ok-txt':GEN_JOB.status==='failed'?'warn-txt':''}">${esc(GEN_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status)}</b></div>`+
-    `<div class="kv"><span>冻结版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.skill_artifact_hash||'').slice(0,10))}</span></div>`+
+    `<div class="kv"><span>实际执行版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.execution_skill_hash||'').slice(0,10))}</span></div>`+
+    `<div class="kv"><span>报告生成模型</span><span>${esc(GEN_JOB.model||'CLI 默认')}</span></div>`+
+    `<div class="kv"><span>报告生成并发</span><span>${GEN_JOB.parallel}</span></div>`+
+    (historical?`<div class="warn-txt" style="margin-top:5px">这是历史任务；当前 Session 已是 ${esc(STATE.current_version)}。</div>`:'')+
     `<div class="kv"><span>已导入</span><span>${imported}/${total}</span></div>`+
     `<div class="barwrap" style="margin-top:7px"><div class="bar" style="width:${pct}%"></div></div>`+
     (GEN_JOB.error?`<div class="warn-txt" style="margin-top:6px">${esc(GEN_JOB.error)}</div>`:'');
@@ -275,7 +363,8 @@ function render(){
   }).join('');
   document.getElementById('versionPills').innerHTML = pills +
     `<div class="small mut" style="margin-top:6px">数据 ${STATE.n_cases} 条 ${JSON.stringify(STATE.splits)}</div>`;
-  document.getElementById('advanceBtn').disabled=!STATE.can_advance||generationActive()||JUDGE_RUNNING;
+  const advanceAction=STATE.actions&&STATE.actions.advance;
+  document.getElementById('advanceBtn').disabled=!(advanceAction?advanceAction.enabled:STATE.can_advance)||generationActive()||JUDGE_RUNNING;
 
   // 当前 skill
   const cv=STATE.versions.find(v=>v.version===STATE.current_version);
@@ -286,7 +375,7 @@ function render(){
     <div class="small mut" style="margin:6px 0">${cv.changelog||''}</div>
     <div class="mut small">已打开的 directive（优化动作 L1）：</div><div>${onDir}</div>
     ${cv.proposal?`<details><summary>本版来自的优化提议</summary><pre>${JSON.stringify(cv.proposal,null,2)}</pre></details>`:''}
-    <details><summary>查看结构（flow / subagents，冻结）</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
+    <details><summary>查看版本结构策略</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
 
   renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard(); renderGenerationPanel();
 }
@@ -338,8 +427,19 @@ function renderJudgeStatus(){
   if(!el||!btn)return;
   const p=STATE&&STATE.judge_progress;
   const allReports=!!(p&&p.total_cases&&p.reports_ready===p.total_cases);
-  btn.disabled=!allReports||generationActive()||JUDGE_RUNNING;
-  btn.textContent=JUDGE_RUNNING?'批量 Judge 执行中…':'▶ 批量 Judge 全部 case';
+  const action=STATE&&STATE.actions&&STATE.actions.run_judge;
+  const parallelInput=document.getElementById('judgeParallel');
+  if(parallelInput&&GEN_CONFIG){
+    if(!parallelInput.dataset.initialized){
+      parallelInput.value=GEN_CONFIG.judge_parallel;
+      parallelInput.dataset.initialized='1';
+    }
+    parallelInput.disabled=generationActive()||JUDGE_RUNNING;
+  }
+  btn.disabled=!(action?action.enabled:allReports)||generationActive()||JUDGE_RUNNING;
+  btn.textContent=JUDGE_RUNNING
+    ?'批量 Judge 执行中…'
+    :(p&&p.judged_cases?'▶ 继续 Judge 未完成 case':'▶ 批量 Judge 全部 case');
   if(!p){
     el.innerHTML='<span class="mut">导入数据后显示 Judge 状态。</span>';return;
   }
@@ -348,15 +448,19 @@ function renderJudgeStatus(){
     `<div class="kv"><span>模型 Judge</span><b class="${complete?'ok-txt':p.judged_cases?'warn-txt':'mut'}">${p.judged_cases}/${p.total_cases}</b></div>`+
     (!allReports?`<div class="warn-txt" style="margin-top:5px">仍缺 ${p.total_cases-p.reports_ready} 份报告，请先重试 WB CLI 或手工补齐。</div>`:'')+
     (complete?'<div class="ok-txt" style="margin-top:5px">全部 case 已完成模型 Judge，可以生成下一版 Skill。</div>':'')+
+    (action&&!action.enabled&&action.reason&&!complete?`<div class="small mut" style="margin-top:5px">${esc(action.reason)}</div>`:'')+
     (JUDGE_SUMMARY&&JUDGE_SUMMARY.failed_cases
       ?`<div class="warn-txt" style="margin-top:5px">最近一次批量 Judge 有 ${JUDGE_SUMMARY.failed_cases} 个 case 未成功，可再次点击整批重跑。</div>`+
        JUDGE_RESULTS.filter(x=>x.status!=='judged').map(x=>
          `<div class="mut">${esc(x.case_id)}：${esc(x.error||x.status)}</div>`).join('')
       :'');
 }
-function cv_structure(){ // 结构从 rubric 无关, 取 v0 的展示(结构冻结, 各版一致)
-  return {flow:["Intake","DataAnalyst→findings","Insight→insights","Writer→draft","Verifier(独立)","Format"],
-          subagents:["DataAnalyst","Insight","Writer","Verifier(独立对抗)"],memory:["config","facts","learned_rules"]};
+function cv_structure(){
+  return {
+    baseline:"skills/research-report",
+    policy:"SKILL.md 与目录结构保持基线不变",
+    evolution:"仅在 references/instructions.md 累积 optimizer directive"
+  };
 }
 
 function renderCurve(){

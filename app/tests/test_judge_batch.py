@@ -15,6 +15,7 @@ for path in (str(APP), str(HARNESS)):
 
 from judge_batch import judge_cases  # noqa: E402
 import persistence as persist  # noqa: E402
+from server import _build_judge_prompt, _judge_parallelism  # noqa: E402
 from session import Session  # noqa: E402
 
 
@@ -31,9 +32,9 @@ RUBRIC = {
 }
 
 
-def build_prompt(_rubric, report, ground_truth):
+def build_prompt(_rubric, report, case_context):
     return json.dumps(
-        {"report": report, "ground_truth": ground_truth},
+        {"report": report, "case_context": case_context},
         ensure_ascii=False,
     )
 
@@ -43,6 +44,27 @@ def extract_json(text):
 
 
 class JudgeBatchTest(unittest.TestCase):
+    def test_judge_parallel_override_has_no_artificial_cap(self):
+        self.assertEqual(_judge_parallelism(200), 200)
+        with self.assertRaisesRegex(ValueError, "至少为 1"):
+            _judge_parallelism(0)
+        with self.assertRaisesRegex(ValueError, "整数"):
+            _judge_parallelism(1.5)
+
+    def test_server_prompt_includes_ground_truth_for_traceability(self):
+        prompt = _build_judge_prompt(
+            RUBRIC,
+            "report",
+            {
+                "case_id": "case-a",
+                "input": {"brief": "A"},
+                "ground_truth": {"reference_report_text": "事实 A"},
+            },
+        )
+        self.assertIn("ground_truth", prompt)
+        self.assertIn("事实 A", prompt)
+        self.assertIn("任务信息", prompt)
+
     def test_judges_all_cases_and_preserves_dataset_order(self):
         cases = [
             {"case_id": "case-a", "ground_truth": {"answer": "A"}},
@@ -74,6 +96,42 @@ class JudgeBatchTest(unittest.TestCase):
         )
         self.assertEqual([item["status"] for item in results], ["judged", "judged"])
         self.assertEqual(results[1]["checks"]["Q1"], "miss")
+
+    def test_prompt_context_includes_ground_truth(self):
+        prompts = []
+
+        def call_model(prompt):
+            prompts.append(json.loads(prompt))
+            return json.dumps(
+                {
+                    "checks": {"Q1": "met", "Q2": "met"},
+                    "reasoning": {},
+                }
+            )
+
+        judge_cases(
+            [
+                {
+                    "case_id": "case-a",
+                    "input": {"brief": "A"},
+                    "ground_truth": {"secret": "answer"},
+                }
+            ],
+            {"case-a": "report-a"},
+            RUBRIC,
+            build_prompt,
+            call_model,
+            extract_json,
+        )
+
+        self.assertEqual(
+            prompts[0]["case_context"]["ground_truth"],
+            {"secret": "answer"},
+        )
+        self.assertEqual(
+            prompts[0]["case_context"]["input"],
+            {"brief": "A"},
+        )
 
     def test_missing_report_and_model_error_do_not_abort_batch(self):
         cases = [
@@ -117,6 +175,32 @@ class JudgeBatchTest(unittest.TestCase):
         )
         self.assertEqual(results[0]["status"], "failed")
         self.assertIn("Q2", results[0]["error"])
+
+    def test_result_callback_persists_each_success_as_completed(self):
+        completed = []
+        results = judge_cases(
+            [
+                {"case_id": "case-a", "input": {}},
+                {"case_id": "case-b", "input": {}},
+            ],
+            {"case-a": "A", "case-b": "B"},
+            RUBRIC,
+            build_prompt,
+            lambda _prompt: json.dumps(
+                {
+                    "checks": {"Q1": "met", "Q2": "met"},
+                    "reasoning": {},
+                }
+            ),
+            extract_json,
+            on_result=lambda item: completed.append(
+                item["case_id"]
+            ),
+        )
+        self.assertEqual(set(completed), {"case-a", "case-b"})
+        self.assertTrue(
+            all(item["status"] == "judged" for item in results)
+        )
 
 
 class ModelOnlySessionTest(unittest.TestCase):
@@ -169,8 +253,185 @@ class ModelOnlySessionTest(unittest.TestCase):
         )
         self.assertTrue(state["judge_progress"]["complete"])
         self.assertTrue(state["can_advance"])
+        self.assertEqual(state["version_status"], "optimizable")
+        self.assertTrue(state["actions"]["advance"]["enabled"])
+        self.assertEqual(state["failure_report"], [])
         self.assertIsNone(state["calib"])
         self.assertIsNone(state["check_calib"])
+
+    def test_real_judge_failure_proposes_pending_version(self):
+        session = Session(
+            "judge-proposal",
+            "生成调研洞察报告",
+            "research_insight",
+        )
+        session.import_data(
+            [
+                {
+                    "case_id": "case-a",
+                    "input": {"brief": "A"},
+                    "ground_truth": {},
+                }
+            ]
+        )
+        session.import_output("case-a", "report A")
+        checks = {
+            check["id"]: "met"
+            for dimension in session.rubric["dimensions"]
+            for check in dimension.get("checks", [])
+        }
+        checks["T2"] = "partial"
+        state = session.set_judge_checks_batch(
+            {
+                "case-a": {
+                    "checks": checks,
+                    "reasoning": {"T2": "unsupported"},
+                }
+            }
+        )
+        self.assertEqual(
+            state["failure_report"][0]["pattern_id"],
+            "trace_fabrication",
+        )
+
+        # 本用例只验证真实 failure → optimizer proposal 的状态流，
+        # 因此显式模拟一个尚未在基线启用的目标开关。
+        session._current()["skill"].directives()[
+            "verify_no_fabrication"
+        ] = False
+        state = session.advance()
+
+        self.assertEqual(state["advance_result"]["status"], "proposed")
+        self.assertEqual(state["current_version"], "v1")
+        self.assertEqual(state["version_status"], "awaiting_generation")
+        self.assertFalse(state["actions"]["advance"]["enabled"])
+        self.assertNotIn(
+            "v1",
+            [item["version"] for item in state["curve"]],
+        )
+
+    def test_report_change_invalidates_completed_judge(self):
+        session = Session(
+            "judge-invalidate",
+            "生成调研洞察报告",
+            "research_insight",
+        )
+        session.import_data(
+            [{"case_id": "case-a", "input": {"brief": "A"}}]
+        )
+        session.import_output("case-a", "report A")
+        checks = {
+            check["id"]: "met"
+            for dimension in session.rubric["dimensions"]
+            for check in dimension.get("checks", [])
+        }
+        session.set_judge_checks_batch(
+            {"case-a": {"checks": checks}}
+        )
+
+        state = session.import_output("case-a", "report B")
+
+        self.assertFalse(state["judge_progress"]["complete"])
+        self.assertEqual(
+            state["judge_progress"]["pending_judge_case_ids"],
+            ["case-a"],
+        )
+        self.assertTrue(state["actions"]["run_judge"]["enabled"])
+
+    def test_partial_judge_results_resume_after_restore(self):
+        session = Session(
+            "judge-resume",
+            "生成调研洞察报告",
+            "research_insight",
+        )
+        session.import_data(
+            [
+                {"case_id": "case-a", "input": {"brief": "A"}},
+                {"case_id": "case-b", "input": {"brief": "B"}},
+            ]
+        )
+        session.import_output("case-a", "report A")
+        session.import_output("case-b", "report B")
+        checks = {
+            check["id"]: "met"
+            for dimension in session.rubric["dimensions"]
+            for check in dimension.get("checks", [])
+        }
+        session.set_judge_checks_batch(
+            {"case-a": {"checks": checks}},
+            evaluate_now=False,
+        )
+
+        restored = Session.restore(
+            persist.load_snapshot("judge-resume")
+        )
+        state = restored.view()
+
+        self.assertEqual(state["judge_progress"]["judged_cases"], 1)
+        self.assertEqual(
+            state["judge_progress"]["pending_judge_case_ids"],
+            ["case-b"],
+        )
+        self.assertTrue(state["actions"]["run_judge"]["enabled"])
+
+    def test_unmapped_failed_check_blocks_instead_of_converging(self):
+        session = Session(
+            "judge-unmapped",
+            "生成调研洞察报告",
+            "research_insight",
+        )
+        session.import_data(
+            [{"case_id": "case-a", "input": {"brief": "A"}}]
+        )
+        session.import_output("case-a", "report A")
+        checks = {
+            check["id"]: "met"
+            for dimension in session.rubric["dimensions"]
+            for check in dimension.get("checks", [])
+        }
+        checks["T2"] = "miss"
+        for dimension in session.rubric["dimensions"]:
+            for check in dimension.get("checks", []):
+                if check["id"] == "T2":
+                    check.pop("optimizer")
+        state = session.set_judge_checks_batch(
+            {"case-a": {"checks": checks}}
+        )
+
+        self.assertEqual(state["version_status"], "blocked")
+        self.assertIn("T2", state["failure_mapping_error"])
+        self.assertFalse(state["actions"]["advance"]["enabled"])
+
+    def test_unfixable_real_failure_is_blocked_not_converged(self):
+        session = Session(
+            "judge-no-change",
+            "生成调研洞察报告",
+            "research_insight",
+        )
+        session.import_data(
+            [{"case_id": "case-a", "input": {"brief": "A"}}]
+        )
+        session.import_output("case-a", "report A")
+        session._current()["skill"].directives()[
+            "verify_no_fabrication"
+        ] = True
+        checks = {
+            check["id"]: "met"
+            for dimension in session.rubric["dimensions"]
+            for check in dimension.get("checks", [])
+        }
+        checks["T2"] = "partial"
+        session.set_judge_checks_batch(
+            {"case-a": {"checks": checks}}
+        )
+
+        state = session.advance()
+
+        self.assertEqual(state["advance_result"]["status"], "blocked")
+        self.assertEqual(
+            state["advance_result"]["code"],
+            "optimizer_no_applicable_change",
+        )
 
 
 if __name__ == "__main__":

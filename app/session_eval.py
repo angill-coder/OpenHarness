@@ -26,6 +26,7 @@ import runner as runner_mod                         # noqa: E402
 import judge as judge_mod                           # noqa: E402
 import clustering as clustering_mod                 # noqa: E402
 import optimizer as optimizer_mod                   # noqa: E402
+from workbuddy_batch.dataset import openharness_rows  # noqa: E402
 
 import persistence as persist                        # noqa: E402
 
@@ -35,17 +36,24 @@ class SessionEval:
 
     # ---------- 数据导入 ----------
     def import_data(self, rows: List[Dict[str, Any]], labels: Optional[List[Dict]] = None, account=None):
-        # 校验最小字段(算数字型认 ground_truth_findings; 调研洞察认 ground_truth)
+        # 同一份 openharness-wb/v1 JSON 同时服务 WB 生成和平台评测。
+        # 旧数组/JSONL 在迁移期仍可读取，但不再静默跳过坏数据。
+        normalized = openharness_rows(rows)
         is_research = self.rubric.get("product") == "research_insight"
         clean = []
-        for r in rows:
-            if "case_id" not in r or "input" not in r:
-                continue
-            if is_research and "ground_truth" not in r:
-                continue
+        for source in normalized:
+            r = copy.deepcopy(source)
             if not is_research and "ground_truth_findings" not in r:
-                continue
+                raise ValueError(
+                    "算数字型 case %s 缺少 ground_truth_findings"
+                    % r["case_id"]
+                )
             r.setdefault("split", "dev")
+            if r["split"] not in {"train", "dev", "test"}:
+                raise ValueError(
+                    "case %s 的 split 非法: %s"
+                    % (r["case_id"], r["split"])
+                )
             r.setdefault("hard_case_tags", [])
             r.setdefault("required_sections", [])
             r.setdefault("audience", self.detected.get("audience", "exec"))
@@ -77,6 +85,8 @@ class SessionEval:
         cur = self._current()
         skill = cur["skill"]
         ver = cur["version"]
+        if cur.get("workflow_block"):
+            cur["workflow_block"] = None
 
         train_dev = [c for c in self.cases if c["split"] in ("train", "dev")]
         dev = [c for c in self.cases if c["split"] == "dev"]
@@ -91,9 +101,29 @@ class SessionEval:
 
         cur["dev"] = runner_mod.mean_scores(dev_recs, self.rubric) if dev else runner_mod.mean_scores(recs_all, self.rubric)
         cur["test"] = runner_mod.mean_scores(test_recs, self.rubric) if test else None
-        cur["failures"] = clustering_mod.cluster(
-            [r for r in recs_all if r.dataset_split in ("train", "dev")] or recs_all,
-            product=self.rubric.get("product"))
+        eligible_recs = (
+            [r for r in recs_all if r.dataset_split in ("train", "dev")]
+            or recs_all
+        )
+        if self.rubric.get("product") == "research_insight":
+            try:
+                failure_report = clustering_mod.analyze_real_judgments(
+                    self.judge_checks.get(ver, {}),
+                    self.rubric,
+                )
+                cur["failure_mapping_error"] = []
+            except clustering_mod.FailureMappingError as exc:
+                failure_report = []
+                cur["failure_mapping_error"] = exc.check_ids
+            cur["failure_report"] = failure_report
+            cur["failures"] = failure_report
+        else:
+            cur["failures"] = clustering_mod.analyze_mock_records(
+                eligible_recs,
+                product=self.rubric.get("product"),
+            )
+            cur["failure_report"] = cur["failures"]
+            cur["failure_mapping_error"] = []
         cur["_recs"] = recs_all         # 暂存基础记录(账号无关), 供 view(account) 叠加人工分
 
         # 记录失败历史(用于看板消长)
@@ -122,6 +152,7 @@ class SessionEval:
             jc = (jchecks.get(r.case_id) or {}).get("checks")
             jv = juds.get(r.case_id)
             if jc:
+                r.judge_checks = dict(jc)
                 r.scores = judge_mod.dim_from_checks(jc, self.rubric)
                 r.judge_reasoning = (jchecks.get(r.case_id) or {}).get("reasoning", {})
                 r.score_source = "recorded"
@@ -206,6 +237,13 @@ class SessionEval:
             n = 1
         rb["version"] = "r%d" % n
         self.rubric = rb
+        clustering_mod.validate_optimizer_mappings(self.rubric)
+        current_version = self._current()["version"]
+        self._invalidate_judge_checks(
+            current_version,
+            list(self.judge_checks.get(current_version, {})),
+            "rubric_changed",
+        )
         persist.append_event(self.id, "edit_rubric", {
             "new_version": rb["version"],
             "weights": {d["name"]: d["weight"] for d in rb["dimensions"]},
@@ -226,9 +264,54 @@ class SessionEval:
             cur = self._current()
 
         skill = cur["skill"]
-        proposal = optimizer_mod.propose(skill, cur["failures"], self.opt_history)
+        state = self.view(account)
+        advance_action = state["actions"]["advance"]
+        if not advance_action["enabled"]:
+            state["advance_result"] = {
+                "status": "blocked",
+                "code": "workflow_not_ready",
+                "message": advance_action["reason"] or "当前版本不可推进",
+            }
+            return state
+
+        failures = (
+            cur.get("failure_report")
+            if self.rubric.get("product") == "research_insight"
+            else cur["failures"]
+        ) or []
+        proposal = optimizer_mod.propose(
+            skill,
+            failures,
+            self.opt_history,
+        )
         if proposal is None:
-            note = self._plateau_note(cur["failures"])
+            if failures:
+                note = (
+                    "真实 Judge 仍有失败项，但 Optimizer 没有可应用的新改动；"
+                    "请检查 directive 状态或扩展优化动作。"
+                )
+                cur["workflow_block"] = note
+                persist.append_event(
+                    self.id,
+                    "optimizer_blocked",
+                    {
+                        "at_version": skill.version,
+                        "failure_patterns": [
+                            item.get("pattern_id")
+                            for item in failures
+                        ],
+                        "note": note,
+                    },
+                )
+                self._save()
+                state = self.view(account)
+                state["advance_result"] = {
+                    "status": "blocked",
+                    "code": "optimizer_no_applicable_change",
+                    "message": note,
+                }
+                return state
+            note = self._plateau_note(failures)
             persist.append_event(self.id, "converged", {
                 "at_version": skill.version, "note": note})
             self._save()
@@ -236,9 +319,58 @@ class SessionEval:
                 "status": "converged",
                 "message": "优化器无更多可提议改动 => 平台期/收敛。" + note}}
 
-        vnum = sum(1 for v in self.versions if v["adopted"])   # 下一个版本号
+        version_nums = []
+        for item in self.versions:
+            try:
+                version_nums.append(
+                    int(str(item["version"]).lstrip("v"))
+                )
+            except (TypeError, ValueError):
+                continue
+        vnum = max(version_nums, default=0) + 1
         cand_ver = "v%d" % vnum
         candidate = optimizer_mod.apply_proposal(skill, proposal, cand_ver)
+
+        if self.rubric.get("product") == "research_insight":
+            self._add_version(candidate, adopted=True, proposal=proposal)
+            self.current_idx = len(self.versions) - 1
+            self.opt_history.append({
+                "target": proposal["target"],
+                "directive": proposal.get("directive"),
+                "fewshot": proposal.get("fewshot"),
+                "result": "pending_real_evaluation",
+            })
+            self.evaluate(account)
+            result = {
+                "status": "proposed",
+                "version": cand_ver,
+                "proposal": proposal,
+                "requires_real_evaluation": True,
+                "message": (
+                    "已生成待验证候选 %s: %s。"
+                    "请执行 WB CLI + 批量真实 Judge。"
+                )
+                % (cand_ver, proposal["change"]),
+            }
+            persist.append_event(
+                self.id,
+                "version_proposed",
+                {
+                    "version": cand_ver,
+                    "parent": skill.version,
+                    "proposal": proposal,
+                    "validation": "pending_real_evaluation",
+                    "directives_on": [
+                        key
+                        for key, enabled in candidate.directives().items()
+                        if enabled
+                    ],
+                },
+            )
+            self._save()
+            view = self.view(account)
+            view["advance_result"] = result
+            return view
 
         # dev gate(与账号无关: gate 用 judge/mock 分, 不用人工分)
         dev = [c for c in self.cases if c["split"] == "dev"] or self.cases
@@ -304,7 +436,7 @@ class SessionEval:
 
     def _plateau_note(self, failures):
         if not failures:
-            return " 失败模式已零散, 当前结构够用。"
+            return " 当前版本全部 Judge check 均已满足。"
         top = failures[0]
         if top.get("directive_hint") is None:
             return " 首要失败'%s'无指令级修法 => 触发结构优化(Phase3)信号, 需人工回改 v0 结构。" % top["pattern"]

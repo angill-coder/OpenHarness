@@ -53,6 +53,20 @@ class SessionGeneration:
             imported_for_job[case_id] = digest
 
         if clean:
+            changed_judged = [
+                case_id
+                for case_id, text in clean.items()
+                if (
+                    self.report_outputs.get(version, {}).get(case_id)
+                    not in (None, text)
+                )
+            ]
+            if changed_judged:
+                self._invalidate_judge_checks(
+                    version,
+                    changed_judged,
+                    "generated_report_changed",
+                )
             self.report_outputs.setdefault(version, {}).update(clean)
             persist.append_outputs_batch(
                 self.id,

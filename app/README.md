@@ -17,10 +17,10 @@ python3 server.py                 # 默认 http://127.0.0.1:8080
 默认配置已经对应当前仓库；需要覆盖时设置：
 
 ```bash
-export OPENHARNESS_WB_DATASET=../data/data.json
+export OPENHARNESS_WB_DATASET=../data/20260727_test_data/data.json
 export OPENHARNESS_WB_SKILL_PATH=../skills/research-report
-export OPENHARNESS_WB_MODEL=deepseek-v4-pro
-export OPENHARNESS_WB_PARALLEL=10
+export OPENHARNESS_WB_MODEL=deepseek-v4-pro-ioa
+export OPENHARNESS_WB_PARALLEL=20
 export OPENHARNESS_WB_MAX_REPORT_RETRIES=3
 export OPENHARNESS_WB_OUTPUT=../generation_runs
 
@@ -44,10 +44,14 @@ export ANTHROPIC_API_KEY=...
 export ANTHROPIC_BASE_URL=https://api.anthropic.com
 export ANTHROPIC_JUDGE_MODEL=claude-opus-4-8
 export LLM_API_STYLE=anthropic          # 第三方 OpenAI 兼容网关填 openai
-export OPENHARNESS_JUDGE_PARALLEL=3     # 默认 3，最大 8
+export OPENHARNESS_JUDGE_PARALLEL=20    # 默认 20；可在 Web UI 调整
 ```
 
-默认读取仓库内的 `data/data.json`；该文件已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查生效配置。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
+默认读取仓库内的 `data/20260727_test_data/data.json`；该文件已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查生效配置。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
+
+报告生成和 Judge 的默认并发均为 20。当前版本不设置人为安全上限；实际并发不会超过待处理 case 数量，并受本机资源、WB CLI 和模型服务容量约束。
+
+Web UI 可为每次报告生成任务单独填写模型和最大并发；默认模型为 `deepseek-v4-pro-ioa`。任务会记录实际模型；「仅重试失败 case」默认显示原任务配置，也允许在点击前改用新的模型或并发。一次任务耗尽内部重试后，仍可创建新的失败 case 重试任务。
 
 > 内置样例：算数字型读 `data/report_assistant/dataset.jsonl`（没有先跑 `python3 ../data/report_assistant/build_dataset.py`）；调研洞察型读 `data/research_assistant/dataset.sample.jsonl`。「用内置样例」按钮按会话产品自动选。
 
@@ -62,8 +66,8 @@ export OPENHARNESS_JUDGE_PARALLEL=3     # 默认 3，最大 8
 
 ## 页面输入（左列自上而下）
 
-1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。平台识别产品/受众、产出**第一版 v0 skill（结构+指令+memory）+ 一版 rubric**（directive 全关，作为优化起跑线）。
-2. **导入数据**：点「用内置样例数据集」，或粘贴 JSONL/JSON 数组。每条 case 需含 `case_id` / `input` / 答案键（算数字型 `ground_truth_findings`；调研洞察 `ground_truth`）。
+1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。调研洞察产品固定读取 `skills/research-report` 唯一基线，并按基线实际内容初始化已启用 directive；其它产品仍由 generator 生成 v0。
+2. **导入数据**：调研报告可直接点「加载当前 WB 数据集」，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `ground_truth` 作为评测参考：不会发送给 WB 生成模型，但会与报告、Rubric 一起发送给模型 Judge。
 3. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；无有效报告自动额外重试 3 次，成功报告批量导入冻结版本。
 4. **批量模型 Judge**：点击「批量 Judge 全部 case」。系统以有限并发为每个 case 单独调用模型，并把逐-check结果汇总为六维分。
 
@@ -78,15 +82,17 @@ export OPENHARNESS_JUDGE_PARALLEL=3     # 默认 3，最大 8
 
 - HTTP 启动立即返回，页面通过轮询更新，不会被长任务阻塞；
 - 同一个 Session 同时只允许一个真实生成任务；
-- 任务启动时冻结 Session Skill 版本和内容 hash；
+- 任务启动时完整复制 `skills/research-report`，只在现有 `references/instructions.md` 中写入当前版本新增 directive，并冻结版本、基线 hash 和执行目录 hash；
 - 生成期间禁止替换数据、修改 Rubric、推进 Skill 或手工覆盖报告；
 - WorkBuddy 每个 case 的 `repetition=1`，只有没有有效报告时才重跑，最多额外 3 次；
 - 通过 `deliverables/report.md` 验收的报告才会导入；
+- 每次 attempt 完成并捕获报告/清单后删除临时 workspace，不重复保留原始素材副本；
+- trace 保留聚合 `2_events.jsonl`、请求、结果和 stderr；不落盘逐 round 的 `stdout.jsonl`，并过滤逐 token `stream_event`；
 - 多个报告只触发一次 `evaluate()` 和一次 Session 保存；
 - 部分成功会保留并导入成功报告，页面可「仅重试失败 case」；
 - 服务重启后历史任务仍可查看；执行中的任务标为 `interrupted`，不会静默重复执行。
 
-报告生成和模型 Judge 仍是两个显式步骤，不自动推进 Skill。执行 Skill 仍是固定的 `skills/research-report`；前端明确标为“固定 Skill 链路验证”。版本化 Skill Renderer 完成前，不应把这条结果当成完整的真实版本 Gate。
+报告生成和模型 Judge 仍是两个显式步骤，不会自动推进 Skill。`skills/research-report` 是调研报告的唯一结构与基础指令来源；每次生成从该基线复制，并叠加当前 Session 累计打开、且基线尚未包含的 directive。
 
 ## 批量模型 Judge
 
@@ -95,7 +101,7 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 ```text
 一次点击
   → 当前 Skill 版本的全部 case
-  → 每个 case 独立 Prompt（报告 + ground_truth + rubric checks）
+  → 每个 case 独立 Prompt（任务信息 + 报告 + ground truth + rubric checks）
   → 最多 OPENHARNESS_JUDGE_PARALLEL 路并发
   → 单 case 失败隔离
   → 成功结果一次性写入 Session 并重评
@@ -151,10 +157,10 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 | `POST /api/import_judgment` `{id, case_id, scores:{dim:score}, reasoning?, version?}` | 存平台 LLM-judge 六维分（覆盖 mock）|
 | `POST /api/run_judge_batch` `{id, version?}` | 并发 Judge 当前版本全部 case，返回 summary/results/state |
 | `GET /api/generation/config` | 查看 WB 运行配置与预检状态 |
-| `POST /api/generation/start` `{id, case_ids?, idempotency_key?}` | 后台生成并自动导入 |
+| `POST /api/generation/start` `{id, case_ids?, idempotency_key?, model?, parallel?}` | 按本次指定模型/并发后台生成并自动导入 |
 | `GET /api/generation?id=<job_id>` | 查询任务/逐 case 状态 |
 | `GET /api/generation?session_id=<sid>` | 查询 Session 最近任务和历史 |
-| `POST /api/generation/retry` `{job_id, idempotency_key?}` | 仅重跑未导入 case |
+| `POST /api/generation/retry` `{job_id, idempotency_key?, model?, parallel?}` | 按可选新模型/并发仅重跑未导入 case |
 | `POST /api/generation/cancel` `{job_id}` | 请求在当前 CLI 轮次结束后安全停止 |
 | `GET /api/sample_data` | 返回内置样例数据集（按会话产品）|
 | `GET /api/sessions` | 列出所有已恢复会话 |
@@ -163,8 +169,8 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 
 - **落盘持久化**：需求描述、每一版 skill/rubric、报告和模型 Judge 结果都落盘，重启自动恢复（见下）。
 - **离线确定性**：mock 后端的输出质量由 skill 的 directive 决定，judge 按 rubric 锚点对照 ground truth 打分，所以"打开正确 directive → 分数上升"是 rubric 的必然而非脚本。算数字型走 `MockBackend`，调研洞察型走 `ResearchMockBackend`（吐报告文本+signals）。
-- **Mock 无需 API key**：真实报告可手工粘贴，也可由本机 WorkBuddy CLI 生成；Judge 仍需单独配置相应 LLM key。（`generator.py` 保留一条 dormant 的 Claude 生成 v0 分支，仅在有 key + `--real` 时启用。）
-- **v0 生成用固定词汇**：需求描述影响产品/受众/权重/初始 directive，但结构与维度沿用 harness 已知词汇（保证生成物能被 loop 真正跑起来）。
+- **Mock 无需 API key**：真实报告可手工粘贴，也可由本机 WorkBuddy CLI 生成；Judge 仍需单独配置相应 LLM key。
+- **调研 v0 使用唯一基线**：`generator.py` 不再为调研产品另造 Skill 结构；v0 directive 状态直接读取 `skills/research-report/references/instructions.md` 的声明。
 - **优化目前只做 L1**（打开 directive）；L2（few-shot）/L3（memory）与结构级优化是后续。
 
 ## 落盘与恢复

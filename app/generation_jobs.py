@@ -38,6 +38,10 @@ from generation_models import (  # noqa: E402
     GenerationJob,
 )
 import persistence as persist  # noqa: E402
+from skill_compiler import (  # noqa: E402
+    compile_session_skill,
+    directory_hash as compiled_skill_hash,
+)
 
 
 class GenerationJobError(ValueError):
@@ -60,8 +64,8 @@ class GenerationSettings:
     output_root: Path
     skill_path: Optional[Path] = None
     skill_name: Optional[str] = None
-    model: Optional[str] = "deepseek-v4-pro"
-    parallel: int = 10
+    model: Optional[str] = "deepseek-v4-pro-ioa"
+    parallel: int = 20
     max_report_retries: int = 3
     timeout_seconds: float = 900.0
     stall_timeout_seconds: float = 180.0
@@ -76,7 +80,12 @@ class GenerationSettings:
         dataset = Path(
             os.environ.get(
                 "OPENHARNESS_WB_DATASET",
-                str(ROOT / "data" / "data.json"),
+                str(
+                    ROOT
+                    / "data"
+                    / "20260727_test_data"
+                    / "data.json"
+                ),
             )
         )
         output = Path(
@@ -106,10 +115,10 @@ class GenerationSettings:
             skill_name=skill_name,
             model=os.environ.get(
                 "OPENHARNESS_WB_MODEL",
-                "deepseek-v4-pro",
+                "deepseek-v4-pro-ioa",
             )
             or None,
-            parallel=_env_int("OPENHARNESS_WB_PARALLEL", 10),
+            parallel=_env_int("OPENHARNESS_WB_PARALLEL", 20),
             max_report_retries=_env_int(
                 "OPENHARNESS_WB_MAX_REPORT_RETRIES",
                 3,
@@ -148,16 +157,22 @@ class GenerationSettings:
             raise GenerationJobError(
                 "WB dataset 不存在: %s" % self.dataset_path
             )
-        if bool(self.skill_path) == bool(self.skill_name):
+        if self.skill_name or not self.skill_path:
             raise GenerationJobError(
-                "WB skill_path 与 skill_name 必须且只能配置一个"
+                "Session Skill 版本演进必须配置唯一基础 skill_path"
             )
-        if self.skill_path:
-            path = self.skill_path.expanduser()
-            skill_file = path / "SKILL.md" if path.is_dir() else path
-            if not skill_file.is_file():
+        path = self.skill_path.expanduser()
+        if not path.is_dir():
+            raise GenerationJobError(
+                "基础 Skill 必须是目录: %s" % path
+            )
+        for relative in (
+            Path("SKILL.md"),
+            Path("references") / "instructions.md",
+        ):
+            if not (path / relative).is_file():
                 raise GenerationJobError(
-                    "WB Skill 缺少 SKILL.md: %s" % path
+                    "基础 Skill 缺少 %s: %s" % (relative, path)
                 )
         if self.parallel < 1:
             raise GenerationJobError("parallel 必须至少为 1")
@@ -174,8 +189,9 @@ class GenerationSettings:
         return {
             "dataset_path": str(self.dataset_path.expanduser().resolve()),
             "output_root": str(self.output_root.expanduser().resolve()),
-            "skill_mode": "fixed_path" if self.skill_path else "installed",
-            "skill_ref": str(
+            "skill_mode": "session_artifact",
+            "skill_ref": "复制唯一基础 Skill，并写入当前版本 directive",
+            "base_skill_ref": str(
                 self.skill_path.expanduser().resolve()
                 if self.skill_path
                 else self.skill_name
@@ -188,7 +204,7 @@ class GenerationSettings:
             "stall_timeout_seconds": self.stall_timeout_seconds,
             "max_concurrent_jobs": self.max_concurrent_jobs,
             "min_report_bytes": self.min_report_bytes,
-            "versioned_skill": False,
+            "versioned_skill": True,
         }
 
 
@@ -222,6 +238,14 @@ def _directory_hash(path: Optional[Path]) -> Optional[str]:
         digest.update(b"\0")
         digest.update(item.read_bytes())
         digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.expanduser().resolve().open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
     return digest.hexdigest()
 
 
@@ -322,9 +346,17 @@ class GenerationJobService:
             ) from exc
         index = {}
         for case in cases:
+            is_unified = (
+                case.metadata.get("dataset_schema_version")
+                == "openharness-wb/v1"
+            )
             case_id = str(
-                case.metadata.get("openharness_case_id")
-                or case.case_id
+                case.case_id
+                if is_unified
+                else (
+                    case.metadata.get("openharness_case_id")
+                    or case.case_id
+                )
             )
             if case_id in index:
                 raise GenerationJobError(
@@ -403,6 +435,8 @@ class GenerationJobService:
         session_id: str,
         account: str,
         case_ids: Optional[Iterable[str]] = None,
+        parallel: Optional[int] = None,
+        model: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         parent_job_id: Optional[str] = None,
     ) -> tuple[GenerationJob, bool]:
@@ -415,6 +449,27 @@ class GenerationJobService:
             (list, tuple, set),
         ):
             raise GenerationJobError("case_ids 必须是数组")
+        if isinstance(parallel, bool) or (
+            isinstance(parallel, float) and not parallel.is_integer()
+        ):
+            raise GenerationJobError("报告生成并发必须是整数")
+        try:
+            selected_parallel = int(
+                self.settings.parallel if parallel is None else parallel
+            )
+        except (TypeError, ValueError) as exc:
+            raise GenerationJobError("报告生成并发必须是整数") from exc
+        if selected_parallel < 1:
+            raise GenerationJobError("报告生成并发必须至少为 1")
+        if model is not None and not isinstance(model, str):
+            raise GenerationJobError("报告生成模型必须是字符串")
+        selected_model = (
+            self.settings.model
+            if model is None
+            else model.strip()
+        )
+        if not selected_model:
+            raise GenerationJobError("报告生成模型不能为空")
 
         with self._lock:
             if idempotency_key:
@@ -445,7 +500,18 @@ class GenerationJobService:
             }
             version = session._current()["version"]
             skill = _skill_for_version(session, version)
-            skill_artifact_hash = _json_hash(skill.to_dict())
+            try:
+                frozen_skill = compile_session_skill(
+                    self.settings.output_root,
+                    session_id,
+                    skill,
+                    self.settings.skill_path,
+                )
+            except (OSError, ValueError) as exc:
+                raise GenerationJobError(
+                    "Session Skill 编译失败: %s" % exc
+                ) from exc
+            skill_artifact_hash = frozen_skill.artifact_hash
         requested = list(
             dict.fromkeys(
                 str(item)
@@ -476,36 +542,30 @@ class GenerationJobService:
             time.strftime("%Y%m%dT%H%M%S"),
             uuid.uuid4().hex[:8],
         )
-        skill_ref = str(
-            self.settings.skill_path.expanduser().resolve()
-            if self.settings.skill_path
-            else self.settings.skill_name
-        )
         job = GenerationJob(
             job_id=job_id,
             session_id=session_id,
             account=account,
             skill_version=version,
             skill_artifact_hash=skill_artifact_hash,
-            execution_skill_hash=_directory_hash(
-                self.settings.skill_path
-            ),
+            execution_skill_hash=frozen_skill.directory_hash,
             dataset_path=str(
                 self.settings.dataset_path.expanduser().resolve()
             ),
-            skill_mode=(
-                "fixed_path"
-                if self.settings.skill_path
-                else "installed"
-            ),
-            skill_ref=skill_ref,
-            model=self.settings.model,
-            parallel=self.settings.parallel,
+            skill_mode="session_artifact",
+            skill_ref=str(frozen_skill.path),
+            model=selected_model,
+            parallel=selected_parallel,
             max_report_retries=self.settings.max_report_retries,
             timeout_seconds=self.settings.timeout_seconds,
             stall_timeout_seconds=self.settings.stall_timeout_seconds,
             created_at=now,
             updated_at=now,
+            dataset_sha256=_file_hash(
+                self.settings.dataset_path
+            ),
+            compiler_version=frozen_skill.compiler_version,
+            base_skill_hash=frozen_skill.base_skill_hash,
             cases=[
                 GenerationCaseState(
                     case_id=case_id,
@@ -550,6 +610,8 @@ class GenerationJobService:
         self,
         job_id: str,
         account: str,
+        parallel: Optional[int] = None,
+        model: Optional[str] = None,
         idempotency_key: Optional[str] = None,
     ) -> tuple[GenerationJob, bool]:
         previous = self.get(job_id)
@@ -562,6 +624,12 @@ class GenerationJobService:
             previous.session_id,
             account,
             case_ids=failed_ids,
+            parallel=(
+                previous.parallel
+                if parallel is None
+                else parallel
+            ),
+            model=previous.model if model is None else model,
             idempotency_key=idempotency_key,
             parent_job_id=previous.job_id,
         )
@@ -580,18 +648,22 @@ class GenerationJobService:
             return job
 
     def _request_for(self, job: GenerationJob) -> ExternalRunRequest:
+        if job.skill_mode != "session_artifact":
+            raise GenerationJobError(
+                "生成任务未冻结 Session Skill，拒绝执行"
+            )
         return ExternalRunRequest(
-            case_file=self.settings.dataset_path,
+            case_file=Path(job.dataset_path),
             output_root=self.settings.output_root,
             skill_version=job.skill_version,
             session_id=job.session_id,
-            skill_name=self.settings.skill_name,
-            skill_path=self.settings.skill_path,
-            model=self.settings.model,
-            parallel=self.settings.parallel,
-            timeout_seconds=self.settings.timeout_seconds,
-            stall_timeout_seconds=self.settings.stall_timeout_seconds,
-            max_report_retries=self.settings.max_report_retries,
+            skill_name=None,
+            skill_path=Path(job.skill_ref),
+            model=job.model,
+            parallel=job.parallel,
+            timeout_seconds=job.timeout_seconds,
+            stall_timeout_seconds=job.stall_timeout_seconds,
+            max_report_retries=job.max_report_retries,
             output_contract=ReportOutputContract(
                 min_bytes=self.settings.min_report_bytes,
             ),
@@ -599,7 +671,7 @@ class GenerationJobService:
             workbuddy_home=self.settings.workbuddy_home,
             product_config=self.settings.product_config,
             allowed_material_roots=(
-                self.settings.dataset_path.expanduser().resolve().parent,
+                Path(job.dataset_path).expanduser().resolve().parent,
             ),
             openharness_case_ids=tuple(
                 item.case_id for item in job.cases
@@ -646,6 +718,14 @@ class GenerationJobService:
                     job.status = "running"
                     job.started_at = time.time()
                     self._persist(job)
+                if (
+                    job.dataset_sha256 is not None
+                    and _file_hash(Path(job.dataset_path))
+                    != job.dataset_sha256
+                ):
+                    raise GenerationJobError(
+                        "数据集在任务启动后发生变化，拒绝执行"
+                    )
 
                 result = self.runner_func(
                     self._request_for(job),
@@ -670,8 +750,16 @@ class GenerationJobService:
                         "生成完成，但 Session 已不存在"
                     )
                 if (
+                    job.dataset_sha256 is not None
+                    and _file_hash(Path(job.dataset_path))
+                    != job.dataset_sha256
+                ):
+                    raise GenerationJobError(
+                        "数据集在任务期间发生变化，拒绝自动导入"
+                    )
+                if (
                     job.execution_skill_hash is not None
-                    and _directory_hash(self.settings.skill_path)
+                    and compiled_skill_hash(Path(job.skill_ref))
                     != job.execution_skill_hash
                 ):
                     raise GenerationJobError(

@@ -52,6 +52,24 @@ def main() -> int:
             encoding="utf-8",
         )
 
+    if os.environ.get("FAKE_WB_STREAM_EVENT") == "1":
+        print(
+            json.dumps(
+                {
+                    "type": "stream_event",
+                    "event": {
+                        "type": "content_block_delta",
+                        "delta": {
+                            "type": "text_delta",
+                            "text": "逐 token 内容",
+                        },
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
     print(
         json.dumps(
             {

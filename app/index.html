@@ -113,12 +113,13 @@
 
     <div class="card step" id="dataCard">
       <h2><span class="n">2</span>导入数据</h2>
-      <p class="small mut">数据集需含 case_id / input / 答案键（算数字型:ground_truth_findings;调研洞察:ground_truth）。judge 靠它核对可回溯性、抓编造。</p>
+      <p class="small mut">调研报告使用统一 openharness-wb/v1 数据：同一份 JSON 同时驱动 WB 生成和模型 Judge；ground_truth 保留评测参考内容，且只发送给 Judge。</p>
       <div class="row">
         <button class="ghost" id="sampleBtn">用内置样例数据集</button>
+        <button class="ghost" id="configuredDataBtn">加载当前 WB 数据集</button>
       </div>
-      <label style="margin-top:8px">或粘贴 JSONL / JSON 数组</label>
-      <textarea id="dataInput" placeholder='每行一个 case 的 JSON, 或一个 JSON 数组'></textarea>
+      <label style="margin-top:8px">或粘贴 JSONL / JSON 数组 / {cases:[...]}</label>
+      <textarea id="dataInput" placeholder='JSONL、JSON 数组，或 openharness-wb/v1 的 {cases:[...]}'></textarea>
       <div class="row" style="margin-top:8px">
         <button class="ghost" id="importBtn">导入</button>
         <span id="dataInfo" class="small mut"></span>
@@ -157,6 +158,16 @@
       <h2><span class="n">▶</span>真实运行 · WB CLI</h2>
       <p class="small mut">一键执行当前 Session 的全部 case；缺失报告自动重试最多 3 次，通过验收的报告会批量导入当前冻结版本。</p>
       <div id="generationConfig" class="small mut">正在读取运行配置…</div>
+      <div class="row" style="align-items:flex-end;margin-top:8px">
+        <div style="flex:1">
+          <label for="generationModel">报告生成模型</label>
+          <input id="generationModel" type="text" placeholder="deepseek-v4-pro-ioa">
+        </div>
+        <div>
+          <label for="generationParallel">报告生成最大并发</label>
+          <input id="generationParallel" type="number" min="1" step="1" style="width:110px">
+        </div>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="ok" id="runGenerationBtn" disabled>▶ 一键生成并导入报告</button>
         <button class="ghost" id="retryGenerationBtn" style="display:none">↻ 仅重试失败 case</button>
@@ -183,7 +194,9 @@
         <span id="reportPreview" class="small mut"></span>
       </div>
 
-      <div class="row" style="margin-top:12px">
+      <label for="judgeParallel" style="margin-top:12px">Judge 最大并发</label>
+      <input id="judgeParallel" type="number" min="1" step="1" style="width:110px">
+      <div class="row" style="margin-top:10px">
         <button class="ok" id="runJudgeBtn">▶ 批量 Judge 全部 case</button>
       </div>
       <div id="judgeStatus" class="small" style="margin-top:8px"></div>
