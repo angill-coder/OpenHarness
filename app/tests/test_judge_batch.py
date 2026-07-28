@@ -13,9 +13,19 @@ for path in (str(APP), str(HARNESS)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from judge_batch import judge_cases  # noqa: E402
+from judge_batch import (  # noqa: E402
+    JUDGE_STRATEGY_PER_DIMENSION,
+    JUDGE_STRATEGY_SIX_AGENT,
+    judge_cases,
+    normalize_judge_strategy,
+)
 import persistence as persist  # noqa: E402
-from server import _build_judge_prompt, _judge_parallelism  # noqa: E402
+from server import (  # noqa: E402
+    _build_judge_prompt,
+    _judge_parallelism,
+    _judge_summary,
+    _load_evidence_metadata,
+)
 from session import Session  # noqa: E402
 
 
@@ -51,19 +61,20 @@ class JudgeBatchTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "整数"):
             _judge_parallelism(1.5)
 
-    def test_server_prompt_includes_ground_truth_for_traceability(self):
+    def test_server_prompt_treats_ground_truth_as_reference_only(self):
         prompt = _build_judge_prompt(
             RUBRIC,
             "report",
             {
                 "case_id": "case-a",
-                "input": {"brief": "A"},
+                "background": {"input": {"brief": "A"}},
                 "ground_truth": {"reference_report_text": "事实 A"},
             },
         )
-        self.assertIn("ground_truth", prompt)
+        self.assertIn("Ground Truth（仅作参考案例）", prompt)
         self.assertIn("事实 A", prompt)
-        self.assertIn("任务信息", prompt)
+        self.assertIn("不绝对正确", prompt)
+        self.assertIn('"Q1": "met"', prompt)
 
     def test_judges_all_cases_and_preserves_dataset_order(self):
         cases = [
@@ -129,8 +140,61 @@ class JudgeBatchTest(unittest.TestCase):
             {"secret": "answer"},
         )
         self.assertEqual(
-            prompts[0]["case_context"]["input"],
+            prompts[0]["case_context"]["background"]["input"],
             {"brief": "A"},
+        )
+
+    def test_single_call_receives_all_available_context(self):
+        prompts = []
+        evidence = {
+            "schema": "openharness-evidence/v1",
+            "case_id": "case-a",
+            "items": [{"id": "EV-001"}],
+            "unresolved": [],
+        }
+
+        def call_model(prompt):
+            prompts.append(json.loads(prompt))
+            return json.dumps(
+                {
+                    "checks": {"Q1": "met", "Q2": "met"},
+                    "reasoning": {},
+                }
+            )
+
+        results = judge_cases(
+            [
+                {
+                    "case_id": "case-a",
+                    "turns": [
+                        {"round": 0, "prompt": "任务"},
+                        {"round": 1, "prompt": "背景"},
+                    ],
+                    "ground_truth": {"reference_report_text": "GT"},
+                    "evidence_metadata": evidence,
+                }
+            ],
+            {"case-a": "report-a"},
+            RUBRIC,
+            build_prompt,
+            call_model,
+            extract_json,
+            strategy="single_call",
+        )
+
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(
+            set(prompts[0]["case_context"]),
+            {
+                "case_id",
+                "background",
+                "ground_truth",
+                "evidence_metadata",
+            },
+        )
+        self.assertEqual(
+            results[0]["judge_meta"],
+            {"strategy": "single_call", "model_calls": 1},
         )
 
     def test_missing_report_and_model_error_do_not_abort_batch(self):
@@ -200,6 +264,247 @@ class JudgeBatchTest(unittest.TestCase):
         self.assertEqual(set(completed), {"case-a", "case-b"})
         self.assertTrue(
             all(item["status"] == "judged" for item in results)
+        )
+
+    def test_per_dimension_routes_only_allowed_context(self):
+        rubric = {
+            "dimensions": [
+                {"name": "traceability", "checks": [{"id": "T1"}]},
+                {"name": "structure", "checks": [{"id": "S1"}]},
+                {"name": "narrative", "checks": [{"id": "N1"}]},
+                {"name": "insight", "checks": [{"id": "I1"}]},
+                {"name": "coverage", "checks": [{"id": "V1"}]},
+                {"name": "expression", "checks": [{"id": "E1"}]},
+            ]
+        }
+        prompts = {}
+
+        def dimension_prompt(current_rubric, report, case_context):
+            dimension = current_rubric["dimensions"][0]
+            return json.dumps(
+                {
+                    "dimension": dimension["name"],
+                    "ids": [item["id"] for item in dimension["checks"]],
+                    "report": report,
+                    "case_context": case_context,
+                },
+                ensure_ascii=False,
+            )
+
+        def call_model(prompt):
+            payload = json.loads(prompt)
+            prompts[payload["dimension"]] = payload["case_context"]
+            check_id = payload["ids"][0]
+            return json.dumps(
+                {
+                    "checks": {check_id: "met"},
+                    "reasoning": {check_id: payload["dimension"]},
+                }
+            )
+
+        results = judge_cases(
+            [
+                {
+                    "case_id": "case-a",
+                    "turns": [
+                        {"round": 0, "prompt": "任务"},
+                        {"round": 1, "prompt": "背景"},
+                    ],
+                    "ground_truth": {"reference_report_text": "GT"},
+                    "evidence_metadata": {
+                        "schema": "openharness-evidence/v1",
+                        "case_id": "case-a",
+                        "items": [{"id": "EV-001"}],
+                        "unresolved": [],
+                    },
+                }
+            ],
+            {"case-a": "报告"},
+            rubric,
+            dimension_prompt,
+            call_model,
+            extract_json,
+            strategy=JUDGE_STRATEGY_PER_DIMENSION,
+        )
+
+        self.assertEqual(
+            set(prompts["traceability"]),
+            {"case_id", "background", "evidence_metadata"},
+        )
+        self.assertEqual(
+            set(prompts["insight"]),
+            {"case_id", "background", "evidence_metadata"},
+        )
+        self.assertEqual(
+            set(prompts["coverage"]),
+            {
+                "case_id",
+                "background",
+                "evidence_metadata",
+                "ground_truth",
+            },
+        )
+        for dimension in ("structure", "narrative", "expression"):
+            self.assertEqual(set(prompts[dimension]), {"case_id"})
+        self.assertEqual(
+            results[0]["checks"],
+            {
+                "T1": "met",
+                "S1": "met",
+                "N1": "met",
+                "I1": "met",
+                "V1": "met",
+                "E1": "met",
+            },
+        )
+        self.assertEqual(
+            results[0]["judge_meta"],
+            {"strategy": "per_dimension", "model_calls": 6},
+        )
+
+    def test_per_dimension_failure_marks_only_that_case_failed(self):
+        rubric = {
+            "dimensions": [
+                {"name": "structure", "checks": [{"id": "S1"}]},
+                {"name": "narrative", "checks": [{"id": "N1"}]},
+            ]
+        }
+
+        def dimension_prompt(current_rubric, _report, _context):
+            return current_rubric["dimensions"][0]["name"]
+
+        def call_model(prompt):
+            if prompt == "narrative":
+                raise RuntimeError("provider unavailable")
+            return json.dumps(
+                {"checks": {"S1": "met"}, "reasoning": {}}
+            )
+
+        results = judge_cases(
+            [{"case_id": "case-a"}],
+            {"case-a": "report"},
+            rubric,
+            dimension_prompt,
+            call_model,
+            extract_json,
+            strategy=JUDGE_STRATEGY_PER_DIMENSION,
+        )
+        self.assertEqual(results[0]["status"], "failed")
+        self.assertIn("narrative", results[0]["error"])
+
+    def test_per_dimension_call_count_follows_rubric(self):
+        rubric = {
+            "dimensions": [
+                {"name": "structure", "checks": [{"id": "S1"}]},
+                {"name": "narrative", "checks": [{"id": "N1"}]},
+                {"name": "empty", "checks": []},
+            ]
+        }
+        calls = []
+
+        def dimension_prompt(current_rubric, _report, _context):
+            dimension = current_rubric["dimensions"][0]
+            return json.dumps(
+                {
+                    "name": dimension["name"],
+                    "check_id": dimension["checks"][0]["id"],
+                }
+            )
+
+        def call_model(prompt):
+            payload = json.loads(prompt)
+            calls.append(payload["name"])
+            return json.dumps(
+                {
+                    "checks": {payload["check_id"]: "met"},
+                    "reasoning": {},
+                }
+            )
+
+        results = judge_cases(
+            [{"case_id": "case-a"}],
+            {"case-a": "report"},
+            rubric,
+            dimension_prompt,
+            call_model,
+            extract_json,
+            strategy=JUDGE_STRATEGY_PER_DIMENSION,
+        )
+
+        self.assertEqual(calls, ["structure", "narrative"])
+        self.assertEqual(results[0]["judge_meta"]["model_calls"], 2)
+        summary = _judge_summary(
+            results,
+            parallel=5,
+            strategy=JUDGE_STRATEGY_PER_DIMENSION,
+            dimension_count=2,
+        )
+        self.assertEqual(summary["model_calls_per_case"], 2)
+
+    def test_evidence_metadata_is_loaded_from_case_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dataset = root / "data.json"
+            dataset.write_text("{}", encoding="utf-8")
+            case_dir = root / "collection" / "case-a"
+            source_dir = case_dir / "source"
+            source_dir.mkdir(parents=True)
+            payload = {
+                "schema": "openharness-evidence/v1",
+                "case_id": "case-a",
+                "items": [{"id": "EV-001"}],
+                "unresolved": [],
+            }
+            (case_dir / "evidence_metadata.json").write_text(
+                json.dumps(payload),
+                encoding="utf-8",
+            )
+            prepared = _load_evidence_metadata(
+                [
+                    {
+                        "case_id": "case-a",
+                        "input_files": [
+                            {
+                                "source": "./collection/case-a/source",
+                                "target": "materials",
+                            }
+                        ],
+                    }
+                ],
+                dataset,
+            )
+        self.assertEqual(prepared[0]["evidence_metadata"], payload)
+
+    def test_missing_evidence_metadata_fails_preflight(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dataset = root / "data.json"
+            dataset.write_text("{}", encoding="utf-8")
+            (root / "case-a" / "source").mkdir(parents=True)
+            with self.assertRaisesRegex(
+                ValueError,
+                "Evidence Metadata 预检失败",
+            ):
+                _load_evidence_metadata(
+                    [
+                        {
+                            "case_id": "case-a",
+                            "input_files": [
+                                {"source": "./case-a/source"}
+                            ],
+                        }
+                    ],
+                    dataset,
+                )
+
+    def test_invalid_judge_strategy_is_rejected(self):
+        with self.assertRaises(ValueError):
+            normalize_judge_strategy("unknown")
+
+    def test_legacy_six_agent_name_maps_to_per_dimension(self):
+        self.assertEqual(
+            normalize_judge_strategy(JUDGE_STRATEGY_SIX_AGENT),
+            JUDGE_STRATEGY_PER_DIMENSION,
         )
 
 

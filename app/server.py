@@ -15,7 +15,7 @@ API:
   POST /api/advance           {id}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
-  POST /api/run_judge_batch   {id, version?, parallel?} -> 并发 Judge 当前版本全部 case
+  POST /api/run_judge_batch   {id, version?, parallel?, judge_strategy?} -> 并发 Judge 当前版本全部 case
   POST /api/generation/start  {id, idempotency_key?, parallel?, model?} -> 后台调用 WB 并自动批量导入
   GET  /api/generation?id=    -> 查询生成任务
   POST /api/generation/retry  {job_id, parallel?, model?} -> 仅重跑未导入的 case
@@ -29,6 +29,7 @@ import hashlib
 import io
 import json
 import os
+from pathlib import Path
 import re
 import sys
 import threading
@@ -46,7 +47,11 @@ from generation_jobs import (  # noqa: E402
     GenerationJobError,
     GenerationJobService,
 )
-from judge_batch import judge_cases  # noqa: E402
+from judge_batch import (  # noqa: E402
+    JUDGE_STRATEGY_PER_DIMENSION,
+    judge_cases,
+    normalize_judge_strategy,
+)
 from workbuddy_batch.dataset import load_openharness_rows  # noqa: E402
 # import auth as auth_mod  # [鉴权已临时关闭·本地测试] 恢复时取消注释
 
@@ -106,6 +111,51 @@ def _load_sample(product="report-assistant"):
     return _pick("dataset")
 
 
+def _load_evidence_metadata(cases, dataset_path):
+    """为 Judge 的临时 case 副本加载同目录 Evidence Metadata。"""
+    dataset_root = Path(dataset_path).expanduser().resolve().parent
+    prepared = []
+    errors = []
+    for source_case in cases:
+        case = dict(source_case)
+        case_id = str(case.get("case_id") or "")
+        candidates = set()
+        for item in case.get("input_files") or []:
+            if not isinstance(item, dict) or not item.get("source"):
+                continue
+            source = Path(str(item["source"])).expanduser()
+            if not source.is_absolute():
+                source = (dataset_root / source).resolve()
+            if source.name == "source":
+                candidates.add(source.parent / "evidence_metadata.json")
+        if len(candidates) != 1:
+            errors.append(
+                "%s: 无法从 input_files.source 唯一定位 metadata"
+                % case_id
+            )
+            continue
+        path = next(iter(candidates))
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append("%s: %s (%s)" % (case_id, path, exc))
+            continue
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema") != "openharness-evidence/v1"
+            or payload.get("case_id") != case_id
+            or not isinstance(payload.get("items"), list)
+            or not payload["items"]
+        ):
+            errors.append("%s: Evidence Metadata 结构或 case_id 不合法" % case_id)
+            continue
+        case["evidence_metadata"] = payload
+        prepared.append(case)
+    if errors:
+        raise ValueError("Evidence Metadata 预检失败: " + "; ".join(errors))
+    return prepared
+
+
 # ---------------- 文件解析 / LLM-judge 调用 ----------------
 def _parse_report(filename: str, raw: bytes) -> str:
     """按扩展名把上传的报告文件解析成文本。md/txt 直读;pdf 用 pypdf;docx 用 zipfile+xml。"""
@@ -126,14 +176,53 @@ def _parse_report(filename: str, raw: bytes) -> str:
 
 
 def _build_judge_prompt(rubric, report_text, case_context) -> str:
-    """组装逐 check 判分提示词:列出所有 check,要求对每条判 met/partial/miss + 理由。"""
-    L = ["你是严格的调研报告评审。根据【任务信息】【参考答案】【报告正文】和下面逐条 check，",
-         "对**每一条 check** 判 met(满足)/partial(部分)/miss(不满足)。",
-         "参考答案用于核对关键事实、证据覆盖和可回溯性；"
-         "不得把报告未呈现的参考答案内容算作报告已经满足。",
-         "", "## 逐条 check(每条都要打分)"]
+    """组装单维度 Judge 提示词，并按调用方提供的上下文动态分区。"""
+    dimensions = rubric.get("dimensions") or []
+    L = [
+        "你是严格的调研报告评审。",
+        "只评价【报告正文】实际呈现的内容；背景、Evidence 和 GT "
+        "只用于核验，不得算作报告已经写到。",
+        "对本次列出的每一条 check 判 "
+        "met(满足)/partial(部分)/miss(不满足)。",
+    ]
+    if len(dimensions) == 1:
+        dimension = dimensions[0]
+        L += [
+            "",
+            "本次是独立维度评审，只评 `%s`（%s）。"
+            % (
+                dimension.get("name", ""),
+                dimension.get("name_zh", ""),
+            ),
+            "不要推测、补评或平衡其他维度。",
+        ]
+    context = dict(case_context or {})
+    if context.get("background"):
+        L.append(
+            "背景信息只用于确定任务范围、研究问题和受众，不是事实证据。"
+        )
+    if context.get("evidence_metadata"):
+        L += [
+            "Evidence Metadata 是从原始资料提炼的证据索引，不是参考答案。",
+            "用它核验事实、冲突、口径、样本边界和异常；"
+            "报告论断未被索引覆盖时可以判为无法回溯，"
+            "但不得仅据此直接认定为事实编造。",
+            "只有与 Evidence 明确冲突或报告给出无依据的确定性事实时，"
+            "才对“不编造·不曲解”降档。",
+        ]
+    if context.get("ground_truth"):
+        L += [
+            "Ground Truth 只是可能的参考案例，并不完整，也不绝对正确。",
+            "不得要求报告复刻其结论、论据、措辞或结构；"
+            "只用它辅助识别可能遗漏的问题和关键 claim。",
+        ]
+    if set(context) <= {"case_id"}:
+        L.append("本维度只根据报告正文和 check 本身判断。")
+    L += ["", "## 逐条 check（每条都要打分）"]
+    check_ids = []
     for d in rubric["dimensions"]:
         for c in d.get("checks", []):
+            check_ids.append(str(c["id"]))
             rl = " [红线]" if c.get("redline") else ""
             L.append("- %s(%s·%s%s): %s | 触发降档: %s" % (
                 c["id"],
@@ -143,15 +232,32 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
                 c.get("desc", ""),
                 c.get("effect", ""),
             ))
-    judge_context = dict(case_context or {})
-    ground_truth = judge_context.pop("ground_truth", {})
-    L += ["", "## 任务信息", json.dumps(judge_context, ensure_ascii=False),
-          "", "## 参考答案（ground_truth）",
-          json.dumps(ground_truth, ensure_ascii=False),
-          "", "## 报告正文", report_text or "(空)",
-          "", "## 输出(只输出严格 JSON,不要多余文字):",
-          '{"checks":{"T1":"met","T2":"miss", ...每条 check 都要},',
-          ' "reasoning":{"T1":"一句话","T2":"一句话", ...}}']
+    for key, title in (
+        ("background", "背景信息（round 0–1）"),
+        ("evidence_metadata", "Evidence Metadata"),
+        ("ground_truth", "Ground Truth（仅作参考案例）"),
+    ):
+        if context.get(key):
+            L += [
+                "",
+                "## " + title,
+                json.dumps(context[key], ensure_ascii=False),
+            ]
+    example = {
+        "checks": {check_id: "met" for check_id in check_ids},
+        "reasoning": {
+            check_id: "一句话说明判定依据"
+            for check_id in check_ids
+        },
+    }
+    L += [
+        "",
+        "## 报告正文",
+        report_text or "(空)",
+        "",
+        "## 输出（只输出严格 JSON，不要多余文字）",
+        json.dumps(example, ensure_ascii=False),
+    ]
     return "\n".join(L)
 
 
@@ -180,7 +286,12 @@ def _judge_parallelism(requested=None):
     return parallel
 
 
-def _judge_summary(results, parallel=None):
+def _judge_summary(
+    results,
+    parallel=None,
+    strategy=JUDGE_STRATEGY_PER_DIMENSION,
+    dimension_count=0,
+):
     counts = {
         "judged": 0,
         "failed": 0,
@@ -205,6 +316,12 @@ def _judge_summary(results, parallel=None):
         "stale_report_cases": counts["stale_report"],
         "model": os.environ.get("ANTHROPIC_JUDGE_MODEL", "claude-opus-4-8"),
         "parallel": _judge_parallelism(parallel),
+        "judge_strategy": strategy,
+        "model_calls_per_case": (
+            dimension_count
+            if strategy == JUDGE_STRATEGY_PER_DIMENSION
+            else 1
+        ),
     }
 
 
@@ -323,6 +440,12 @@ class Handler(BaseHTTPRequestHandler):
             payload.update(
                 {
                     "judge_parallel": _judge_parallelism(),
+                    "judge_strategy": normalize_judge_strategy(
+                        os.environ.get(
+                            "OPENHARNESS_JUDGE_STRATEGY",
+                            JUDGE_STRATEGY_PER_DIMENSION,
+                        )
+                    ),
                 }
             )
             return self._send(200, payload)
@@ -709,6 +832,13 @@ class Handler(BaseHTTPRequestHandler):
                 judge_parallel = _judge_parallelism(
                     b.get("parallel")
                 )
+                judge_strategy = normalize_judge_strategy(
+                    b.get("judge_strategy")
+                    or os.environ.get(
+                        "OPENHARNESS_JUDGE_STRATEGY",
+                        JUDGE_STRATEGY_PER_DIMENSION,
+                    )
+                )
             except ValueError as exc:
                 return self._send(400, {"error": str(exc)})
             ver = b.get("version") or s._eval_target()["version"]
@@ -727,6 +857,10 @@ class Handler(BaseHTTPRequestHandler):
                     reports = dict(s.report_outputs.get(ver, {}))
                     rubric = dict(s.rubric)
                     existing = dict(s.judge_checks.get(ver, {}))
+                judge_dimension_count = sum(
+                    bool(dimension.get("checks"))
+                    for dimension in rubric.get("dimensions", [])
+                )
                 if not cases:
                     return self._send(400, {"error": "尚未导入评测 case"})
                 missing_reports = [
@@ -758,7 +892,12 @@ class Handler(BaseHTTPRequestHandler):
                         200,
                         {
                             "summary": {
-                                **_judge_summary([], judge_parallel),
+                                **_judge_summary(
+                                    [],
+                                    judge_parallel,
+                                    judge_strategy,
+                                    judge_dimension_count,
+                                ),
                                 "status": "completed",
                                 "total_cases": 0,
                                 "judged_cases": 0,
@@ -769,6 +908,19 @@ class Handler(BaseHTTPRequestHandler):
                             "state": state,
                         },
                     )
+
+                if GENERATION_SERVICE is None:
+                    return self._send(
+                        503,
+                        {"error": "GenerationJobService 尚未初始化"},
+                    )
+                try:
+                    cases = _load_evidence_metadata(
+                        cases,
+                        GENERATION_SERVICE.settings.dataset_path,
+                    )
+                except ValueError as exc:
+                    return self._send(409, {"error": str(exc)})
 
                 def persist_result(item):
                     if item.get("status") != "judged":
@@ -830,6 +982,7 @@ class Handler(BaseHTTPRequestHandler):
                     _extract_json,
                     parallel=judge_parallel,
                     on_result=persist_result,
+                    strategy=judge_strategy,
                 )
                 with _session_lock(s.id):
                     s.evaluate(acct)
@@ -837,7 +990,12 @@ class Handler(BaseHTTPRequestHandler):
                     # llm_rewrite:候选判分完成 -> 自动 gate 结算(采纳/回滚)
                     settle = s.settle_pending_candidate(acct)
                     state = s.view(acct)
-                summary = _judge_summary(results, judge_parallel)
+                summary = _judge_summary(
+                    results,
+                    judge_parallel,
+                    judge_strategy,
+                    judge_dimension_count,
+                )
                 summary["remaining_cases"] = len(
                     state["judge_progress"]["pending_judge_case_ids"]
                 )
