@@ -420,12 +420,18 @@ class ExternalRunnerTest(unittest.TestCase):
 
         result = run_external_cases(
             request,
-            progress_callback=lambda item: updates.append(item.status),
+            progress_callback=lambda item: updates.append(
+                (
+                    item.status,
+                    [case.status for case in item.cases],
+                )
+            ),
         )
 
         self.assertTrue(result.succeeded)
-        self.assertEqual(updates[0], "running")
-        self.assertEqual(updates[-1], "completed")
+        self.assertEqual(updates[0], ("running", ["queued"]))
+        self.assertEqual(updates[1], ("running", ["running"]))
+        self.assertEqual(updates[-1][0], "completed")
 
     def test_rejects_unknown_openharness_case_filter(self) -> None:
         request = replace(

@@ -51,7 +51,7 @@ export OPENHARNESS_JUDGE_PARALLEL=20    # 默认 20；可在 Web UI 调整
 
 报告生成和 Judge 的默认并发均为 20。当前版本不设置人为安全上限；实际并发不会超过待处理 case 数量，并受本机资源、WB CLI 和模型服务容量约束。
 
-Web UI 可为每次报告生成任务单独填写模型和最大并发；默认模型为 `deepseek-v4-pro-ioa`。任务会记录实际模型；「仅重试失败 case」默认显示原任务配置，也允许在点击前改用新的模型或并发。一次任务耗尽内部重试后，仍可创建新的失败 case 重试任务。
+Web UI 可为每次报告生成任务从 WorkBuddy 支持列表中选择模型并设置最大并发；默认模型为 `deepseek-v4-pro-ioa`。任务会记录实际模型；「仅重试失败 case」默认显示原任务配置，也允许在点击前改用新的模型或并发。一次任务耗尽内部重试后，仍可创建新的失败 case 重试任务。
 
 > 内置样例：算数字型读 `data/report_assistant/dataset.jsonl`（没有先跑 `python3 ../data/report_assistant/build_dataset.py`）；调研洞察型读 `data/research_assistant/dataset.sample.jsonl`。「用内置样例」按钮按会话产品自动选。
 
@@ -68,7 +68,7 @@ Web UI 可为每次报告生成任务单独填写模型和最大并发；默认�
 
 1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。调研洞察产品固定读取 `skills/research-report` 唯一基线，并按基线实际内容初始化已启用 directive；其它产品仍由 generator 生成 v0。
 2. **导入数据**：调研报告可直接点「加载当前 WB 数据集」，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `ground_truth` 作为评测参考：不会发送给 WB 生成模型，但会与报告、Rubric 一起发送给模型 Judge。
-3. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；无有效报告自动额外重试 3 次，成功报告批量导入冻结版本。
+3. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；case 启动后立即显示为生成中，无有效报告自动额外重试 3 次，每份成功报告产出后立即导入冻结版本。
 4. **批量模型 Judge**：点击「批量 Judge 全部 case」。系统以有限并发为每个 case 单独调用模型，并把逐-check结果汇总为六维分。
 
 ## 一键生成并导入报告

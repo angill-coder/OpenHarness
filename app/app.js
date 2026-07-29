@@ -221,11 +221,15 @@ document.getElementById('advanceBtn').onclick=async()=>{
 };
 
 // ---- 真实运行 · WB CLI ----
-const GEN_STATUS_ZH={
-  queued:'排队中',running:'生成中',retrying:'自动重试中',importing:'批量导入中',
+const GEN_JOB_STATUS_ZH={
+  queued:'等待任务执行槽',running:'生成中',retrying:'自动重试中',importing:'导入中',
   cancel_requested:'等待安全停止',completed:'已完成',partial:'部分成功',
-  failed:'失败',cancelled:'已取消',interrupted:'服务重启中断',
-  generated:'已生成',imported:'已导入',retry_exhausted:'重试耗尽'
+  failed:'失败',cancelled:'已取消',interrupted:'服务重启中断'
+};
+const GEN_CASE_STATUS_ZH={
+  queued:'待生成',running:'生成中',retrying:'自动重试中',
+  generated:'已生成',imported:'已导入',retry_exhausted:'重试耗尽',
+  failed:'失败',cancelled:'已取消',interrupted:'服务重启中断'
 };
 function generationActive(){
   return !!(GEN_JOB&&GEN_JOB.active);
@@ -256,7 +260,7 @@ async function pollGeneration(){
       STATE=j; render();
       const msg=GEN_JOB.status==='completed'
         ?`真实报告已生成并导入：${GEN_JOB.imported_count}/${GEN_JOB.case_count}`
-        :`真实运行结束：${GEN_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status}，已导入 ${GEN_JOB.imported_count}/${GEN_JOB.case_count}`;
+        :`真实运行结束：${GEN_JOB_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status}，已导入 ${GEN_JOB.imported_count}/${GEN_JOB.case_count}`;
       toast(msg,5200);
     }
   }catch(e){clearTimeout(GEN_POLL);}
@@ -332,6 +336,21 @@ function renderGenerationPanel(){
   const judgeParallelInput=document.getElementById('judgeParallel');
   if(!cfg)return;
 
+  if(modelInput&&GEN_CONFIG&&Array.isArray(GEN_CONFIG.models)){
+    const desired=modelInput.value||GEN_CONFIG.model||'deepseek-v4-pro-ioa';
+    const models=GEN_CONFIG.models.slice();
+    if(desired&&!models.includes(desired))models.push(desired);
+    const signature=models.join('\n');
+    if(modelInput.dataset.models!==signature){
+      modelInput.innerHTML=models.map(model=>
+        `<option value="${esc(model)}">${esc(model)}</option>`
+      ).join('');
+      modelInput.dataset.models=signature;
+    }
+    modelInput.value=models.includes(desired)
+      ?desired:(GEN_CONFIG.model||models[0]||'');
+  }
+
   if(!GEN_CONFIG){
     cfg.textContent='正在读取运行配置…';
   }else if(!GEN_CONFIG.ready){
@@ -386,7 +405,7 @@ function renderGenerationPanel(){
   const done=(GEN_JOB.cases||[]).filter(x=>x.imported||['retry_exhausted','failed','cancelled'].includes(x.status)).length;
   const pct=total?Math.round(done/total*100):0;
   const historical=STATE&&GEN_JOB.skill_version!==STATE.current_version;
-  status.innerHTML=`<div class="kv"><span>状态</span><b class="${GEN_JOB.status==='completed'?'ok-txt':GEN_JOB.status==='failed'?'warn-txt':''}">${esc(GEN_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status)}</b></div>`+
+  status.innerHTML=`<div class="kv"><span>状态</span><b class="${GEN_JOB.status==='completed'?'ok-txt':GEN_JOB.status==='failed'?'warn-txt':''}">${esc(GEN_JOB_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status)}</b></div>`+
     `<div class="kv"><span>实际执行版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.execution_skill_hash||'').slice(0,10))}</span></div>`+
     `<div class="kv"><span>报告生成模型</span><span>${esc(GEN_JOB.model||'CLI 默认')}</span></div>`+
     `<div class="kv"><span>报告生成并发</span><span>${GEN_JOB.parallel}</span></div>`+
@@ -395,9 +414,12 @@ function renderGenerationPanel(){
     `<div class="barwrap" style="margin-top:7px"><div class="bar" style="width:${pct}%"></div></div>`+
     (GEN_JOB.error?`<div class="warn-txt" style="margin-top:6px">${esc(GEN_JOB.error)}</div>`:'');
   cases.innerHTML=(GEN_JOB.cases||[]).map(c=>
-    `<div class="job-case"><span class="status-dot ${esc(c.status)}"></span><b>${esc(c.case_id)}</b> `+
-    `<span class="mut">${esc(GEN_STATUS_ZH[c.status]||c.status)} · ${c.attempts||0} 次</span>`+
-    (c.error?`<div class="mut" title="${esc(c.error)}">${esc(c.error).slice(0,180)}</div>`:'')+
+    `<div class="job-case"><div class="job-case-main">`+
+    `<span class="status-dot ${esc(c.status)}"></span>`+
+    `<b class="job-case-id" title="${esc(c.case_id)}">${esc(c.case_id)}</b>`+
+    `<span class="job-case-state mut">${esc(GEN_CASE_STATUS_ZH[c.status]||c.status)} · ${c.attempts||0} 次</span>`+
+    `</div>`+
+    (c.error?`<div class="job-case-error mut" title="${esc(c.error)}">${esc(c.error).slice(0,180)}</div>`:'')+
     `</div>`).join('');
 }
 
