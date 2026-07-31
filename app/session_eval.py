@@ -72,8 +72,7 @@ class SessionEval:
 
     # ---------- 评估当前版本 ----------
     def evaluate(self, account=None):
-        """计算与账号无关的基础量(judge/mock 分、失败聚类、dev/test 均分)并暂存基础记录;
-        人工标注叠加与校准是按账号的, 放到 view(account) 时再算(线程安全: 不把账号数据写进共享缓存)。"""
+        """计算模型 Judge/mock 分、失败聚类和 dev/test 均分，并暂存基础记录。"""
         cur = self._current()
         eval_cases = self._cases_for(cur)
         if not eval_cases:
@@ -87,8 +86,13 @@ class SessionEval:
         dev = [c for c in eval_cases if c["split"] == "dev"]
         test = [c for c in eval_cases if c["split"] == "test"]
 
-        # 基础评估与账号无关: 不注入人工分(人工 overlay 在 view 时按账号叠加)
-        recs_all = runner_mod.run_split(skill, eval_cases, self.rubric, self.backend, ver, {})
+        recs_all = runner_mod.run_split(
+            skill,
+            eval_cases,
+            self.rubric,
+            self.backend,
+            ver,
+        )
         # 用平台真实报告 + LLM-judge 评分覆盖 mock(有则真实, 无则保留 mock 作占位)
         self._apply_recorded(recs_all, ver)
         dev_recs = [r for r in recs_all if r.dataset_split == "dev"]
