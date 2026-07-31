@@ -70,6 +70,9 @@ python3 run_demo.py
 
 Runner 已新增真实外部执行入口，保留原有 `run_split()` Mock 路径不变。
 
+批量素材转换为独立 case、按编号/标签选择并合并 dataset，见
+[`CASE_DATASETS.md`](CASE_DATASETS.md)。
+
 从 OpenHarness 根目录执行：
 
 ```bash
@@ -113,3 +116,35 @@ generation_runs/<generation-id>/
 ```bash
 python -m unittest discover -s harness/tests -p 'test_*.py' -v
 ```
+
+## 数据质检工具
+
+统一入口会先把原始 source 生成 Evidence Metadata，再基于 source、
+metadata 和 groundtruth 完成遗漏/冲突/噪声质检。增加
+`--repair-metadata` 后，会把“source 已有但 metadata 漏提”的事实重新回查
+source 并追加到修复版 Metadata：
+
+```bash
+# OpenHarness data.json
+python harness/data_workflow.py run \
+  --dataset data/20260727_test_data/data.json \
+  --case-id <case-id> \
+  --repair-metadata \
+  --output quality_runs
+
+# Standalone
+python harness/data_workflow.py run \
+  --source ./source \
+  --groundtruth ./groundtruth.pdf \
+  --case-id example \
+  --background "研究背景" \
+  --output quality_runs
+```
+
+Python 内嵌入口为
+`harness.data_workflow.run_data_workflow(DataWorkflowRequest(...))`，并可传入
+`progress_callback` 与 `should_cancel`，供 Web UI 展示进度或取消任务。
+默认只写独立产物目录；
+增加 `--publish-metadata` 才会把合法 Metadata 同步到 OpenHarness case 目录。
+启用修复时，原始版本保存在 `evidence_metadata.json`，修复版写入
+`evidence_metadata.repaired.json`；`--publish-metadata` 会发布最终修复版。
