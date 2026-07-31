@@ -2,7 +2,7 @@
 """前端一键真实报告生成任务编排。
 
 HTTP 层只负责创建/查询任务；本模块在后台线程中调用 harness Runner，
-接收 attempt 进度，并把通过验收的报告一次性导入 Session。
+接收 attempt 进度，并把通过验收的报告逐 case 导入 Session。
 """
 
 from __future__ import annotations
@@ -48,6 +48,35 @@ class GenerationJobError(ValueError):
     """可直接返回给前端的任务配置或状态错误。"""
 
 
+SUPPORTED_WB_MODELS = (
+    "deepseek-v4-pro-ioa",
+    "hy3-ioa",
+    "deepseek-v4-flash-ioa",
+    "claude-opus-4.8-1m",
+    "claude-opus-4.8",
+    "claude-opus-4.7-1m",
+    "claude-opus-4.7",
+    "claude-opus-4.6-1m",
+    "claude-opus-4.6",
+    "claude-sonnet-5-1m",
+    "claude-sonnet-5",
+    "claude-sonnet-4.6-1m",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.3-codex",
+    "gemini-3.5-flash",
+    "glm-5.2-ioa",
+    "glm-5v-turbo-ioa",
+    "kimi-k3-ioa",
+    "kimi-k2.7-ioa",
+    "kimi-k2.6-ioa",
+    "minimax-m3-ioa",
+)
+
+
 def _env_int(name: str, default: int) -> int:
     value = os.environ.get(name)
     return int(value) if value not in (None, "") else default
@@ -65,6 +94,7 @@ class GenerationSettings:
     skill_path: Optional[Path] = None
     skill_name: Optional[str] = None
     model: Optional[str] = "deepseek-v4-pro-ioa"
+    models: tuple[str, ...] = SUPPORTED_WB_MODELS
     parallel: int = 20
     max_report_retries: int = 3
     timeout_seconds: float = 900.0
@@ -176,6 +206,12 @@ class GenerationSettings:
                 )
         if self.parallel < 1:
             raise GenerationJobError("parallel 必须至少为 1")
+        if not self.models:
+            raise GenerationJobError("报告生成模型列表不能为空")
+        if self.model and self.model not in self.models:
+            raise GenerationJobError(
+                "默认报告生成模型不在支持列表中: %s" % self.model
+            )
         if self.max_report_retries < 0:
             raise GenerationJobError(
                 "max_report_retries 不能小于 0"
@@ -197,6 +233,7 @@ class GenerationSettings:
                 else self.skill_name
             ),
             "model": self.model,
+            "models": list(self.models),
             "parallel": self.parallel,
             "max_report_retries": self.max_report_retries,
             "max_attempts": self.max_report_retries + 1,
@@ -470,6 +507,10 @@ class GenerationJobService:
         )
         if not selected_model:
             raise GenerationJobError("报告生成模型不能为空")
+        if selected_model not in self.settings.models:
+            raise GenerationJobError(
+                "不支持的报告生成模型: %s" % selected_model
+            )
 
         with self._lock:
             if idempotency_key:
@@ -678,23 +719,76 @@ class GenerationJobService:
             ),
         )
 
+    def _import_reports(
+        self,
+        job: GenerationJob,
+        reports: Dict[str, str],
+    ) -> None:
+        """校验冻结输入，并把本次新产出的报告立即导入 Session。"""
+        if not reports:
+            return
+        if not job.generation_id:
+            raise GenerationJobError("生成任务缺少 generation_id")
+        session = self.sessions.get(job.session_id)
+        if session is None:
+            raise GenerationJobError(
+                "报告已生成，但 Session 已不存在"
+            )
+        if (
+            job.dataset_sha256 is not None
+            and _file_hash(Path(job.dataset_path))
+            != job.dataset_sha256
+        ):
+            raise GenerationJobError(
+                "数据集在任务期间发生变化，拒绝自动导入"
+            )
+        if (
+            job.execution_skill_hash is not None
+            and compiled_skill_hash(Path(job.skill_ref))
+            != job.execution_skill_hash
+        ):
+            raise GenerationJobError(
+                "执行 Skill 文件在任务期间发生变化，拒绝自动导入"
+            )
+        with self.session_lock(job.session_id):
+            skill = _skill_for_version(
+                session,
+                job.skill_version,
+            )
+            if _json_hash(skill.to_dict()) != job.skill_artifact_hash:
+                raise GenerationJobError(
+                    "Skill 版本内容在任务期间发生变化，拒绝自动导入"
+                )
+            imported = session.import_generated_outputs(
+                reports,
+                job.skill_version,
+                job.generation_id,
+                account=job.account,
+            )
+            if "error" in imported:
+                raise GenerationJobError(imported["error"])
+
     def _on_progress(self, job_id: str, result) -> None:
         with self._lock:
             job = self._jobs[job_id]
             job.generation_id = result.generation_id
             job.output_dir = result.output_dir
             by_case = {item.case_id: item for item in job.cases}
+            new_reports = {}
             for external in result.cases:
                 case = by_case.get(external.openharness_case_id)
                 if case is None:
                     continue
-                case.status = external.status
+                if not case.imported:
+                    case.status = external.status
                 case.attempts = len(external.attempts)
                 last = external.attempts[-1] if external.attempts else None
                 case.error = last.error if last else None
                 if external.report:
                     case.report_sha256 = external.report.sha256
                     case.report_size = external.report.size
+                    if not case.imported:
+                        new_reports[case.case_id] = external.report.text
             if not job.cancel_requested:
                 job.status = (
                     "retrying"
@@ -702,6 +796,16 @@ class GenerationJobService:
                     else "running"
                 )
             self._persist(job)
+
+        self._import_reports(job, new_reports)
+
+        if new_reports:
+            with self._lock:
+                for case in job.cases:
+                    if case.case_id in new_reports:
+                        case.imported = True
+                        case.status = "imported"
+                self._persist(job)
 
     def _run(self, job_id: str) -> None:
         job = self.get(job_id)
@@ -735,58 +839,28 @@ class GenerationJobService:
                     ),
                     should_cancel=cancel_event.is_set,
                 )
-                with self._lock:
-                    job.status = "importing"
-                    self._persist(job)
-
                 reports = {
                     item.openharness_case_id: item.report.text
                     for item in result.cases
                     if item.report is not None
+                    and not any(
+                        case.case_id == item.openharness_case_id
+                        and case.imported
+                        for case in job.cases
+                    )
                 }
-                session = self.sessions.get(job.session_id)
-                if session is None:
-                    raise GenerationJobError(
-                        "生成完成，但 Session 已不存在"
-                    )
-                if (
-                    job.dataset_sha256 is not None
-                    and _file_hash(Path(job.dataset_path))
-                    != job.dataset_sha256
-                ):
-                    raise GenerationJobError(
-                        "数据集在任务期间发生变化，拒绝自动导入"
-                    )
-                if (
-                    job.execution_skill_hash is not None
-                    and compiled_skill_hash(Path(job.skill_ref))
-                    != job.execution_skill_hash
-                ):
-                    raise GenerationJobError(
-                        "执行 Skill 文件在任务期间发生变化，拒绝自动导入"
-                    )
-                with self.session_lock(job.session_id):
-                    skill = _skill_for_version(
-                        session,
-                        job.skill_version,
-                    )
-                    if _json_hash(
-                        skill.to_dict()
-                    ) != job.skill_artifact_hash:
-                        raise GenerationJobError(
-                            "Skill 版本内容在任务期间发生变化，拒绝自动导入"
-                        )
-                    imported = session.import_generated_outputs(
-                        reports,
-                        job.skill_version,
-                        result.generation_id,
-                        account=job.account,
-                    )
-                    if "error" in imported:
-                        raise GenerationJobError(imported["error"])
+                if reports:
+                    with self._lock:
+                        job.status = "importing"
+                        self._persist(job)
+                    self._import_reports(job, reports)
 
                 with self._lock:
-                    generated_ids = set(reports)
+                    generated_ids = {
+                        item.openharness_case_id
+                        for item in result.cases
+                        if item.report is not None
+                    }
                     for item in job.cases:
                         if item.case_id in generated_ids:
                             item.imported = True

@@ -631,6 +631,7 @@ def run_external_cases(
                     wb_case_id, _ = ready.popleft()
                     case_results[wb_case_id].status = "cancelled"
 
+            launched = False
             while (
                 ready
                 and len(in_flight) < request.parallel
@@ -638,6 +639,7 @@ def run_external_cases(
             ):
                 wb_case_id, attempt = ready.popleft()
                 case_results[wb_case_id].status = "running"
+                launched = True
                 future = executor.submit(
                     _execute_case_attempt,
                     case_by_id[wb_case_id],
@@ -647,6 +649,17 @@ def run_external_cases(
                     batch_config,
                 )
                 in_flight[future] = (wb_case_id, attempt)
+
+            if launched:
+                snapshot = _snapshot_result(
+                    generation_id,
+                    request,
+                    generation_dir,
+                    started_at,
+                    case_results,
+                )
+                _persist_result(generation_dir, snapshot)
+                _notify_progress(progress_callback, snapshot)
 
             if not in_flight:
                 break

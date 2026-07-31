@@ -40,21 +40,6 @@ def _dims_from_rubric(rubric):
     return dims, zh
 
 
-def _migrate_human_labels(hl):
-    """把旧结构 {version:{case:{dim:score}}} 迁移成按账号 {version:{account:{case:{dim}}}}。
-    旧记录归入哨兵账号 '_legacy'。已是新结构(内层值为 dict)的原样返回。"""
-    out = {}
-    for ver, vmap in (hl or {}).items():
-        if not isinstance(vmap, dict) or not vmap:
-            out[ver] = vmap if isinstance(vmap, dict) else {}
-            continue
-        # 判断: 新结构里 vmap 的值是 {case:{dim}}(dict of dict); 旧结构里是 {dim:score}(dict of num)
-        sample = next(iter(vmap.values()))
-        is_new = isinstance(sample, dict) and all(isinstance(v, dict) for v in sample.values()) if sample else True
-        out[ver] = vmap if is_new else {"_legacy": vmap}
-    return out
-
-
 def _normalize_optimizer_stop(value=None):
     """校验会话级 early-stop；它独立于 rubric.target，不改评分标准。"""
     value = value or {}
@@ -146,7 +131,6 @@ class SessionCore:
         # 每个版本通过 version_entry["dataset_id"] 绑定到其中一个分组来评测/生成/判分。
         self.datasets: Dict[str, Dict[str, Any]] = {}
         self.active_dataset_id: Optional[str] = None
-        self.human_labels: Dict[str, Dict[str, Dict[str, int]]] = {}  # {version: {case_id: {dim: score}}}
         self.report_outputs: Dict[str, Dict[str, str]] = {}  # {version: {case_id: report_text}} 平台真实报告
         self.report_judgments: Dict[str, Dict[str, Dict]] = {}  # {version: {case_id: {scores,reasoning,flagged}}} 平台LLM-judge
         self.judge_checks: Dict[str, Dict[str, Dict]] = {}   # {version:{case:{checks,reasoning}}} Opus逐check
@@ -435,16 +419,6 @@ class SessionCore:
             persist.append_event(self.id, "optimization_stopped", state)
             self._save()
         return state
-
-    def _human_for(self, version: str, account: str) -> Dict[str, Dict[str, int]]:
-        """某账号在某版本的维度级人工标注 {case_id: {dim: score}}(可变, 供写入)。"""
-        return self.human_labels.setdefault(version, {}).setdefault(account or "_legacy", {})
-
-    def _human_checks_for(self, version: str, account) -> Dict[str, Dict[str, float]]:
-        """某账号在某版本的逐 check 人工标注 {case_id: {check_id: val}}。account 为空则返回空(不叠加)。"""
-        if not account:
-            return {}
-        return self.human_checks.get(version, {}).get(account, {})
 
     # ---------- 落盘 / 恢复 ----------
     def _save(self):

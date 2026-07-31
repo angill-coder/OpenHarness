@@ -24,6 +24,7 @@ from external_run_models import (  # noqa: E402
 from generation_jobs import (  # noqa: E402
     GenerationJobService,
     GenerationSettings,
+    SUPPORTED_WB_MODELS,
 )
 from generation_models import GenerationCaseState, GenerationJob  # noqa: E402
 import persistence as persist  # noqa: E402
@@ -182,6 +183,12 @@ class GenerationJobServiceTest(unittest.TestCase):
             output_root=self.root / "runs",
             skill_path=self.skill,
             model="fake-model",
+            models=(
+                "fake-model",
+                "deepseek-v4-pro-ioa",
+                "retry-model",
+                "retry-override-model",
+            ),
             parallel=2,
             max_report_retries=3,
             timeout_seconds=10,
@@ -208,6 +215,13 @@ class GenerationJobServiceTest(unittest.TestCase):
         )
         self.assertEqual(settings.parallel, 20)
         self.assertEqual(settings.model, "deepseek-v4-pro-ioa")
+        self.assertEqual(
+            settings.models[:2],
+            ("deepseek-v4-pro-ioa", "hy3-ioa"),
+        )
+        self.assertNotIn("auto", settings.models)
+        self.assertNotIn("echo", settings.models)
+        self.assertEqual(settings.models, SUPPORTED_WB_MODELS)
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
@@ -285,6 +299,86 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
 
+    def test_each_report_is_imported_before_the_batch_finishes(self):
+        first_imported = threading.Event()
+        release = threading.Event()
+
+        def staged_runner(
+            request,
+            progress_callback=None,
+            should_cancel=None,
+        ):
+            first = ExternalBatchResult(
+                generation_id="gen-staged",
+                session_id=request.session_id,
+                skill_version=request.skill_version,
+                status="running",
+                output_dir="/tmp/gen-staged",
+                created_at=_now(),
+                finished_at=_now(),
+                cases=[
+                    ExternalCaseResult(
+                        wb_case_id="wb-case-a",
+                        openharness_case_id="case-a",
+                        split="dev",
+                        status="generated",
+                        report=_artifact("case-a"),
+                    ),
+                    ExternalCaseResult(
+                        wb_case_id="wb-case-b",
+                        openharness_case_id="case-b",
+                        split="dev",
+                        status="running",
+                    ),
+                ],
+            )
+            progress_callback(first)
+            first_imported.set()
+            release.wait(3)
+            final = ExternalBatchResult(
+                generation_id="gen-staged",
+                session_id=request.session_id,
+                skill_version=request.skill_version,
+                status="completed",
+                output_dir="/tmp/gen-staged",
+                created_at=_now(),
+                finished_at=_now(),
+                cases=[
+                    first.cases[0],
+                    ExternalCaseResult(
+                        wb_case_id="wb-case-b",
+                        openharness_case_id="case-b",
+                        split="dev",
+                        status="generated",
+                        report=_artifact("case-b"),
+                    ),
+                ],
+            )
+            progress_callback(final)
+            return final
+
+        service = GenerationJobService(
+            {"test-session": self.session},
+            self.settings,
+            staged_runner,
+        )
+        job, _ = service.start("test-session", "tester")
+
+        self.assertTrue(first_imported.wait(1))
+        in_progress = service.get(job.job_id)
+        self.assertEqual(in_progress.imported_count, 1)
+        self.assertTrue(in_progress.cases[0].imported)
+        self.assertEqual(in_progress.cases[0].status, "imported")
+        self.assertFalse(in_progress.cases[1].imported)
+        self.assertIn("case-a", self.session.report_outputs["v0"])
+        self.assertNotIn("case-b", self.session.report_outputs["v0"])
+
+        release.set()
+        done = service.wait(job.job_id)
+        self.assertEqual(done.status, "completed")
+        self.assertEqual(done.imported_count, 2)
+        self.assertIn("case-b", self.session.report_outputs["v0"])
+
     def test_job_uses_requested_parallel_with_backend_limit(self):
         fake = FakeRunner()
         service = GenerationJobService(
@@ -318,6 +412,12 @@ class GenerationJobServiceTest(unittest.TestCase):
                 "test-session",
                 "tester",
                 model="  ",
+            )
+        with self.assertRaisesRegex(ValueError, "不支持"):
+            service.start(
+                "test-session",
+                "tester",
+                model="not-a-workbuddy-model",
             )
 
     def test_partial_job_can_retry_only_failed_case(self):

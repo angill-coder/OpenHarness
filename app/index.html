@@ -41,9 +41,17 @@
   .ver-pill.rej{opacity:.5;text-decoration:line-through}
   .barwrap{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:2px}
   .bar{height:100%;background:var(--acc)}
-  .job-case{padding:7px 0;border-bottom:1px dashed var(--line)}
-  .job-case:last-child{border-bottom:0}
-  .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mut);margin-right:6px}
+  .job-case-list{max-height:286px;overflow-y:auto;border:1px solid var(--line);
+       border-radius:8px;padding:6px;background:#141920;scrollbar-gutter:stable}
+  .job-case-list:empty{display:none}
+  .job-case{min-height:50px;padding:7px 9px;margin-bottom:6px;border:1px solid var(--line);
+       border-radius:7px;background:var(--panel2)}
+  .job-case:last-child{margin-bottom:0}
+  .job-case-main{display:flex;align-items:center;min-width:0}
+  .job-case-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .job-case-state{margin-left:auto;padding-left:8px;white-space:nowrap}
+  .job-case-error{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px 0 0 14px}
+  .status-dot{display:inline-block;flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:var(--mut);margin-right:6px}
   .status-dot.running,.status-dot.retrying,.status-dot.importing{background:var(--warn)}
   .status-dot.generated,.status-dot.imported,.status-dot.completed{background:var(--ok)}
   .status-dot.failed,.status-dot.retry_exhausted,.status-dot.interrupted{background:var(--bad)}
@@ -180,12 +188,14 @@
 
     <div class="card step" id="realRunCard">
       <h2><span class="n">▶</span>真实运行 · WB CLI</h2>
-      <p class="small mut">一键执行当前 Session 的全部 case；缺失报告自动重试最多 3 次，通过验收的报告会批量导入当前冻结版本。</p>
+      <p class="small mut">一键执行当前 Session 的全部 case；缺失报告自动重试最多 3 次，每份通过验收的报告产出后立即导入当前冻结版本。</p>
       <div id="generationConfig" class="small mut">正在读取运行配置…</div>
       <div class="row" style="align-items:flex-end;margin-top:8px">
         <div style="flex:1">
           <label for="generationModel">报告生成模型</label>
-          <input id="generationModel" type="text" placeholder="deepseek-v4-pro-ioa">
+          <select id="generationModel">
+            <option value="deepseek-v4-pro-ioa">deepseek-v4-pro-ioa</option>
+          </select>
         </div>
         <div>
           <label for="generationParallel">报告生成最大并发</label>
@@ -198,7 +208,7 @@
         <button class="ghost" id="cancelGenerationBtn" style="display:none">停止</button>
       </div>
       <div id="generationStatus" class="small" style="margin-top:10px"></div>
-      <div id="generationCases" class="small" style="margin-top:6px"></div>
+      <div id="generationCases" class="job-case-list small" style="margin-top:8px"></div>
     </div>
 
     <div class="card step" id="outputCard">
