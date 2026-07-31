@@ -33,6 +33,16 @@ class FrontendContractTest(unittest.TestCase):
             source,
         )
 
+    def test_llm_rewrite_can_choose_v0_drafting_strategy(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="v0StrategySel"', html)
+        self.assertIn('value="base_skill"', html)
+        self.assertIn('value="llm_scratch"', html)
+        self.assertIn("v0_strategy:v0Strategy", source)
+        self.assertIn("syncV0StrategyVisibility", source)
+        self.assertIn("LLM 正在起草 V0", source)
+
     def test_frontend_sends_generation_and_judge_parallelism(self):
         source = (APP / "app.js").read_text(encoding="utf-8")
         html = (APP / "index.html").read_text(encoding="utf-8")

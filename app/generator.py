@@ -23,8 +23,10 @@ import copy
 from pathlib import Path
 from typing import Any, Dict, List
 
+import llm_client
 from directive_registry import (
     RESEARCH_DIRECTIVES,
+    load_editable_region,
     load_skill_directives,
 )
 
@@ -130,10 +132,19 @@ def _is_research_insight(text: str) -> bool:
 
 
 def generate_v0(requirement: str, product_id: str = "custom-skill",
-                prefer_real: bool = False) -> Dict[str, Any]:
+                prefer_real: bool = False,
+                optimizer_mode: str = "switch_search",
+                v0_strategy: str = "base_skill") -> Dict[str, Any]:
     """返回 {skill, rubric, rationale, detected}。"""
     if product_id == "research_insight" or _is_research_insight(requirement):
-        return _generate_research(requirement, "research_insight")
+        return _generate_research(
+            requirement,
+            "research_insight",
+            optimizer_mode,
+            v0_strategy,
+        )
+    if v0_strategy == "llm_scratch":
+        raise ValueError("llm_scratch 当前仅支持调研洞察类 Skill")
     if prefer_real and os.environ.get("ANTHROPIC_API_KEY"):
         try:
             return _generate_via_claude(requirement, product_id)
@@ -209,35 +220,226 @@ def _generate_heuristic(requirement: str, product_id: str) -> Dict[str, Any]:
             "detected": {"report_type": rtype, "audience": audience}}
 
 
-def _generate_research(requirement: str, product_id: str) -> Dict[str, Any]:
-    """调研洞察 v0: 唯一基线的开关状态 + 六维 rubric。"""
+def _draft_research_v0_from_scratch(
+    requirement: str,
+    requirement_contract: str,
+    rubric: Dict[str, Any],
+) -> str:
+    """仅基于需求与 Rubric 起草可编辑规则，不读取基础 Skill 正文。"""
+    prompt = "\n".join([
+        "你是 Skill 架构师。请从零起草一份调研洞察汇报 Skill 的可执行质量规则。",
+        "这是 V0 初稿，不存在可继承的旧 instructions；禁止假设或复用任何基础 Skill 正文。",
+        "系统会把冻结任务契约自动放在你的输出之前，因此不要复写任务契约，只输出其后的质量规则。",
+        "",
+        "要求：",
+        "1. 将 Rubric 的每个维度、check、红线、目标和 gate 转化为明确可执行的写作与交付前自检规则。",
+        "2. 所有 redline check 必须逐条明确保留，不得弱化；规则应能直接指导模型处理原始素材并生成报告。",
+        "3. 输出应自包含、无历史版本引用，包含硬规则、自检清单和必要正反例。",
+        "4. 不为了讨好评分堆砌术语，不输出分析过程，不引用本提示词。",
+        "",
+        "## 用户需求",
+        requirement,
+        "",
+        "## 冻结任务契约（仅供理解，不要复写）",
+        requirement_contract,
+        "",
+        "## Rubric（唯一质量依据）",
+        json.dumps(rubric, ensure_ascii=False, indent=2),
+        "",
+        "## 输出格式",
+        "只输出一个 ```json 代码块，代码块内是可被 json.loads 解析的单个对象，代码块外不要写文字。",
+        "instructions_text 必须是完整 Markdown 字符串，换行和引号按 JSON 规则转义。",
+        "```json",
+        json.dumps({
+            "instructions_text": "<从零起草的完整质量规则 Markdown>",
+            "draft_summary": "<如何依据需求和 Rubric 设计本初稿>",
+            "covered_redlines": ["<逐项列出已覆盖的红线 check id>"],
+        }, ensure_ascii=False),
+        "```",
+    ])
+    raw = llm_client.call_llm(
+        prompt,
+        timeout_seconds=os.environ.get(
+            "LLM_REWRITE_TIMEOUT_SECONDS",
+            "600",
+        ),
+        retries=os.environ.get("LLM_REWRITE_RETRIES", "2"),
+    )
+    parsed = llm_client.extract_json(raw)
+    instructions_text = (
+        parsed.get("instructions_text", "").strip()
+        if isinstance(parsed, dict)
+        else ""
+    )
+    if not instructions_text:
+        raise llm_client.LLMClientError(
+            "LLM 未产出有效 instructions_text"
+        )
+
+    # V0 也必须通过与后续候选相同的红线守卫，避免从零起草时漏掉硬约束。
+    import optimizer02
+    guard = optimizer02._redline_guard(instructions_text, rubric)
+    redline_ids = [
+        check["id"]
+        for dimension in rubric.get("dimensions", [])
+        for check in dimension.get("checks", [])
+        if check.get("redline") and check.get("id")
+    ]
+    uncovered = [
+        check_id
+        for check_id in redline_ids
+        if (guard.get("raw") or {}).get(check_id) is not True
+    ]
+    if uncovered:
+        raise llm_client.LLMClientError(
+            "LLM 起草的 v0 未明确保留红线: %s"
+            % ", ".join(uncovered)
+        )
+    return instructions_text
+
+
+def _generate_research(requirement: str, product_id: str,
+                       optimizer_mode: str = "switch_search",
+                       v0_strategy: str = "base_skill") -> Dict[str, Any]:
+    """调研洞察 v0：支持基础 Skill 起步或 LLM 按需求与 Rubric 从零起草。"""
+    if v0_strategy not in ("base_skill", "llm_scratch"):
+        raise ValueError("非法 v0_strategy: %s" % v0_strategy)
+    if optimizer_mode != "llm_rewrite" and v0_strategy != "base_skill":
+        raise ValueError("llm_scratch 仅适用于 llm_rewrite 模式")
+
     base_skill = os.environ.get(
         "OPENHARNESS_WB_SKILL_PATH",
         os.path.join(_ROOT, "skills", "research-report"),
     )
+    rubric = _build_rubric_research()
     directives = load_skill_directives(Path(base_skill))
+    if optimizer_mode == "llm_rewrite":
+        requirement_contract = _research_requirement_contract(
+            requirement,
+            rubric,
+        )
+        prose = (
+            _draft_research_v0_from_scratch(
+                requirement,
+                requirement_contract,
+                rubric,
+            )
+            if v0_strategy == "llm_scratch"
+            else load_editable_region(Path(base_skill))
+        )
+        instructions = {
+            "prose": prose,
+            "mode": "freeform",
+            "directives": directives,   # freeform 编译忽略，仅供审计
+            "requirement_contract": requirement_contract,
+            "v0_strategy": v0_strategy,
+        }
+        changelog = (
+            "v0(freeform) = 冻结需求契约 + LLM 仅依据需求与 Rubric 从零起草质量规则。"
+            if v0_strategy == "llm_scratch"
+            else "v0(freeform) = 冻结需求契约 + 基础 Skill 可编辑规则。"
+        )
+    else:
+        instructions = {
+            "prose": "执行内容以 skills/research-report 唯一基线为准。",
+            "directives": directives,
+            "v0_strategy": "base_skill",
+        }
+        changelog = "v0 读取 skills/research-report 唯一基线及其已启用 directive。"
     skill = {
         "id": product_id, "version": "v0", "parent_version": None,
         "structure": {},
-        "instructions": {
-            "prose": "执行内容以 skills/research-report 唯一基线为准。",
-            "directives": directives,
-        },
+        "instructions": instructions,
         "few_shots": [],
         "memory_content": {
-            "config": {"base_skill": "research-report"},
+            "config": {
+                "base_skill": "research-report",
+                "v0_strategy": (
+                    v0_strategy
+                    if optimizer_mode == "llm_rewrite"
+                    else "base_skill"
+                ),
+            },
             "facts": {},
             "learned_rules": [],
         },
-        "changelog": "v0 读取 skills/research-report 唯一基线及其已启用 directive。",
+        "changelog": changelog,
     }
-    rubric = _build_rubric_research()
-    rationale = ("识别为**调研洞察汇报**(基于异构素材的提炼+写作, 非算数字型)。\n"
-                 "Skill: 固定使用 skills/research-report 唯一基线。\n"
-                 "六维 rubric(可回溯性0.28红线/结构0.15/逻辑0.12/洞察0.22/覆盖0.08/表达0.15)。\n"
-                 "v0 directive 状态直接读取基线，优化器只打开尚未生效的规则。")
+    if optimizer_mode == "llm_rewrite" and v0_strategy == "llm_scratch":
+        origin_text = (
+            "v0 的可编辑质量规则由 LLM 仅依据用户需求与完整 Rubric 从零起草，"
+            "未读取基础 Skill 的可编辑规则；基础目录仅作为运行壳和编译模板。"
+        )
+    elif optimizer_mode == "llm_rewrite":
+        origin_text = "v0 的可编辑质量规则直接继承基础 Skill，后续版本再由 LLM 改写。"
+    else:
+        origin_text = "v0 读取基础 Skill，优化器后续按 directive 搜索推进。"
+    rationale = (
+        "识别为**调研洞察汇报**（基于异构素材的提炼与写作）。\n"
+        "六维 Rubric：可回溯性 0.28 / 结构 0.15 / 逻辑 0.12 / 洞察 0.22 / "
+        "覆盖 0.08 / 表达 0.15。\n"
+        + origin_text
+    )
     return {"skill": skill, "rubric": rubric, "rationale": rationale,
             "detected": {"report_type": "research_insight", "audience": "exec"}}
+
+
+def _research_requirement_contract(
+    requirement: str,
+    rubric: Dict[str, Any],
+) -> str:
+    """把产品需求与当前 rubric 固化成 freeform v0 的不可变任务契约。
+
+    这里不调用 LLM，保证新建会话离线、确定性可复现；自由改写策略只优化
+    契约之后的质量规则。契约使用语义化表述，不把用户原文机械复读进 Skill。
+    """
+    text = (requirement or "").lower()
+    audience = (
+        "总裁/最高管理层"
+        if any(k in text for k in ("总裁", "最高管理层", "高管", "ceo", "董事"))
+        else "管理层"
+    )
+    interaction_fields = []
+    if any(k in text for k in ("背景", "场合", "决策")):
+        interaction_fields.append("汇报背景（受众、场合、要支撑的决策）")
+    if any(k in text for k in ("hypo", "假设", "预判")):
+        interaction_fields.append("hypothesis（只用于验证或证伪，绝不迎合）")
+    if any(k in text for k in ("重点分布", "重点素材", "材料重点", "汇报的重点")):
+        interaction_fields.append(
+            "材料重点分布（重点主题/结论/素材及预期篇幅或权重）"
+        )
+    if not interaction_fields:
+        interaction_fields = [
+            "汇报背景",
+            "hypothesis",
+            "材料重点分布",
+        ]
+
+    dimension_names = "、".join(
+        d.get("name_zh", d.get("name", ""))
+        for d in rubric.get("dimensions", [])
+    )
+    redline_ids = "、".join(
+        c.get("id", "")
+        for d in rubric.get("dimensions", [])
+        for c in d.get("checks", [])
+        if c.get("redline")
+    )
+    lines = [
+        "## 本会话任务契约（冻结，不由优化器改写）",
+        "",
+        "- **受众与目标**：面向%s，围绕用户给定的话题形成可直接用于决策的汇报。" % audience,
+        "- **初始输入**：接收用户给定的话题与原始素材；原始素材文件只读，不修改。",
+        "- **补充交互**：动笔前检查并补齐%s；用户已提供的不得重复询问，仍缺失或含糊的逐项追问，不自行猜测。"
+        % "、".join(interaction_fields),
+        "- **输出结构**：严格三段式——摘要、关键发现、启示。摘要结论先行；关键发现承载事实、数据和有据归因；启示面向决策，素材不足处明确留白。",
+        "- **素材边界**：所有结论与数据只来自原始素材，不新增、篡改或偷换事实与数据口径。允许为高管阅读做有据的筛选、压缩和重组，但关键 claim 不遗漏、噪音不充数、原意不改变。",
+        "- **图表规则**：数据密集或多组对比处优先用 markdown 表格或清晰图表；图表中的每个数字仍须来自素材，禁止补数或推算未给出的数值。",
+        "- **写作方式**：结论先行、金字塔展开、信息组织 MECE；整体简洁、严谨，避免铺陈和术语注水。",
+        "- **质量基线**：严格满足当前 rubric 的%s六维要求；红线检查 %s 必须始终保留。"
+        % (dimension_names, redline_ids or "无"),
+    ]
+    return "\n".join(lines)
 
 
 def _build_rubric_research() -> Dict[str, Any]:

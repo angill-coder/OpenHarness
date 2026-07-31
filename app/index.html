@@ -105,6 +105,30 @@
       <textarea id="reqInput" placeholder="例: 做一个面向高管的经营月报助手, 每月汇总业绩/关键指标/风险, 数据必须准确可回溯, 输出要简洁。"></textarea>
       <label>产品 ID (可选)</label>
       <input id="pidInput" placeholder="report-assistant">
+      <label style="margin-top:8px">优化器策略</label>
+      <select id="optModeSel">
+        <option value="switch_search">翻开关搜索（switch_search · 旧）</option>
+        <option value="llm_rewrite">LLM 自由改写（llm_rewrite · 新）</option>
+      </select>
+      <div id="v0StrategyWrap" style="display:none;margin-top:8px">
+        <label for="v0StrategySel">V0 起草方式</label>
+        <select id="v0StrategySel">
+          <option value="base_skill">从基础 Skill 开始（V0 使用基础规则）</option>
+          <option value="llm_scratch">LLM 从零起草（需求 + Rubric）</option>
+        </select>
+        <div class="small mut" style="margin-top:5px">“从零起草”不会读取基础 Skill 的可编辑规则；创建 V0 时会调用 LLM，可能需要数分钟。</div>
+      </div>
+      <div class="row" style="align-items:flex-end;margin-top:8px">
+        <div style="flex:1">
+          <label for="stopOverall">LLM loop 停止 overall</label>
+          <input id="stopOverall" type="number" min="1" max="5" step="0.1" value="4.8">
+        </div>
+        <div style="flex:1">
+          <label for="stopPatience">连续无提升版本数</label>
+          <input id="stopPatience" type="number" min="1" step="1" value="4">
+        </div>
+      </div>
+      <div class="small mut" style="margin-top:5px">仅用于 LLM 改写实验的 early-stop，不修改 Rubric 目标。</div>
       <div class="row" style="margin-top:10px">
         <button id="genBtn">生成 V0 skill + rubric</button>
       </div>

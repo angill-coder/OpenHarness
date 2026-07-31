@@ -19,6 +19,16 @@ DIRECTIVE_MANIFEST_RE = re.compile(
 VERSION_RULES_START = "<!-- OPENHARNESS_VERSION_RULES_START -->"
 VERSION_RULES_END = "<!-- OPENHARNESS_VERSION_RULES_END -->"
 
+# freeform 优化策略(optimizer02)的可编辑区标记。标记之间的正文由 LLM 整段
+# 改写;标记之外(标题/directive 清单/开场输入/三段结构/版本增量区)属结构层,
+# LLM 不可动。
+EDITABLE_START = "<!-- OPENHARNESS_EDITABLE_START -->"
+EDITABLE_END = "<!-- OPENHARNESS_EDITABLE_END -->"
+EDITABLE_REGION_RE = re.compile(
+    re.escape(EDITABLE_START) + r"(.*?)" + re.escape(EDITABLE_END),
+    re.DOTALL,
+)
+
 
 RESEARCH_DIRECTIVE_DEFINITIONS: Dict[str, Dict[str, object]] = {
     "require_source_ref": {
@@ -160,3 +170,23 @@ def executable_directive_text(directive_id: str) -> str:
     if definition.get("forbidden") or definition.get("exportable") is False:
         raise ValueError("禁止导出到执行 Skill 的 directive: %s" % directive_id)
     return str(definition["text"])
+
+
+def load_editable_region(skill_path: Path) -> str:
+    """读取基础 Skill 的 freeform 可编辑区正文(EDITABLE 标记之间,不含标记本身)。
+
+    供 optimizer02(LLM 自由改写)取 v0 全文;缺标记则报错。
+    """
+    root = skill_path.expanduser().resolve()
+    instructions = root / "references" / "instructions.md"
+    if not instructions.is_file():
+        raise ValueError(
+            "基础 Skill 缺少 references/instructions.md: %s" % root
+        )
+    text = instructions.read_text(encoding="utf-8")
+    match = EDITABLE_REGION_RE.search(text)
+    if match is None:
+        raise ValueError(
+            "基础 Skill 未声明 OPENHARNESS_EDITABLE 可编辑区: %s" % instructions
+        )
+    return match.group(1).strip("\n")

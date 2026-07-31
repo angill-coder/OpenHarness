@@ -29,6 +29,8 @@ import optimizer as optimizer_mod                   # noqa: E402
 from workbuddy_batch.dataset import openharness_rows  # noqa: E402
 
 import persistence as persist                        # noqa: E402
+import optimizer_registry                            # noqa: E402
+import optimizer_pipeline                            # noqa: E402
 
 
 class SessionEval:
@@ -70,20 +72,23 @@ class SessionEval:
 
     # ---------- 评估当前版本 ----------
     def evaluate(self, account=None):
-        """计算模型 Judge/mock 分、失败聚类和 dev/test 均分，并暂存基础记录。"""
-        if not self.cases:
-            return {"error": "尚未导入数据"}
+        """计算与账号无关的基础量(judge/mock 分、失败聚类、dev/test 均分)并暂存基础记录;
+        人工标注叠加与校准是按账号的, 放到 view(account) 时再算(线程安全: 不把账号数据写进共享缓存)。"""
         cur = self._current()
+        eval_cases = self._cases_for(cur)
+        if not eval_cases:
+            return {"error": "尚未导入数据"}
         skill = cur["skill"]
         ver = cur["version"]
         if cur.get("workflow_block"):
             cur["workflow_block"] = None
 
-        train_dev = [c for c in self.cases if c["split"] in ("train", "dev")]
-        dev = [c for c in self.cases if c["split"] == "dev"]
-        test = [c for c in self.cases if c["split"] == "test"]
+        train_dev = [c for c in eval_cases if c["split"] in ("train", "dev")]
+        dev = [c for c in eval_cases if c["split"] == "dev"]
+        test = [c for c in eval_cases if c["split"] == "test"]
 
-        recs_all = runner_mod.run_split(skill, self.cases, self.rubric, self.backend, ver)
+        # 基础评估与账号无关: 不注入人工分(人工 overlay 在 view 时按账号叠加)
+        recs_all = runner_mod.run_split(skill, eval_cases, self.rubric, self.backend, ver, {})
         # 用平台真实报告 + LLM-judge 评分覆盖 mock(有则真实, 无则保留 mock 作占位)
         self._apply_recorded(recs_all, ver)
         dev_recs = [r for r in recs_all if r.dataset_split == "dev"]
@@ -236,6 +241,103 @@ class SessionEval:
 
     # ---------- 推进到下一版 ----------
     def advance(self, account=None):
+        """按 optimizer_mode 派发。switch_search 走原路径(逐字不变);
+        llm_rewrite 走 LLM 改写 + 异步 gate。"""
+        if not self.cases:
+            return {"error": "尚未导入数据"}
+        if getattr(self, "optimizer_mode", "switch_search") == "llm_rewrite":
+            # 重启兜底:上一轮 pending 候选若已判分完但未结算,先结算
+            if getattr(self, "pending_idx", None) is not None:
+                self.settle_pending_candidate(account)
+            return self._advance_llm_rewrite(account)
+        return self._advance_switch_search(account)
+
+    def _advance_llm_rewrite(self, account=None):
+        """LLM 自由改写整段 instructions -> 候选态(不动 current_idx)-> 待真实判分后 settle。"""
+        cur = self._current()
+        if cur["failures"] is None:
+            self.evaluate(account)
+            cur = self._current()
+        stop = self._mark_optimizer_stopped_if_needed()
+        if stop["stopped"]:
+            state = self.view(account)
+            state["advance_result"] = {
+                "status": "converged",
+                "code": stop["code"],
+                "message": "优化 loop 已停止：" + stop["reason"] + "。",
+                "optimizer_stop": stop,
+            }
+            return state
+        skill = cur["skill"]
+        state = self.view(account)
+        advance_action = state["actions"]["advance"]
+        if not advance_action["enabled"]:
+            state["advance_result"] = {
+                "status": "blocked",
+                "code": "workflow_not_ready",
+                "message": advance_action["reason"] or "当前版本不可推进(需先生成并判分)",
+            }
+            return state
+
+        failures = (cur.get("failure_report") or cur.get("failures")) or []
+        strategy = optimizer_registry.get_strategy("llm_rewrite")
+        context = optimizer_pipeline.build_optimizer_context(self, account)
+        proposal = strategy.propose(self, skill, failures, context)
+        if proposal is None:
+            # propose 内部(红线守卫/无产出)已把拒绝原因写进 opt_history
+            note = (self.opt_history[-1].get("reason")
+                    if self.opt_history else None) or "LLM 未产出可用改写"
+            self._save()
+            v = self.view(account)
+            v["advance_result"] = {
+                "status": "blocked",
+                "code": "llm_rewrite_no_change",
+                "message": note,
+            }
+            return v
+
+        version_nums = []
+        for item in self.versions:
+            try:
+                version_nums.append(int(str(item["version"]).lstrip("v")))
+            except (TypeError, ValueError):
+                continue
+        cand_ver = "v%d" % (max(version_nums, default=0) + 1)
+        candidate = strategy.apply_proposal(skill, proposal, cand_ver)
+        self._add_version(candidate, adopted=False, proposal=proposal)
+        self.versions[-1]["candidate_state"] = "pending"
+        self.pending_idx = len(self.versions) - 1   # 关键:不动 current_idx(防回退)
+        self.opt_history.append({
+            "target": "instructions_freeform",
+            "parent": skill.version,
+            "candidate": cand_ver,
+            "change_summary": proposal.get("change_summary", ""),
+            "targets": proposal.get("targets_failures", []),
+            "result": "pending_real_evaluation",
+        })
+        persist.append_event(self.id, "version_proposed", {
+            "version": cand_ver,
+            "parent": skill.version,
+            "strategy": "llm_rewrite",
+            "proposal": {k: proposal.get(k) for k in
+                         ("change_summary", "targets_failures", "preserved",
+                          "hypothesis", "self_check_no_hack")},
+            "validation": "pending_real_evaluation",
+        })
+        self._save()
+        v = self.view(account)
+        v["advance_result"] = {
+            "status": "proposed",
+            "version": cand_ver,
+            "proposal": proposal,
+            "requires_real_evaluation": True,
+            "message": ("已生成待验证候选 %s(LLM 改写)。请对该候选执行 WB 生成 + 批量真实 Judge,"
+                        "判分完成后平台自动结算采纳/回滚。" % cand_ver),
+        }
+        return v
+
+    # ---------- 推进到下一版(switch_search 原路径,逐字不变) ----------
+    def _advance_switch_search(self, account=None):
         """optimizer 读当前失败 -> 提候选 -> dev gate -> 采纳成为新版本。"""
         if not self.cases:
             return {"error": "尚未导入数据"}

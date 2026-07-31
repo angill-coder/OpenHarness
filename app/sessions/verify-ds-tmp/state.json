@@ -1,0 +1,555 @@
+{
+  "id": "verify-ds-tmp",
+  "requirement": "帮我做调研洞察汇报报告",
+  "product_id": "research_insight",
+  "optimizer_mode": "switch_search",
+  "pending_idx": null,
+  "rubric": {
+    "product": "research_insight",
+    "version": "v0",
+    "_note": "调研洞察汇报助手 六维 rubric。机器可读镜像 调研洞察汇报助手_Rubric落地文档.md §1-3。JSON(非YAML)因 harness 走 Python stdlib。judge.score_report_research 读 report[signals] 照本文件锚点打分。",
+    "dimensions": [
+      {
+        "name": "traceability",
+        "name_zh": "可回溯性与支撑充分",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.28,
+        "hard_floor": 3,
+        "is_reverse": false,
+        "criteria": "论断可回溯到 source/claim;不曲解、不编造;冲突指出而非混用;素材不足处诚实留白;结论需≥2独立信源否则降级'待验证'。",
+        "anchors": {
+          "5": "所有论断可回溯;无曲解无编造;冲突被正确指出;素材不足处明确说明证据不足;单一信源结论均已标注'待验证'。",
+          "4": "可回溯性完整;仅1处非关键引用缺失或表述略模糊,不影响结论。",
+          "3": "主体可回溯,但1处关键论断无出处/轻度曲解/单一信源结论未降级。",
+          "2": "≥1处编造事实 / 把冲突素材当一致混用 / 无支撑下强行给结论。核心可信度受损(封顶,红线)。",
+          "1": "大量论断无法回溯或明显编造;报告事实基础整体不可信。"
+        },
+        "positive_example": "人均日时长Q2达27分钟[S-001];竞品X为去重会话时长[S-003],不可直接比较;投放方向素材不足,建议补充后再定。",
+        "negative_example": "满意度显著上升,NPS预计破50。(素材里没有)",
+        "checks": [
+          {
+            "id": "T1",
+            "label": "论断可回溯(有据)",
+            "desc": "每个事实/数据/结论都真有素材支撑、可核验回溯到 S-xxx/C-xxx;正文不写出来源号是允许的,不因未印出处扣分,只看论断是否真有据",
+            "effect": "关键论断查无素材支撑/无法回溯→3",
+            "optimizer": {
+              "pattern_id": "trace_uncited",
+              "directive_hint": "require_source_ref",
+              "priority": 11
+            }
+          },
+          {
+            "id": "T2",
+            "label": "不编造·不曲解",
+            "desc": "无素材里不存在的新事实，未曲解原意",
+            "effect": "编造/曲解→2封顶",
+            "redline": true,
+            "optimizer": {
+              "pattern_id": "trace_fabrication",
+              "directive_hint": "verify_no_fabrication",
+              "priority": 0
+            }
+          },
+          {
+            "id": "T3",
+            "label": "冲突指出不混用",
+            "desc": "素材冲突正确指出、不当一致混用",
+            "effect": "混用冲突→2封顶",
+            "redline": true,
+            "optimizer": {
+              "pattern_id": "trace_conflict",
+              "directive_hint": "flag_source_conflict",
+              "priority": 1
+            }
+          },
+          {
+            "id": "T4",
+            "label": "单源降级待验证",
+            "desc": "单一信源结论标'待验证'，≥2 独立信源才作定论",
+            "effect": "未降级→3",
+            "optimizer": {
+              "pattern_id": "trace_single_source",
+              "directive_hint": "require_two_sources",
+              "priority": 12
+            }
+          },
+          {
+            "id": "T5",
+            "label": "不足诚实留白",
+            "desc": "素材撑不起的问题说'证据不足'，不硬答",
+            "effect": "硬答→2封顶",
+            "redline": true,
+            "optimizer": {
+              "pattern_id": "trace_hardanswer",
+              "directive_hint": "honest_on_unsupportable",
+              "priority": 2
+            }
+          },
+          {
+            "id": "T6",
+            "label": "口径注明",
+            "desc": "口径依赖的数/结论要注明口径、必要时给敏感性",
+            "effect": "选有利口径不注明→3",
+            "optimizer": {
+              "pattern_id": "trace_metric_caveat",
+              "directive_hint": "note_metric_caveat",
+              "priority": 13
+            }
+          },
+          {
+            "id": "T7",
+            "label": "披露样本偏差",
+            "desc": "已知样本有系统性偏差要披露、不当客观结论",
+            "effect": "无视偏差→3",
+            "optimizer": {
+              "pattern_id": "trace_sample_bias",
+              "directive_hint": "disclose_sample_bias",
+              "priority": 14
+            }
+          }
+        ]
+      },
+      {
+        "name": "structure",
+        "name_zh": "结构",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.15,
+        "hard_floor": null,
+        "is_reverse": false,
+        "criteria": "摘要≤3条bullet且每条直接写结论、按重要性排序;正文金字塔、章节MECE、紧凑无注水。",
+        "anchors": {
+          "5": "摘要≤3条纯结论按重要性排序;正文每章论点先行、章节MECE无重叠无遗漏;摘要与正文严格对应。",
+          "4": "结构基本达标,摘要/正文对应清晰;仅1处轻微交叉或1条bullet偏铺陈。",
+          "3": "有摘要+正文分层,但摘要含背景铺陈,或正文非金字塔,或章节明显重叠/遗漏。",
+          "2": "摘要是背景介绍而非结论 / 正文与摘要对不上 / 无明显章节逻辑(封顶)。",
+          "1": "无结构,流水账。"
+        },
+        "positive_example": "• 增长由重度用户留存加深驱动,非拉新。 • 可持续性存疑,仅两期数据。 • 建议资源转向激活。",
+        "negative_example": "• 本季度对DeepSeek用户时长进行了分析。 • 数据来自内部BI和6人访谈。(全是背景铺陈)",
+        "checks": [
+          {
+            "id": "S1",
+            "label": "摘要≤3条纯结论",
+            "desc": "摘要≤3 bullet、每条是结论非背景、重要在前",
+            "effect": "背景铺陈→2封顶",
+            "optimizer": {
+              "pattern_id": "struct_summary",
+              "directive_hint": "summary_format",
+              "priority": 20
+            }
+          },
+          {
+            "id": "S2",
+            "label": "金字塔",
+            "desc": "正文每章先给论点、再给支撑",
+            "effect": "支撑先于论点→3",
+            "optimizer": {
+              "pattern_id": "struct_pyramid",
+              "directive_hint": "pyramid_body",
+              "priority": 21
+            }
+          },
+          {
+            "id": "S3",
+            "label": "MECE 章节",
+            "desc": "章节不重复、不遗漏、不交叉",
+            "effect": "明显重叠/遗漏→3",
+            "optimizer": {
+              "pattern_id": "struct_mece",
+              "directive_hint": "mece_sections",
+              "priority": 22
+            }
+          },
+          {
+            "id": "S4",
+            "label": "摘要↔正文对应",
+            "desc": "正文是摘要的展开、严格对应",
+            "effect": "对不上→2封顶",
+            "optimizer": {
+              "pattern_id": "struct_summary_body",
+              "directive_hint": "summary_format",
+              "priority": 23
+            }
+          }
+        ]
+      },
+      {
+        "name": "narrative",
+        "name_zh": "逻辑与故事线",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.12,
+        "hard_floor": null,
+        "is_reverse": false,
+        "criteria": "论点推进有逻辑;章节衔接自然串成故事线;同一概念/口径/术语全文含义一致。",
+        "anchors": {
+          "5": "一条清晰主线贯穿全文;章节因果/递进衔接自然;同一概念全文口径一致。",
+          "4": "主线清楚;个别衔接略生硬或1处措辞不统一(不影响理解)。",
+          "3": "能读懂,但章节像并列拼接、缺推进感;或有1处概念前后不一致。",
+          "2": "故事线断裂跳跃 / 概念自相矛盾(封顶)。",
+          "1": "逻辑混乱,无法跟随。"
+        },
+        "positive_example": "从'时长为何涨'→'谁在涨'→'能否持续'→'我们该做什么',一条主线递进。",
+        "negative_example": "前文'时长'指累计前台时长,后文对比时不声明换成去重会话时长。",
+        "checks": [
+          {
+            "id": "N1",
+            "label": "主线贯穿",
+            "desc": "一条清晰主线、章节因果/递进衔接自然",
+            "effect": "并列拼接缺推进→3",
+            "optimizer": {
+              "pattern_id": "narr_flow",
+              "directive_hint": "ensure_narrative_flow",
+              "priority": 30
+            }
+          },
+          {
+            "id": "N2",
+            "label": "概念口径一致",
+            "desc": "同一名词/口径全文含义不漂移",
+            "effect": "概念自相矛盾→2封顶",
+            "optimizer": {
+              "pattern_id": "narr_drift",
+              "directive_hint": "concept_consistency",
+              "priority": 31
+            }
+          }
+        ]
+      },
+      {
+        "name": "insight",
+        "name_zh": "提炼与洞察",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.22,
+        "hard_floor": null,
+        "is_reverse": false,
+        "criteria": "案例抽象提炼成模式非罗列;归因/趋势(标置信)/建议三要素;噪音片段不引用;命中 expected_insights。",
+        "anchors": {
+          "5": "命中expected_insights;案例被提炼成规律;归因具体有据、趋势标置信度、建议可执行;噪音全部剔除。",
+          "4": "三要素齐,但1项较泛或支撑略弱,或趋势过度外推未标置信;噪音基本剔除。",
+          "3": "有判断但偏表面(只说'增长了'不解释),或案例是罗列而非提炼,或引用了噪音片段。",
+          "2": "基本是素材复述 / 大量引用噪音片段充数,几乎无归因/趋势/建议(封顶)。",
+          "1": "纯素材罗列,无任何判断。"
+        },
+        "positive_example": "5家AI Native公司4家采用'人机双轨过渡'——先影子运行再切流,共性是把风险控制在可回退区间[C-003,C-004,C-005]。",
+        "negative_example": "把5家公司案例逐条抄一遍,不提炼共性。",
+        "checks": [
+          {
+            "id": "I1",
+            "label": "提炼成规律",
+            "desc": "案例抽象成模式/共性，非逐条罗列",
+            "effect": "罗列→3",
+            "optimizer": {
+              "pattern_id": "insight_listing",
+              "directive_hint": "abstract_cases",
+              "priority": 41
+            }
+          },
+          {
+            "id": "I2",
+            "label": "归因/趋势/建议三要素",
+            "desc": "有归因、趋势(标置信度)、可执行建议",
+            "effect": "仅复述→2封顶",
+            "optimizer": {
+              "pattern_id": "insight_restate",
+              "directive_hint": "require_insight_triplet",
+              "priority": 40
+            }
+          },
+          {
+            "id": "I3",
+            "label": "不过度外推",
+            "desc": "趋势标置信、不越界外推",
+            "effect": "过度外推→4(并拉低可回溯性)",
+            "optimizer": {
+              "pattern_id": "insight_overclaim",
+              "directive_hint": "mark_extrapolation_confidence",
+              "priority": 43
+            }
+          },
+          {
+            "id": "I4",
+            "label": "剔噪",
+            "desc": "不引用噪音片段(noise_source_ids)",
+            "effect": "引噪音充数→3",
+            "optimizer": {
+              "pattern_id": "insight_noise",
+              "directive_hint": "drop_noise",
+              "priority": 42
+            }
+          },
+          {
+            "id": "I5",
+            "label": "异常交叉验证",
+            "desc": "一次性异常/离群作交叉或情境解释、不当作趋势或错误归因",
+            "effect": "异常当趋势→4",
+            "optimizer": {
+              "pattern_id": "insight_outlier",
+              "directive_hint": "crosscheck_outliers",
+              "priority": 44
+            }
+          }
+        ]
+      },
+      {
+        "name": "coverage",
+        "name_zh": "覆盖度",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.08,
+        "hard_floor": null,
+        "is_reverse": false,
+        "criteria": "素材支持的 key_question 全答;key_claim_ids 无遗漏;required_sections 全覆盖且非空。素材答不了的(unsupportable_questions)不算漏。",
+        "anchors": {
+          "5": "可答的key_question全答、关键claim无遗漏、段落齐且有实质内容。",
+          "4": "段落齐、可答问题全答;有1个次要claim未提。",
+          "3": "缺1个required section,或漏1个关键claim / 未答1个素材支持的key_question。",
+          "2": "缺≥2段,或漏多个关键claim / 多个可答问题未答。",
+          "1": "大面积缺失,报告不成形。"
+        },
+        "positive_example": "五段齐全,时长变化原因与贡献用户群都答到。",
+        "negative_example": "缺'归因分析'段,且漏答'增长由哪类用户贡献'。",
+        "checks": [
+          {
+            "id": "V1",
+            "label": "可答问题全答",
+            "desc": "key_questions 中素材支持的都答到(答不了的不算漏)",
+            "effect": "漏答可答问题→3",
+            "optimizer": {
+              "pattern_id": "cover_key_missed",
+              "directive_hint": "cover_key_claims",
+              "priority": 50
+            }
+          },
+          {
+            "id": "V2",
+            "label": "关键 claim 无遗漏",
+            "desc": "key_claim_ids 都覆盖",
+            "effect": "漏关键claim→3",
+            "optimizer": {
+              "pattern_id": "cover_key_missed",
+              "directive_hint": "cover_key_claims",
+              "priority": 51
+            }
+          },
+          {
+            "id": "V3",
+            "label": "必需段落齐",
+            "desc": "required_sections 全覆盖且有实质内容",
+            "effect": "缺1段→3；缺≥2→2",
+            "optimizer": {
+              "pattern_id": "cover_section_missed",
+              "directive_hint": "mece_sections",
+              "priority": 52
+            }
+          }
+        ]
+      },
+      {
+        "name": "expression",
+        "name_zh": "表达与受众契合",
+        "scale": [
+          1,
+          5
+        ],
+        "weight": 0.15,
+        "hard_floor": null,
+        "is_reverse": true,
+        "criteria": "面向高管精炼、结论先行、措辞严谨;关键数据用表/图结构化呈现;长度匹配受众;禁用'不是,而是'句式、不堆术语。反向维度防reward hacking。",
+        "checks": [
+          {
+            "id": "E1",
+            "label": "结论先行·措辞严谨",
+            "desc": "结论先行、直击决策，措辞严谨不含糊",
+            "effect": "缺失/通篇铺垫→降到3",
+            "optimizer": {
+              "pattern_id": "expr_rigorous",
+              "directive_hint": "require_rigorous_wording",
+              "priority": 60
+            }
+          },
+          {
+            "id": "E2",
+            "label": "结构化呈现(表/图)",
+            "desc": "关键数据/对比用 markdown 表格或图，而非埋在长段文字里",
+            "effect": "该图不图→降到3",
+            "optimizer": {
+              "pattern_id": "expr_nochart",
+              "directive_hint": "require_charts",
+              "priority": 61
+            }
+          },
+          {
+            "id": "E3",
+            "label": "长度匹配受众",
+            "desc": "长度合 exec(≤1.5 页量级)、不注水",
+            "effect": "严重偏离长度→2封顶",
+            "optimizer": {
+              "pattern_id": "expr_length",
+              "directive_hint": "match_exec_length",
+              "priority": 62
+            }
+          },
+          {
+            "id": "E4",
+            "label": "风格禁令(硬红线)",
+            "desc": "禁用'不是,而是'句式;禁术语堆砌(数据驱动/闭环/赋能/范式重构式空话)",
+            "effect": "命中任一→2封顶",
+            "redline": true,
+            "optimizer": {
+              "pattern_id": "expr_bushi",
+              "directive_hint": "ban_bushi_ershi",
+              "priority": 63
+            }
+          },
+          {
+            "id": "E5",
+            "label": "措辞严谨",
+            "desc": "措辞严谨不含糊、不模棱两可(结论/限定条件清楚)",
+            "effect": "含糊/模棱→降档(真实judge评)",
+            "optimizer": {
+              "pattern_id": "expr_rigorous",
+              "directive_hint": "require_rigorous_wording",
+              "priority": 64
+            }
+          }
+        ],
+        "anchors": {
+          "5": "结论先行直击决策;关键数据/对比用了表格或图;措辞严谨;长度合exec(≤1.5页);无违禁句式无注水。",
+          "4": "基本精炼;有个别可删句,或1处本该用表却用文字。",
+          "3": "一定冗余或轻度术语堆砌,或该可视化的没可视化,或长度偏离受众。",
+          "2": "出现'不是,而是'句式 / 明显冗长套话术语堆砌 / 严重偏离长度(封顶)。",
+          "1": "充斥空话,信息密度极低。"
+        },
+        "positive_example": "用一张3行表呈现Q1/Q2时长、重度/轻度增幅、样本量。",
+        "negative_example": "增长并非来自拉新,而是来自留存加深。(命中'不是,而是'句式)"
+      }
+    ],
+    "aggregate": "weighted_avg",
+    "gates": [
+      {
+        "id": "red_line_traceability",
+        "type": "hard_floor",
+        "dimension": "traceability",
+        "floor": 3,
+        "rule": "任一 case traceability < 3(编造/混用冲突/无据硬结论) -> 该 case 不合格"
+      },
+      {
+        "id": "no_regression",
+        "type": "no_regression",
+        "drop_tolerance": 0.15,
+        "rule": "候选版本采纳条件:目标维度↑ 且 其它维度均不塌(分维度看)"
+      },
+      {
+        "id": "structure_guard",
+        "type": "human_review",
+        "dimension": "structure",
+        "floor": 3,
+        "rule": "structure < 3 -> 人工复检"
+      },
+      {
+        "id": "narrative_guard",
+        "type": "human_review",
+        "dimension": "narrative",
+        "floor": 3,
+        "rule": "narrative < 3 -> 人工复检"
+      },
+      {
+        "id": "hack_guard",
+        "type": "human_review",
+        "dimension": "expression",
+        "floor": 3,
+        "rule": "expression < 3 -> 触发人工复检(疑似 reward hacking / 违禁句式)"
+      }
+    ],
+    "target": {
+      "traceability": 4.2,
+      "structure": 4.0,
+      "narrative": 3.8,
+      "insight": 3.6,
+      "coverage": 4.0,
+      "expression": 3.8,
+      "overall": 4.0,
+      "judge_human_agreement": 0.85
+    }
+  },
+  "gen_rationale": "识别为**调研洞察汇报**(基于异构素材的提炼+写作, 非算数字型)。\nSkill: 固定使用 skills/research-report 唯一基线。\n六维 rubric(可回溯性0.28红线/结构0.15/逻辑0.12/洞察0.22/覆盖0.08/表达0.15)。\nv0 directive 状态直接读取基线，优化器只打开尚未生效的规则。",
+  "detected": {
+    "report_type": "research_insight",
+    "audience": "exec"
+  },
+  "current_idx": 0,
+  "opt_history": [],
+  "cases": [],
+  "human_labels": {},
+  "generation_imports": {},
+  "versions": [
+    {
+      "skill": {
+        "id": "research_insight",
+        "version": "v0",
+        "parent_version": null,
+        "structure": {},
+        "instructions": {
+          "prose": "执行内容以 skills/research-report 唯一基线为准。",
+          "directives": {
+            "require_source_ref": true,
+            "flag_source_conflict": true,
+            "honest_on_unsupportable": true,
+            "require_two_sources": true,
+            "summary_format": true,
+            "pyramid_body": true,
+            "mece_sections": true,
+            "concept_consistency": true,
+            "ensure_narrative_flow": true,
+            "require_insight_triplet": true,
+            "abstract_cases": true,
+            "drop_noise": true,
+            "mark_extrapolation_confidence": true,
+            "crosscheck_outliers": true,
+            "cover_key_claims": true,
+            "ban_bushi_ershi": true,
+            "require_charts": true,
+            "match_exec_length": true,
+            "require_rigorous_wording": true,
+            "verify_no_fabrication": true,
+            "note_metric_caveat": true,
+            "disclose_sample_bias": true,
+            "buzzword_emphasis": false
+          }
+        },
+        "few_shots": [],
+        "memory_content": {
+          "config": {
+            "base_skill": "research-report"
+          },
+          "facts": {},
+          "learned_rules": []
+        },
+        "changelog": "v0 读取 skills/research-report 唯一基线及其已启用 directive。"
+      },
+      "adopted": true,
+      "proposal": null,
+      "failure_report": null,
+      "failure_mapping_error": [],
+      "workflow_block": null,
+      "candidate_state": null,
+      "verdict": null,
+      "verdict_reasons": null
+    }
+  ],
+  "_saved_at": 1785245926.232
+}

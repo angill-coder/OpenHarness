@@ -14,6 +14,9 @@ from typing import List, Set, Tuple
 
 from directive_registry import (
     DIRECTIVE_MANIFEST_RE,
+    EDITABLE_END,
+    EDITABLE_REGION_RE,
+    EDITABLE_START,
     VERSION_RULES_END,
     VERSION_RULES_START,
     directive_manifest,
@@ -22,7 +25,7 @@ from directive_registry import (
 )
 
 
-COMPILER_VERSION = "session-skill/v2"
+COMPILER_VERSION = "session-skill/v3"
 
 
 @dataclass(frozen=True)
@@ -133,6 +136,33 @@ def _replace_version_rules(
     return pattern.sub(lambda _match: rendered, text, count=1)
 
 
+def _replace_editable_region(
+    text: str,
+    prose: str,
+    requirement_contract: str = "",
+) -> str:
+    """freeform 策略:把冻结需求契约 + LLM 正文写进 EDITABLE 区。
+
+    requirement_contract 由 v0 基于需求与 rubric 确定，后续版本只改 prose，
+    从结构上避免 LLM 优化时把受众、交互、输出结构或素材边界改丢。
+    """
+    if EDITABLE_REGION_RE.search(text) is None:
+        raise ValueError(
+            "基础 Skill 的 instructions.md 缺少 OPENHARNESS_EDITABLE 可编辑区"
+        )
+    parts = [
+        part.strip("\n")
+        for part in (requirement_contract, prose)
+        if (part or "").strip()
+    ]
+    rendered = "%s\n%s\n%s" % (
+        EDITABLE_START,
+        "\n\n".join(parts),
+        EDITABLE_END,
+    )
+    return EDITABLE_REGION_RE.sub(lambda _match: rendered, text, count=1)
+
+
 def compile_session_skill(
     output_root: Path,
     session_id: str,
@@ -185,16 +215,29 @@ def compile_session_skill(
             base,
             temp_dir,
             dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns(".*", "__pycache__"),
+            ignore=shutil.ignore_patterns(
+                ".*",
+                "__pycache__",
+                "DRAFT*.md",
+            ),
         )
         instructions = temp_dir / "references" / "instructions.md"
         text = instructions.read_text(encoding="utf-8")
-        text = _replace_directive_manifest(text, effective_enabled)
-        text = _replace_version_rules(
-            text,
-            additional,
-            skill.few_shots,
-        )
+        if skill.instructions.get("mode") == "freeform":
+            # freeform 策略(optimizer02):LLM 整段改写可编辑区;
+            # manifest/version_rules 保持基线原样,不做 per-directive 注入。
+            text = _replace_editable_region(
+                text,
+                skill.instructions.get("prose", ""),
+                skill.instructions.get("requirement_contract", ""),
+            )
+        else:
+            text = _replace_directive_manifest(text, effective_enabled)
+            text = _replace_version_rules(
+                text,
+                additional,
+                skill.few_shots,
+            )
         instructions.write_text(text, encoding="utf-8")
 
         expected_hash = directory_hash(temp_dir)

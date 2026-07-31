@@ -250,13 +250,13 @@ def _file_hash(path: Path) -> str:
 
 
 def _skill_for_version(session, version: str):
-    adopted = [
+    matches = [
         item
         for item in session.versions
-        if item["version"] == version and item.get("adopted")
+        if item["version"] == version
     ]
-    if adopted:
-        return adopted[-1]["skill"]
+    if matches:
+        return matches[-1]["skill"]
     raise GenerationJobError("Session 中不存在 Skill 版本: %s" % version)
 
 
@@ -498,7 +498,7 @@ class GenerationJobService:
                 )
                 for item in session.cases
             }
-            version = session._current()["version"]
+            version = session._eval_target()["version"]
             skill = _skill_for_version(session, version)
             try:
                 frozen_skill = compile_session_skill(
