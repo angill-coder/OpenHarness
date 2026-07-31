@@ -4,7 +4,8 @@ judge.py — LLM-as-judge 的确定性模拟 (对应架构文档 JUDGE 盒 + Rub
 
 真实系统里这是一个按 rubric prompt 的 LLM。这里用一个**忠实实现 rubric 锚点**的
 确定性打分器: 打分逻辑严格照 rubric 锚点, 于是"打开某 directive 修好某缺陷 -> 该维度
-分数上升"是 rubric 定义的必然结果, 而非硬塞。
+分数上升"是 rubric 定义的必然结果, 而非硬塞。judge 与人工标注的差距(见 calibration)
+来自判罚力度与专家不完全一致 —— 正是 meta-eval 要校准的东西。
 
 两个产品两套打分:
   · score_report_bizreport —— 算数字型 report-assistant, 读 flag dict(数据准确/完整/洞察/简洁)
@@ -245,3 +246,4 @@ def dim_from_checks(check_scores: Dict[str, float], rubric: Dict[str, Any]) -> D
             score = min(score, 2)
         out[d["name"]] = max(1, min(5, score))
     return out
+

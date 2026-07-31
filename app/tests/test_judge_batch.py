@@ -256,55 +256,8 @@ class ModelOnlySessionTest(unittest.TestCase):
         self.assertEqual(state["version_status"], "optimizable")
         self.assertTrue(state["actions"]["advance"]["enabled"])
         self.assertEqual(state["failure_report"], [])
-        self.assertNotIn("calib", state)
-        self.assertNotIn("check_calib", state)
-        record = state["current_eval"][0]
-        self.assertIn("check_judge", record)
-        self.assertNotIn("human_label", record)
-        self.assertNotIn("check_human", record)
-        self.assertNotIn("dims_human", record)
-
-    def test_restore_ignores_legacy_human_judge_state(self):
-        session = Session(
-            "legacy-human-state",
-            "生成调研洞察报告",
-            "research_insight",
-        )
-        session.import_data(
-            [
-                {
-                    "case_id": "case-a",
-                    "input": {"brief": "A"},
-                    "ground_truth": {},
-                    "split": "dev",
-                }
-            ]
-        )
-        snapshot = session.to_snapshot()
-        self.assertNotIn("human_labels", snapshot)
-
-        snapshot["human_labels"] = {
-            "v0": {"legacy-user": {"case-a": {"traceability": 5}}}
-        }
-        session_dir = Path(persist._BASE) / session.id
-        (session_dir / "check_labels.jsonl").write_text(
-            json.dumps(
-                {
-                    "version": "v0",
-                    "account": "legacy-user",
-                    "case_id": "case-a",
-                    "checks": {"V1": 1.0},
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
-        restored = Session.restore(snapshot)
-        state = restored.view("legacy-user")
-        self.assertFalse(hasattr(restored, "human_labels"))
-        self.assertFalse(hasattr(restored, "human_checks"))
-        self.assertNotIn("human_label", state["current_eval"][0])
+        self.assertIsNone(state["calib"])
+        self.assertIsNone(state["check_calib"])
 
     def test_real_judge_failure_proposes_pending_version(self):
         session = Session(

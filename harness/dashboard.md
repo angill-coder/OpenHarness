@@ -1,5 +1,10 @@
 # 回归看板 — report-assistant
 
+## Judge 校准 (meta-eval)
+
+- 整体一致率: **0.973** (门槛 0.85) — 通过,可开优化
+- 分维度: 数据准确性 1.00, 完整性 1.00, 洞察质量 1.00, 简洁性 0.89
+
 ## 分数曲线
 
 | 版本 | 父版 | 打开的 directive | dev overall | test overall | 红线失败 |

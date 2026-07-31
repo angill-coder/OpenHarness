@@ -142,7 +142,7 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 | `server.py` | stdlib `http.server`，JSON API + 托管页面 |
 | `index.html` | 单页 UI（输入 + 版本演进 + 报告生成 + 批量 Judge + 看板）|
 
-算法本体（runner/judge/clustering/optimizer）复用 `harness/`。Web 应用只保留模型 Judge 链路，不包含人工评分与 meta-eval 校准逻辑。
+算法本体（runner/judge/clustering/optimizer）复用 `harness/`。人工标注和 meta-eval 校准代码暂为历史兼容保留，但 Web/API 主链路不再使用。
 
 ## API（供调试）
 

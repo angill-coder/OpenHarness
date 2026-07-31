@@ -19,17 +19,17 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 
 ```
 ┌─ harness/  离线引擎（纯 stdlib、确定性）——「算法闭环」
-│    schemas → store → runner → judge → clustering → optimizer → loop → dashboard
+│    schemas → store → runner → judge → calibration → clustering → optimizer → loop → dashboard
 │    backend.py（Mock / ResearchMock / Recorded 三后端）
 │    workbuddy_runner.py → workbuddy_batch/*（真实外部报告生成）
 │    artifacts/rubric*.json（评测尺子）
 │
-├─ app/  Web 平台（stdlib http + 单页 JS）——「运行时 / 模型评测」
+├─ app/  Web 平台（stdlib http + 单页 JS）——「运行时 / 人在环」
 │    server.py(路由/鉴权入口) · session.py+session_{core,eval,label}.py(会话编排)
 │    persistence.py(落盘) · generator.py(需求→v0) · auth.py(iOA 鉴权)
 │    index.html(单页 UI 结构+样式) · app.js(前端逻辑)
 │
-└─ 资产层：rubric/落地文档 · data/(数据集+坏变体) · skills/research-report/(下属用的生成 skill)
+└─ 资产层：rubric/落地文档 · data/(数据集+校准集+坏变体) · skills/research-report/(下属用的生成 skill)
 ```
 
 **冲突热点（多人最容易撞车）**：`session*.py`、`server.py`、`index.html`/`app.js`、`rubric_research.json`、`sessions/*/state.json`。
@@ -41,11 +41,11 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 
 | 模块 | 职责 | 主要文件 | owner 画像 |
 |---|---|---|---|
-| **M1 评测算法核心** | 判分/聚类/优化器/编排的算法逻辑 | `harness/{judge,clustering,optimizer,loop,runner,store,dashboard}.py` + `run_demo*.py` | 算法/评测强的人 |
+| **M1 评测算法核心** | 判分/聚类/优化器/校准/编排的算法逻辑 | `harness/{judge,clustering,optimizer,calibration,loop,runner,store,dashboard}.py` + `run_demo*.py` | 算法/评测强的人 |
 | **M2 后端模拟与生成** | signal 模拟、23 directive 集、v0 skill 生成 | `harness/backend.py` + `app/generator.py` | 懂 rubric↔directive 映射的人 |
 | **M3 平台服务（后端）** | HTTP 路由、鉴权、落盘、会话编排 | `app/{server,auth,persistence}.py` + `app/session.py` + `app/session_{core,eval,label}.py` | 后端/Web 服务 |
 | **M4 前端 UI** | 单页三栏交互、标注表、打印 | `app/index.html`（结构+样式） + `app/app.js`（逻辑） | 前端 |
-| **M5 Rubric 与数据资产** | 六维尺子、数据集、坏变体 | `harness/artifacts/rubric_research.json`、`调研…落地文档.md`、`data/research_assistant/*` | **用户本人（不可外包）** |
+| **M5 Rubric 与数据资产** | 六维尺子、数据集、校准集、坏变体 | `harness/artifacts/rubric_research.json`、`调研…落地文档.md`、`data/research_assistant/*` | **用户本人（不可外包）** |
 | **M6 生成 skill 母本** | 下属实际用的 research-report skill | `skills/research-report/*` | 用户 + 提示词工程 |
 | **M7 真实外部执行** | Runner→WorkBuddy、产物验收、attempt 重试、provenance | `harness/{workbuddy_runner,external_run_models,report_artifact,run_external}.py` + `harness/workbuddy_batch/*` | 执行框架/基础设施 |
 
@@ -69,7 +69,7 @@ OpenHarness = eval 驱动的 skill 优化平台，天然分成 **两大件 + 三
 | `changelog` | str | 本版改动说明 | optimizer |
 
 **`EvalRecord`**（一条 trace 的评测结果）：
-`run_id` · `skill_version` · `dataset_split` · `case_id` · `input` · `trace`(执行过程，聚类/归因靠它) · `output` · `scores{dim:int}` · `judge_reasoning{dim:str}` · `judge_checks{check_id:float}` · `flagged[str]` · `case_failed_gate:bool`(命中红线)。
+`run_id` · `skill_version` · `dataset_split` · `case_id` · `input` · `trace`(执行过程，聚类/归因靠它) · `output` · `scores{dim:int}` · `judge_reasoning{dim:str}` · `flagged[str]` · `case_failed_gate:bool`(命中红线) · `human_label:{dim:int}|None`。
 > app 侧还会在运行期给 record 附加非 schema 字段 `score_source`（`recorded`/`mock`），见 `session_eval._apply_recorded`。加它到 schema 前先知会 M3。
 
 **约定**：schema 字段的增删改**必须单独 PR、全员知会**，绝不夹带在功能改动里。这是最重要的一条防冲突规则。
@@ -107,24 +107,26 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 | GET | `/app.js` | — | JS（**新增**，公开静态） | — |
 | GET | `/api/me` | — | `{login_name, display_name, email}` | — |
 | GET | `/api/session?id=` | query id | 完整会话视图(见 `view()`) | `view(account)` |
-| GET | `/api/sample_data?id=/product=` | query | `{rows, n}` | — |
+| GET | `/api/sample_data?id=/product=` | query | `{rows, labels, n}` | — |
 | GET | `/api/sessions` | — | `{sessions:[{id,product_id,requirement,current_version,n_versions,n_cases,created_at}]}` | — |
 | GET | `/api/generation/config` | — | WB 配置与 `ready/error` | `GenerationJobService.configuration` |
 | GET | `/api/generation?id=/session_id=` | query | 单任务或 Session 最近 20 个任务 | `GenerationJobService.get/list` |
 | POST | `/api/session` | `{requirement, product_id?}` | 会话视图 | `__init__` |
-| POST | `/api/data` | `{id, rows?/use_sample?/use_configured?}` | 会话视图 | `import_data` |
+| POST | `/api/data` | `{id, rows?/use_sample?, labels?}` | 会话视图 | `import_data` |
+| POST | `/api/labels` | — | `410`（人工评分入口已停用） | — |
 | POST | `/api/rubric` | `{id, weights?, target?}` | 会话视图 | `edit_rubric` |
 | POST | `/api/advance` | `{id}` | 会话视图 + `advance_result` | `advance` |
 | POST | `/api/import_output` | `{id, case_id, report_text, version?}` | 会话视图 | `import_output` |
 | POST | `/api/import_judgment` | `{id, case_id, scores:{dim:int}, reasoning?, version?}` | 会话视图 | `import_judgment` |
 | POST | `/api/upload_report` | `{id, case_id, filename, content_b64, version?}` | 会话视图 | `import_output`(解析后) |
+| POST | `/api/submit_check_labels` | — | `410`（人工 Check 已停用） | — |
 | POST | `/api/run_judge` | — | `410`（单 case Judge 已停用） | — |
 | POST | `/api/run_judge_batch` | `{id, version?}` | `{summary,results,state}`（需 Judge key+网络） | `judge_cases` + `set_judge_checks_batch` |
 | POST | `/api/generation/start` | `{id, case_ids?, idempotency_key?}` | `202 {reused,job}` | `GenerationJobService.start` |
 | POST | `/api/generation/retry` | `{job_id,idempotency_key?}` | `202 {reused,job}` | `GenerationJobService.retry` |
 | POST | `/api/generation/cancel` | `{job_id}` | `202 {job}` | `GenerationJobService.cancel` |
 
-> "会话视图" = `Session.view(account)` 的返回结构（`session_core.py`）：`session_id/product_id/backend/detected/n_cases/splits/current_version/rubric/versions/curve/current_eval/current_failures/evaluation_mode/judge_progress/dims/dim_zh/target/can_advance/opt_history/history`。
+> "会话视图" = `Session.view(account)` 的返回结构（`session_core.py`）：`session_id/product_id/backend/detected/n_cases/splits/current_version/rubric/versions/curve/current_eval/current_failures/evaluation_mode/judge_progress/dims/dim_zh/target/can_advance/opt_history/history`。`calib/check_calib` 为兼容旧客户端保留但固定为 `null`。
 
 ---
 
@@ -141,8 +143,8 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 | `coverage` 覆盖度 | 0.08 | ≥4.0 | —(答不了的不算漏) | V1–V3 |
 | `expression` 表达(反向) | 0.15 | ≥3.8 | "不是,而是"/注水=2封顶 | E1–E5 |
 
-- overall 目标 **4.0**。gates: `red_line_traceability` / `no_regression`。
-- 模型 Judge 逐条判 checks，再汇成一个 1–5 分（不单独改权重）。
+- overall 目标 **4.0**。gates: `red_line_traceability` / `no_regression` / `structure_guard` / `narrative_guard` / `hack_guard`。
+- 模型 Judge 逐条判 checks，再汇成一个 1–5 分（不单独改权重）。人工 Check 与 meta-eval 校准暂时停用。
 
 ### 契约 E — Runner ↔ WorkBuddy 真实外部执行
 
@@ -172,9 +174,9 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 
 | 文件 | mixin | 内容 |
 |---|---|---|
-| `session_core.py` | `SessionCore` | 状态骨架：`__init__`/`to_snapshot`/`_save`/`restore`/`view`/`_version_view`/`_split_counts` + 版本管理 `_add_version`/`_current`；模块常量 `DIMS`/`DIM_ZH` 与 helper `_dims_from_rubric` |
+| `session_core.py` | `SessionCore` | 状态骨架：`__init__`/`to_snapshot`/`_save`/`restore`/`view`/`_version_view`/`_split_counts` + 版本管理 `_add_version`/`_current`/`_human_for`/`_human_checks_for`；模块常量 `DIMS`/`DIM_ZH` 与 helper `_dims_from_rubric`/`_migrate_human_labels` |
 | `session_eval.py` | `SessionEval` | 跑分与推进：`import_data`/`evaluate`/`_apply_recorded`/`_rec_view`/`_output_summary`/`edit_rubric`/`advance`/`_plateau_note` |
-| `session_label.py` | `SessionLabel` | 真实产物与模型评分：`import_output`/`import_judgment`/`set_judge_checks`/`set_judge_checks_batch`/`_norm_checks` |
+| `session_label.py` | `SessionLabel` | 标注与真实产物：`import_output`/`import_judgment`/`submit_labels`/`submit_check_labels`/`set_judge_checks`/`_norm_checks`/`_check_calibration` |
 | `session_generation.py` | `SessionGeneration` | WB 报告批量幂等导入：`import_generated_outputs` |
 
 方法解析顺序 = Core→Eval→Label→Generation（无重名遮蔽）。跨 mixin 调用在组合类上运行时解析。

@@ -103,7 +103,7 @@ def _load_sample(product="report-assistant"):
                 with open(p, encoding="utf-8") as f:
                     return [json.loads(l) for l in f if l.strip()]
         return []
-    return _pick("dataset")
+    return _pick("dataset"), _pick("human_labels")
 
 
 # ---------------- 文件解析 / LLM-judge 调用 ----------------
@@ -366,8 +366,8 @@ class Handler(BaseHTTPRequestHandler):
             sid = (q.get("id") or [None])[0]
             s = SESSIONS.get(sid)
             product = s.rubric.get("product") if s else (q.get("product") or ["report-assistant"])[0]
-            rows = _load_sample(product)
-            return self._send(200, {"rows": rows, "n": len(rows)})
+            rows, labels = _load_sample(product)
+            return self._send(200, {"rows": rows, "labels": labels, "n": len(rows)})
         if u.path == "/api/sessions":
             out = []
             for sid, s in SESSIONS.items():
@@ -455,7 +455,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
             rows = b.get("rows")
             if b.get("use_sample"):
-                rows = _load_sample(s.rubric.get("product"))
+                rows, _legacy_labels = _load_sample(s.rubric.get("product"))
             if b.get("use_configured"):
                 if GENERATION_SERVICE is None:
                     return self._send(
@@ -485,10 +485,16 @@ class Handler(BaseHTTPRequestHandler):
                 )
             try:
                 with _session_lock(s.id):
-                    result = s.import_data(rows, account=acct)
+                    result = s.import_data(rows, None, account=acct)
             except ValueError as exc:
                 return self._send(400, {"error": str(exc)})
             return self._send(200, result)
+
+        if u.path == "/api/labels":
+            return self._send(
+                410,
+                {"error": "人工评分入口已停用；请使用批量模型 Judge"},
+            )
 
         if u.path == "/api/rubric":
             s = self._sess(b.get("id"))
@@ -694,6 +700,12 @@ class Handler(BaseHTTPRequestHandler):
                     account=acct,
                 )
             return self._send(200, result)
+
+        if u.path == "/api/submit_check_labels":
+            return self._send(
+                410,
+                {"error": "人工 Check 标注已停用；请使用批量模型 Judge"},
+            )
 
         if u.path == "/api/run_judge":
             return self._send(

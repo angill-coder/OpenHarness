@@ -5,6 +5,7 @@ dashboard.py — 回归看板 (对应架构文档 REGRESSION DASHBOARD)
 平台是否成立就看这里:
   - 每版 skill 在 dev/test 上的分维度分数曲线
   - held-out(test) 是否过拟合
+  - judge 与人工一致率
   - 失败模式随版本消长
 输出到 console + markdown 文件。
 """
@@ -31,7 +32,7 @@ def _fmt(scores, key):
     return "%5.2f" % scores.get(key, 0)
 
 
-def render_console(store, failure_history, target, rubric=None):
+def render_console(store, calib, failure_history, target, rubric=None):
     dims, dim_zh, product = _dims_of(rubric)
     lines = []
     P = lines.append
@@ -39,6 +40,18 @@ def render_console(store, failure_history, target, rubric=None):
     P("=" * 78)
     P("  REGRESSION DASHBOARD — %s" % product)
     P("=" * 78)
+
+    # Judge 校准
+    P("")
+    P("  [Judge 校准 / meta-eval]  (门槛 overall >= %.2f)" % calib["gate"])
+    status = "PASS ✅ 可开优化" if calib["passes_gate"] else "FAIL ❌ 不许开优化"
+    P("    judge↔人工 一致率: overall=%.3f  %s" % (calib["overall"], status))
+    P("    分维度: " + "  ".join("%s=%.2f" % (dim_zh[d], calib["per_dim"].get(d, 0)) for d in dims))
+    if calib["worst_rate"] < 1.0:
+        P("    最弱维度: %s (%.2f) — 分歧最多, 该补锚点/反例" % (
+            dim_zh.get(calib["worst_dim"], calib["worst_dim"]), calib["worst_rate"]))
+    else:
+        P("    所有维度一致率 = 1.00, 无明显分歧维度")
 
     # 分数曲线
     P("")
@@ -93,10 +106,14 @@ def render_console(store, failure_history, target, rubric=None):
     return "\n".join(lines)
 
 
-def render_markdown(store, target, rubric=None):
+def render_markdown(store, calib, target, rubric=None):
     dims, dim_zh, product = _dims_of(rubric)
     L = []
     L.append("# 回归看板 — %s\n" % product)
+    L.append("## Judge 校准 (meta-eval)\n")
+    L.append("- 整体一致率: **%.3f** (门槛 %.2f) — %s" % (
+        calib["overall"], calib["gate"], "通过,可开优化" if calib["passes_gate"] else "未通过"))
+    L.append("- 分维度: " + ", ".join("%s %.2f" % (dim_zh[d], calib["per_dim"].get(d, 0)) for d in dims) + "\n")
     L.append("## 分数曲线\n")
     L.append("| 版本 | 父版 | 打开的 directive | dev overall | test overall | 红线失败 |")
     L.append("|------|------|------------------|-------------|--------------|---------|")

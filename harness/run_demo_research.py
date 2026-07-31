@@ -6,9 +6,12 @@ run_demo_research.py — 调研洞察汇报助手 六维离线闭环演示 (确�
   python3 run_demo_research.py
 
 它跑完整闭环: 合成一份带 trap 的调研数据集 + v0 skill(六维 directive 全关) + 六维 rubric
--> ResearchMockBackend 产报告文本+signals -> 六维 judge 照锚点打分 ->
-开优化循环逐个打开 directive -> 回归看板 -> 显式演示 buzzword_emphasis
-(讨好裁判杠杆)被 gate 拒。
+-> ResearchMockBackend 产报告文本+signals -> 六维 judge 照锚点打分 -> 校准 judge ->
+(过则)开优化循环逐个打开 directive -> 回归看板 -> 显式演示 buzzword_emphasis(讨好裁判杠杆)
+被 gate 拒。
+
+说明: 本 demo 的 human_labels 是"对 v0 输出的模拟专家分"(= judge(v0) 加确定性扰动),
+仅为让离线闭环自洽跑绿。真实项目的校准标注由你按 rubric 手工产出(见 README 数据线)。
 """
 import json
 import os
@@ -20,6 +23,8 @@ sys.path.insert(0, HERE)
 from schemas import SkillArtifact          # noqa: E402
 import backend as backend_mod               # noqa: E402
 import runner as runner_mod                 # noqa: E402
+import judge as judge_mod                   # noqa: E402
+import calibration as calibration_mod       # noqa: E402
 import loop as loop_mod                     # noqa: E402
 import dashboard as dashboard_mod           # noqa: E402
 
@@ -131,31 +136,55 @@ def build_dataset():
     return cases
 
 
+def simulate_human_labels(v0_recs, dims):
+    """模拟专家分 = judge(v0) + 确定性扰动(个别维度差2分, 造出 <1.0 的一致率)。"""
+    human = {}
+    for i, r in enumerate(sorted(v0_recs, key=lambda x: x.case_id)):
+        scores = dict(r.scores)
+        # 每第3条 case 在某个维度上制造一个 2 分分歧(模拟专家与 judge 判罚力度差异)
+        if i % 3 == 0:
+            d = dims[i % len(dims)]
+            scores[d] = max(1, min(5, scores[d] + (2 if scores[d] <= 3 else -2)))
+        human[r.case_id] = scores
+    return human
+
+
 def main():
     rubric = json.load(open(os.path.join(ART_DIR, "rubric_research.json"), encoding="utf-8"))
+    dims = [d["name"] for d in rubric["dimensions"]]
     skill0 = build_v0_skill()
     cases = build_dataset()
     backend = backend_mod.get_backend(product_id="research_insight")
     print("[demo] backend = %s | %d cases (train/dev/test) | 六维 rubric %s"
           % (backend.name, len(cases), rubric["version"]))
 
-    # ---- Step A: 优化闭环 ----
+    # ---- 生成模拟人工标注(= judge(v0) 加确定性扰动) ----
+    pre = runner_mod.run_split(skill0, cases, rubric, backend, "v0-pre", {})
+    human_labels = simulate_human_labels(pre, dims)
+
+    # ---- Step A: judge 校准 ----
+    all_recs = runner_mod.run_split(skill0, cases, rubric, backend, "v0-calib", human_labels)
+    calib = calibration_mod.agreement(all_recs, rubric)
+    print("[demo] judge 校准: overall 一致率 = %.3f (门槛 %.2f) -> %s"
+          % (calib["overall"], calib["gate"], "PASS" if calib["passes_gate"] else "FAIL"))
+
+    # ---- Step B: 优化闭环 ----
     from store import ArtifactStore
     store = ArtifactStore()
     store, failure_history, _log = loop_mod.run_loop(
-        skill0, cases, rubric, backend, store,
+        skill0, cases, rubric, backend, human_labels, store, calib,
         max_rounds=20, plateau_patience=3)
 
-    # ---- Step B: 看板 ----
-    print(dashboard_mod.render_console(store, failure_history, rubric["target"], rubric=rubric))
+    # ---- Step C: 看板 ----
+    print(dashboard_mod.render_console(store, calib, failure_history, rubric["target"], rubric=rubric))
 
-    # ---- Step C: reward-hacking 防线演示 ----
-    _demo_reward_hacking(store, cases, rubric, backend)
+    # ---- Step D: reward-hacking 防线演示 ----
+    _demo_reward_hacking(store, cases, rubric, backend, human_labels)
 
     # ---- 落盘 ----
     out_store = os.path.join(ART_DIR, "versions_research.json")
     store.dump(out_store)
-    md = dashboard_mod.render_markdown(store, rubric["target"], rubric=rubric)
+    md = dashboard_mod.render_markdown(store, calib, rubric["target"], rubric=rubric)
     out_md = os.path.join(HERE, "dashboard_research.md")
     open(out_md, "w", encoding="utf-8").write(md)
     hist = store.adopted_history()
@@ -166,7 +195,7 @@ def main():
         print("[demo] 已写出: %s, %s" % (os.path.relpath(out_store), os.path.relpath(out_md)))
 
 
-def _demo_reward_hacking(store, cases, rubric, backend):
+def _demo_reward_hacking(store, cases, rubric, backend, human_labels):
     """取最优版, 手动套用 buzzword_emphasis(讨好裁判杠杆), 跑 gate, 演示被拒。"""
     best = store.latest_adopted()
     if not best:
@@ -176,7 +205,7 @@ def _demo_reward_hacking(store, cases, rubric, backend):
     base_dev = best["dev"]
     hacked = base_skill.clone_with_directive("buzzword_emphasis", True, "v-hack",
                                              "手动尝试: 打开 buzzword_emphasis 堆大词讨好裁判")
-    hrecs = runner_mod.run_split(hacked, dev, rubric, backend, "v-hack")
+    hrecs = runner_mod.run_split(hacked, dev, rubric, backend, "v-hack", human_labels)
     hdev = runner_mod.mean_scores(hrecs, rubric)
     tol = next(g["drop_tolerance"] for g in rubric["gates"] if g["id"] == "no_regression")
     expr_drop = base_dev.get("expression", 0) - hdev.get("expression", 0)
