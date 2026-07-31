@@ -26,8 +26,7 @@ def run_external_cases(request, progress_callback=None, should_cancel=None):
 
 
 def run_split(skill, cases: List[Dict[str, Any]], rubric: Dict[str, Any],
-              backend, run_id: str, human_labels: Dict[str, Dict] = None) -> List[EvalRecord]:
-    human_labels = human_labels or {}
+              backend, run_id: str) -> List[EvalRecord]:
     records = []
     for case in cases:
         report, trace = backend.run(skill, case)
@@ -36,7 +35,6 @@ def run_split(skill, cases: List[Dict[str, Any]], rubric: Dict[str, Any],
             run_id=run_id, skill_version=skill.version, dataset_split=case["split"],
             case_id=case["case_id"], input=case["input"], trace=trace, output=report,
             scores=scores, judge_reasoning=reasoning, flagged=flagged, case_failed_gate=failed,
-            human_label=human_labels.get(case["case_id"]),
         )
         records.append(rec)
     return records

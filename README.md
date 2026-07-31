@@ -2,7 +2,7 @@
 
 **eval 驱动的 skill 自动优化平台**。当前重点产品 = 调研洞察汇报助手（`research_insight`，六维 rubric）。
 
-> 📌 接手先读 **[`HANDOFF.md`](HANDOFF.md)**（完整交接：架构、资产、进度、致命坑）与 **[`MODULES.md`](MODULES.md)**（多人协作的模块划分 + 接口契约）。本 README 只给最短上手路径。
+> 📌 接手先读 **[`MODULES.md`](MODULES.md)**（多人协作的模块划分 + 接口契约）与 **[`app/README.md`](app/README.md)**（Web 运行说明）。`HANDOFF.md` 是早期历史交接记录，不再代表当前运行链路。
 
 ## 是什么
 
@@ -12,7 +12,7 @@
 
 ## 两大件
 
-- **`harness/`** — 离线引擎（纯 stdlib、确定性）：`schemas` · `store` · `runner` · `judge` · `calibration` · `clustering` · `optimizer` · `loop` · `dashboard` · `backend`(Mock/ResearchMock/Recorded 三后端) · `artifacts/rubric*.json`(评测尺子)。
+- **`harness/`** — 离线引擎（纯 stdlib、确定性）：`schemas` · `store` · `runner` · `judge` · `clustering` · `optimizer` · `loop` · `dashboard` · `backend`(Mock/ResearchMock/Recorded 三后端) · `artifacts/rubric*.json`(评测尺子)。
 - **`app/`** — Web 平台（stdlib http + 单页 JS，批量生成与模型评测运行时）：
   - `server.py`(路由/鉴权入口) · `session.py`(组合入口) + `session_core.py`/`session_eval.py`/`session_label.py`/`session_generation.py`(会话编排) · `generation_jobs.py`(WB 后台任务) · `judge_batch.py`(批量模型 Judge) · `persistence.py`(落盘) · `generator.py`(需求→v0) · `auth.py`(iOA 鉴权)
   - `index.html`(单页 UI 结构+样式) + `app.js`(前端逻辑)

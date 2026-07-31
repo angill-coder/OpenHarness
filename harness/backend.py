@@ -267,7 +267,7 @@ class RecordedBackend(Backend):
 
     outputs_map: {version: {case_id: report_text}}。缺失则返回空文本并在 trace 标 missing。
     真实文本的六维评分需平台 LLM-as-judge 产出(本 MVP 不含),故这里只负责把报告文本
-    带进 EvalRecord,供人工标注 / 后续接入评分。"""
+    带进 EvalRecord，供模型 Judge 评分。"""
     name = "recorded"
 
     def __init__(self, outputs_map: Dict[str, Dict[str, str]]):

@@ -492,11 +492,9 @@ def _build_rubric(product_id: str, weights: Dict[str, float]) -> Dict[str, Any]:
              "floor": 3, "rule": "任一 case data_accuracy < 3 -> 该 case 不合格"},
             {"id": "no_regression", "type": "no_regression", "drop_tolerance": 0.15,
              "rule": "候选版本采纳条件:目标维度↑ 且 其它维度均不塌"},
-            {"id": "hack_guard", "type": "human_review", "dimension": "conciseness", "floor": 3,
-             "rule": "conciseness < 3 -> 触发人工复检(疑似 reward hacking)"},
         ],
         "target": {"data_accuracy": 4.2, "completeness": 4.0, "insight": 3.8,
-                   "conciseness": 3.5, "overall": 4.0, "judge_human_agreement": 0.85},
+                   "conciseness": 3.5, "overall": 4.0},
     }
 
 

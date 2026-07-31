@@ -7,7 +7,6 @@ persistence.py — 会话落盘 (append-only 历史 + 快照 + 重启恢复)
   events.jsonl   追加式完整历史, 一行一个事件, 每条带 ts + type + payload:
                    created            —— 生成 v0(含 v0 skill + rubric)
                    import_data        —— 导入数据(case 数 / split)
-                   submit_labels      —— 人工标注(version + 每个 case 的分维度分)
                    edit_rubric        —— rubric 变更(新版本号 + weights/target)
                    version_adopted    —— 采纳新版 skill(version + proposal + 分数)
                    version_rejected   —— 候选被 gate 拒(version + reason)
@@ -112,15 +111,6 @@ def append_judgment(sid: str, version: str, case_id: str, scores: Dict[str, int]
     rec = {"ts": _now(), "version": version, "case_id": case_id, "scores": scores,
            "reasoning": reasoning or {}, "flagged": flagged or []}
     with open(os.path.join(d, "judgments.jsonl"), "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
-
-def append_check_label(sid: str, version: str, case_id: str, checks: Dict[str, float], account: str = "_legacy"):
-    """逐 check 的人工标注(满足/部分/不满足 = 1/0.5/0)。落在 check_labels.jsonl, 带标注账号。"""
-    d = _ensure(sid)
-    rec = {"ts": _now(), "version": version, "case_id": case_id,
-           "account": account or "_legacy", "checks": checks}
-    with open(os.path.join(d, "check_labels.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
@@ -267,23 +257,6 @@ def _load_check_jsonl(sid: str, fname: str) -> Dict[str, Dict[str, Dict[str, Any
                 "report_sha256": rec.get("report_sha256"),
                 "rubric_sha256": rec.get("rubric_sha256"),
             }
-    return out
-
-
-def load_check_labels(sid: str) -> Dict[str, Dict[str, Dict[str, Dict[str, float]]]]:
-    """恢复逐 check 人工标注, 按账号隔离 {version:{account:{case_id:{check_id: 1/0.5/0}}}}
-    (同 (version,account,case) 后写覆盖; 无 account 字段的旧记录归入 '_legacy')。"""
-    p = os.path.join(_BASE, sid, "check_labels.jsonl")
-    if not os.path.exists(p):
-        return {}
-    out: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {}
-    with open(p, encoding="utf-8") as f:
-        for l in f:
-            if not l.strip():
-                continue
-            rec = json.loads(l)
-            acct = rec.get("account") or "_legacy"
-            out.setdefault(rec["version"], {}).setdefault(acct, {})[rec["case_id"]] = rec.get("checks", {})
     return out
 
 
