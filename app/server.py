@@ -41,6 +41,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import session as session_mod  # noqa: E402
 import persistence as persist  # noqa: E402
+import llm_client  # noqa: E402
 from generation_jobs import (  # noqa: E402
     GenerationJobError,
     GenerationJobService,
@@ -154,44 +155,10 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
     return "\n".join(L)
 
 
-def _call_opus(prompt: str) -> str:
-    """调 LLM 判分。支持直连 Anthropic 或第三方中转(new-api/bianxie 等 OpenAI 兼容)。
-    环境变量:
-      ANTHROPIC_API_KEY     必填,key
-      ANTHROPIC_BASE_URL    base url(默认 https://api.anthropic.com;第三方填其 url)
-      ANTHROPIC_JUDGE_MODEL 模型 id(默认 claude-opus-4-8)
-      LLM_API_STYLE         openai | anthropic(不填则:非 anthropic.com 域名自动用 openai)
-    """
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError("未设置 ANTHROPIC_API_KEY —— 无法在页面直调。请先 export 后重启 server。")
-    base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
-    model = os.environ.get("ANTHROPIC_JUDGE_MODEL", "claude-opus-4-8")
-    style = os.environ.get("LLM_API_STYLE", "").lower() or ("anthropic" if "anthropic.com" in base else "openai")
-    if style == "openai":
-        url = base + "/v1/chat/completions"
-        headers = {"Authorization": "Bearer " + key, "content-type": "application/json"}
-    else:
-        url = base + "/v1/messages"
-        headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
-    body = json.dumps({"model": model, "max_tokens": 2000,
-                       "messages": [{"role": "user", "content": prompt}]}).encode("utf-8")
-    req = urllib.request.Request(url, data=body, method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=90) as resp:
-        j = json.loads(resp.read().decode("utf-8"))
-    if style == "openai":
-        return j["choices"][0]["message"]["content"]
-    return "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
-
-
-def _extract_json(text: str):
-    m = re.search(r"\{.*\}", text or "", re.S)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(0))
-    except Exception:
-        return None
+# 判分/优化共用的 LLM 调用与 JSON 抽取已抽到 llm_client(断循环依赖)。
+# 此处保留同名薄别名,判分链路字节等价。
+_call_opus = llm_client.call_llm
+_extract_json = llm_client.extract_json
 
 
 def _judge_parallelism(requested=None):
@@ -430,9 +397,40 @@ class Handler(BaseHTTPRequestHandler):
             if not req:
                 return self._send(400, {"error": "缺少 requirement(需求描述)"})
             pid = (b.get("product_id") or "custom-skill").strip() or "custom-skill"
+            mode = (b.get("optimizer_mode") or "switch_search").strip() or "switch_search"
+            if mode not in ("switch_search", "llm_rewrite"):
+                return self._send(400, {"error": "非法 optimizer_mode: %s" % mode})
+            v0_strategy = (
+                b.get("v0_strategy") or "base_skill"
+            ).strip() or "base_skill"
+            if v0_strategy not in ("base_skill", "llm_scratch"):
+                return self._send(
+                    400,
+                    {"error": "非法 v0_strategy: %s" % v0_strategy},
+                )
+            if mode != "llm_rewrite" and v0_strategy != "base_skill":
+                return self._send(
+                    400,
+                    {"error": "llm_scratch 仅适用于 llm_rewrite 模式"},
+                )
+            stop = b.get("optimizer_stop") or {}
+            if not isinstance(stop, dict):
+                return self._send(400, {"error": "optimizer_stop 必须是对象"})
             sid = uuid.uuid4().hex[:8]
             try:
-                SESSIONS[sid] = session_mod.Session(sid, req, pid, prefer_real=PREFER_REAL)
+                SESSIONS[sid] = session_mod.Session(
+                    sid,
+                    req,
+                    pid,
+                    prefer_real=PREFER_REAL,
+                    optimizer_mode=mode,
+                    optimizer_stop=stop,
+                    v0_strategy=v0_strategy,
+                )
+            except llm_client.LLMClientError as e:
+                return self._send(502, {"error": "LLM 起草 v0 失败: %s" % e})
+            except ValueError as e:
+                return self._send(400, {"error": "生成 v0 失败: %s" % e})
             except Exception as e:
                 return self._send(500, {"error": "生成 v0 失败: %s" % e})
             return self._send(200, SESSIONS[sid].view(acct))
@@ -541,8 +539,20 @@ class Handler(BaseHTTPRequestHandler):
                         "job_id": active.job_id,
                     },
                 )
-            with _session_lock(s.id):
-                result = s.advance(account=acct)
+            try:
+                with _session_lock(s.id):
+                    result = s.advance(account=acct)
+            except llm_client.LLMClientError as exc:
+                return self._send(
+                    502,
+                    {"error": "LLM 改写失败: %s" % exc},
+                )
+            except Exception as exc:
+                print("[advance] 生成下一版失败: %s" % exc)
+                return self._send(
+                    500,
+                    {"error": "生成下一版失败: %s" % exc},
+                )
             return self._send(200, result)
 
         if u.path == "/api/generation/start":
@@ -713,8 +723,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except ValueError as exc:
                 return self._send(400, {"error": str(exc)})
-            ver = b.get("version") or s._current()["version"]
-            if ver != s._current()["version"]:
+            ver = b.get("version") or s._eval_target()["version"]
+            if ver != s._eval_target()["version"]:
                 return self._send(409, {"error": "只能批量 Judge 当前 Skill 版本"})
             if not _claim_judge(s.id):
                 return self._send(409, {"error": "该 Session 已有批量 Judge 正在执行"})
@@ -777,7 +787,7 @@ class Handler(BaseHTTPRequestHandler):
                         return item
                     case_id = item["case_id"]
                     with _session_lock(s.id):
-                        if s._current()["version"] != ver:
+                        if s._eval_target()["version"] != ver:
                             return {
                                 **item,
                                 "status": "stale_report",
@@ -836,6 +846,8 @@ class Handler(BaseHTTPRequestHandler):
                 with _session_lock(s.id):
                     s.evaluate(acct)
                     s._save()
+                    # llm_rewrite:候选判分完成 -> 自动 gate 结算(采纳/回滚)
+                    settle = s.settle_pending_candidate(acct)
                     state = s.view(acct)
                 summary = _judge_summary(results, judge_parallel)
                 summary["remaining_cases"] = len(
@@ -843,6 +855,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 if summary["remaining_cases"] == 0:
                     summary["status"] = "completed"
+                if settle:
+                    summary["candidate_settled"] = settle
                 return self._send(
                     200,
                     {

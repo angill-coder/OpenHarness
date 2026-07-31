@@ -1,0 +1,173 @@
+{
+  "_export_note": "research-run 优化器收敛终版 v16；导出自 state.json versions[17].skill；current_idx=17。= L1 15个质量directive全开 + L2 few-shot(style_exemplar)注入槽；关8个(含FORBIDDEN buzzword_emphasis)。",
+  "_source": "app/sessions/research-run/state.json versions[-1]",
+  "_lineage": "v0(全关)→逐版采纳15个directive→v15→v16(L1耗尽自动升L2注入style_exemplar)",
+  "_directive_summary": {
+    "on(15)": [
+      "honest_on_unsupportable",
+      "summary_format",
+      "pyramid_body",
+      "mece_sections",
+      "concept_consistency",
+      "ensure_narrative_flow",
+      "require_insight_triplet",
+      "abstract_cases",
+      "drop_noise",
+      "mark_extrapolation_confidence",
+      "crosscheck_outliers",
+      "cover_key_claims",
+      "ban_bushi_ershi",
+      "require_charts",
+      "match_exec_length"
+    ],
+    "off(8)": [
+      "require_source_ref",
+      "flag_source_conflict",
+      "require_two_sources",
+      "require_rigorous_wording",
+      "verify_no_fabrication",
+      "note_metric_caveat",
+      "disclose_sample_bias",
+      "buzzword_emphasis"
+    ]
+  },
+  "_L2": "few_shots=[{kind:style_exemplar}] 为解耦占位槽——平台标记“此处需注入风格范例”，真实范例内容需人工从高分报告截取填入。",
+  "skill": {
+    "id": "research_insight",
+    "version": "v16",
+    "parent_version": "v15",
+    "structure": {
+      "flow": [
+        {
+          "step": 0,
+          "name": "Intake & Scoping（开场三轮交互）",
+          "produces": "report_spec{背景, hypothesis, 重点素材}",
+          "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材(已提供的不重复问);三项都用进报告;hypothesis只验证/证伪、不迎合"
+        },
+        {
+          "step": 1,
+          "name": "Source Curation",
+          "subagent": "SourceCurator",
+          "produces": "source_slices",
+          "rule": "素材切片配 S-xxx ID"
+        },
+        {
+          "step": 2,
+          "name": "Claim Analysis",
+          "subagent": "Analyst",
+          "produces": "claims",
+          "rule": "抽 claim 挂 source_ids, 强制标冲突"
+        },
+        {
+          "step": 3,
+          "name": "Insight Extraction",
+          "subagent": "Insight",
+          "produces": "insights",
+          "rule": "案例提炼成规律, 只在 claims 内推理"
+        },
+        {
+          "step": 4,
+          "name": "Narrative Composition",
+          "subagent": "Writer",
+          "produces": "draft_report",
+          "rule": "论断携带 [S-xxx]/[C-xxx]"
+        },
+        {
+          "step": 5,
+          "name": "Verification",
+          "subagent": "Verifier",
+          "produces": "verification_report",
+          "rule": "独立对抗, 查编造/混用/剔噪",
+          "loop_back_to": 4
+        },
+        {
+          "step": 6,
+          "name": "Deliver",
+          "produces": "final_doc"
+        }
+      ],
+      "subagents": [
+        {
+          "name": "SourceCurator",
+          "responsibility": "素材切片、配 ID、去重"
+        },
+        {
+          "name": "Analyst",
+          "responsibility": "抽 claim 挂 source、标冲突、判信源充分性"
+        },
+        {
+          "name": "Insight",
+          "responsibility": "提炼规律/归因/趋势/建议, 只在 claims 内"
+        },
+        {
+          "name": "Writer",
+          "responsibility": "金字塔组织、携带引用、结构化呈现"
+        },
+        {
+          "name": "Verifier",
+          "responsibility": "对抗查错(编造/混用/噪音/越界)",
+          "independent": true
+        }
+      ],
+      "memory_schema": [
+        "config",
+        "facts",
+        "learned_rules"
+      ]
+    },
+    "instructions": {
+      "prose": "你是调研洞察汇报助手。基于给定异构素材(doc/pdf/excel/访谈), 为最高管理层产出可编辑的调研报告。可回溯性是生命线, 素材不足处诚实留白。",
+      "directives": {
+        "require_source_ref": false,
+        "flag_source_conflict": false,
+        "honest_on_unsupportable": true,
+        "require_two_sources": false,
+        "summary_format": true,
+        "pyramid_body": true,
+        "mece_sections": true,
+        "concept_consistency": true,
+        "ensure_narrative_flow": true,
+        "require_insight_triplet": true,
+        "abstract_cases": true,
+        "drop_noise": true,
+        "mark_extrapolation_confidence": true,
+        "crosscheck_outliers": true,
+        "cover_key_claims": true,
+        "ban_bushi_ershi": true,
+        "require_charts": true,
+        "match_exec_length": true,
+        "require_rigorous_wording": false,
+        "verify_no_fabrication": false,
+        "note_metric_caveat": false,
+        "disclose_sample_bias": false,
+        "buzzword_emphasis": false
+      }
+    },
+    "few_shots": [
+      {
+        "kind": "style_exemplar"
+      }
+    ],
+    "memory_content": {
+      "config": {
+        "required_sections": [
+          "核心摘要",
+          "核心发现（含归因）",
+          "对我们的启示与建议（含趋势）"
+        ],
+        "audience_profiles": {
+          "exec": {
+            "length": "<=1.5页",
+            "focus": [
+              "结论",
+              "决策项"
+            ]
+          }
+        }
+      },
+      "facts": {},
+      "learned_rules": []
+    },
+    "changelog": "相对 v15: 注入 few-shot 范例: style_exemplar (针对'措辞/风格待打磨,需注入风格范例(L2, 无指令级修法)')"
+  }
+}

@@ -170,3 +170,63 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 **⑤ 报告生成 skill 母本微调**（`skills/research-report/`，本机路径，未装到 `~/.claude/skills`）：正文不印行内 `[S-xxx]`（改自检时核对可回溯）；禁止把"结论先行/归因"等写作原则字样当小标题写进正文。
 
 **⑥ 打印**：`index.html` 加 `@media print`——专家人工标注表打印时白底黑字、字体放大、隐藏左右列。
+
+---
+
+## 10. 2026-07-28 增量（第二个优化器策略：LLM 自由改写 + 策略可插拔架构）
+
+> ⚠️ **本次推翻了旧铁律"Optimizer(MVP) 只翻 directive、不动结构"**。现在结构层仍冻结，但 **instructions 这一层放开给 LLM 自由改写**。旧的翻开关策略原样保留、行为逐字不变，两个策略并存。
+
+**动机**：翻开关优化器（`harness/optimizer.py`）动作空间被锁死在 23 个预定义 directive，探索空间太低；`research-run` 收敛终版 v16（`app/sessions/research-run/final_skill_v16.json` + `skills/research-report/DRAFT_from_v16.md`）暴露"收敛=开关翻尽"且因 mock 未覆盖 tag 顺手关掉 5 条红线的回退。用户要求：新增"由 LLM 写每一版 skill"的优化器，每轮把上一版关键信息传过去以避免回退。
+
+**架构：策略层多份并存 + 评测流水线唯一共享**
+- **策略层**（每份一个文件，同一接口 `propose(session, cur_skill, failures, context)` / `apply_proposal`）：`harness/optimizer.py`=`switch_search`（旧，翻开关）、`app/optimizer02.py`=`llm_rewrite`（新，LLM 自由改写整段 instructions）。经 `app/optimizer_registry.py` 的 `STRATEGY_REGISTRY` 派发。Session 加字段 `optimizer_mode ∈ {switch_search, llm_rewrite}`。
+- **共享评测流水线**（策略无关，一份）：`compile_session_skill`(freeform 分支) → `generation_jobs`(WB CLI 生成) → `judge_batch`(真实判分) → `_apply_recorded` → gate。**runner/生成/判分/编译本就与策略无关**，`optimizer02` 只接在"产候选"这一个接缝上。
+
+**关键机制：`pending_idx` 与 `current_idx` 解耦（防回退地基 + switch_search 零回归开关）**
+- `current_idx`=当前最优/回滚锚点；`llm_rewrite` 产出的候选以 `adopted=False` 加入 versions、`pending_idx` 指向它，**绝不提前移动 current_idx**。
+- 新增 `session_core._eval_target()` = `versions[pending_idx] if pending_idx is not None else _current()`；流水线读点（`generation_jobs`、`server` run_judge_batch 的 ver 默认/守卫/回写守卫、`view()`）全改指它。`pending_idx is None` 时退化为 `_current()`，**switch_search 全链路逐字不变**。
+- **异步自动 gate**：候选真实判分完成后，`server` run_judge_batch 收尾调 `session_core.settle_pending_candidate()`：临时评估候选与父版真实分 → `optimizer_pipeline.evaluate_gate`（目标维/overall↑ ∧ 其它维不回退超 `no_regression.drop_tolerance` ∧ 无新红线）→ 采纳则 current_idx 移到候选、否则天然回滚（指针留父版，候选标 rejected）。verdict+reasons 两种都写 opt_history + `candidate_settled` 事件。`advance`/重启时兜底探测未结算的 pending 先 settle。
+
+**迭代记忆（carry-forward，防回退核心，喂给 LLM）**：`optimizer_pipeline.build_optimizer_context()` 装配 {rubric 六维锚点+checks+红线+target、current_best(全文+每维分)、must_preserve(≥target 的维+未失败的 check)、open_failures(failure_report)、history(逐版改动+verdict+overall delta)、tried_rejected、guardrails}。
+
+**红线守卫**（`optimizer02._redline_guard`）：候选生成后、进 WB 生成前，用廉价 LLM 逐条核对候选是否仍保留 rubric 里 `redline:true` 的 **T2/T3/T5/E4**；任一被删则当场拒（不烧生成预算）。直接堵住 v16 那种"删红线"回退。
+
+**freeform 表示与编译**：LLM 产出整段可编辑区正文，落 `skill.instructions.prose` + `mode="freeform"`。母本 `skills/research-report/references/instructions.md` 用 `<!-- OPENHARNESS_EDITABLE_START/END -->` 框住「## 硬规则…正反例」（结构层：开场三输入/三段结构/标题/manifest/VERSION_RULES 在标记外，LLM 不可动）。`skill_compiler` 加 freeform 分支：`mode=="freeform"` → 整体替换可编辑区，manifest/version_rules 保持基线原样；无 `mode` 键 → 走原 directive 路径（**switch_search 逐字不变**）。`directive_registry.load_editable_region` 供 v0 取全文。
+
+**LLM 调用抽取**：`server.py:_call_opus/_extract_json` 抽到 `app/llm_client.py`（`call_llm`/`extract_json`），server 保留同名别名（判分链路字节等价），断 app→server 循环依赖，judge 与 optimizer02 共用同一条判分 LLM 线（需 `ANTHROPIC_API_KEY`）。
+
+**新会话 `research-llm`**（`optimizer_mode=llm_rewrite`）：`app/seed_research_llm.py` 一次性建，复用 research-run 同 3 case，v0=母本可编辑区全文(freeform)。**用途=跑新策略闭环**（区别于 research-run 的翻开关 demo）。
+
+**UI（第一版，单会话内）**：`index.html` 建会话加"优化器策略"下拉；`app.js` 的 `render()` 按 `optimizer_mode` 换按钮文案「✍️ LLM 改写下一版」、显示 pending 候选提示条 + freeform 正文 + rationale + gate verdict。**多会话分栏对比是紧跟的第二步**（后端已铺好：pending/candidate 全 per-session，候选是真实 version、天然支持并排 diff）。
+
+**跑法（llm_rewrite 人在环闭环）**：开 `research-llm` → 先对 v0 跑 WB 生成 + 批量真实 Judge（否则 advance 被 gate 卡"未判分"）→ 点「✍️ LLM 改写下一版」得 pending 候选 v1（current_idx 不动）→ 对 v1 跑生成 + 判分 → 判分收尾自动 settle 采纳/回滚 → 看 opt_history 的 verdict。**需真实 LLM key**（判分 + 改写 + 守卫都走它）。
+
+**回归**：`run_demo_research.py`(2.17→4.56/15 版) 与 `run_demo.py`(2.58→4.75/6 版) 均不变、harness `.py` 零改动；`app/tests`+`harness/tests` 57 全绿（新增 `test_llm_rewrite.py` 9 条覆盖 gate/freeform 编译/守卫/settle 采纳回滚）；四个磁盘会话 restore 一致。
+
+**顺手修的数据坑**：`app/sessions/research-run/events.jsonl` 第 20 行两个 JSON 对象被写在同一行（历史 append 漏换行），导致 `load_events` 崩、research-run 打不开——已按 JSONL 拆回逐行（用 `json.raw_decode`），与本次功能无关但必修。
+
+**新增/改动文件清单**：新增 `app/llm_client.py`、`app/optimizer_pipeline.py`、`app/optimizer02.py`、`app/optimizer_registry.py`、`app/seed_research_llm.py`、`app/tests/test_llm_rewrite.py`；改 `app/session_core.py`（游标/字段/结算/view）、`app/session_eval.py`（advance 派发 + `_advance_llm_rewrite`，switch_search 逻辑原样搬进 `_advance_switch_search`）、`app/skill_compiler.py`、`app/directive_registry.py`、`app/generator.py`、`app/server.py`、`app/generation_jobs.py`、`app/index.html`、`app/app.js`、`skills/research-report/references/instructions.md`（插 EDITABLE 标记）。
+
+---
+
+## 11. 2026-07-30 增量（总裁汇报助手 LLM 实验会话）
+
+**新会话**：`app/sessions/president-report-llm/`，`product_id=research_insight`、`optimizer_mode=llm_rewrite`，已导入 `data/20260727_real_project_package/data.json` 的 20 条真实项目 case。创建脚本为 `app/seed_president_report_llm.py`，检测到同名会话时会拒绝覆盖。旧近似会话 `b27e80a8` 保留不动。
+
+**需求契约 / V0**：
+- `generator._research_requirement_contract()` 会把需求语义化为 `skill.instructions.requirement_contract`，本会话固定了：总裁受众；用户先给话题+原始素材；补问汇报背景、hypothesis、材料重点分布；摘要/关键发现/启示三段式；素材文件只读且不编造/篡改；数据密集处图表；结论先行/金字塔/MECE/简洁严谨。
+- 契约与 `instructions.prose` 分开存。`skill_compiler` 编译 freeform 时固定拼成“契约 + LLM 可改写质量规则”；`optimizer02` 只改 prose，不能把产品需求迭代丢失。页面会分别展示“冻结任务契约”和“可改写质量规则”。
+- 本次**没有修改** `harness/artifacts/rubric_research.json`；新会话 rubric 与该文件逐对象相等，核验 SHA-256（规范化 JSON）均为 `1ffb10b85ca0097186dbb73c54facd6ecc0c88c88b778518ffed89ab0bcda816`。
+
+**会话级 early-stop（与 rubric.target 分离）**：
+- 新增 snapshot 字段 `optimizer_stop={overall_target,max_no_improvement}` 与 `optimization_progress`，API/UI 建会话可配置；本会话为 `overall_target=4.8`、`max_no_improvement=4`。
+- 仅在真实 Judge 完整后看分，mock 占位分不触发停止。当前已采纳版 overall ≥4.8 即停；否则每个候选结算后，只有“候选被 Gate 采纳且 overall 创历史新高”才清零 streak，Gate 拒绝或 overall 未创新高都累计，连续 4 版即停。停止后后端禁用 advance，UI 展示原因。
+- stop 是实验编排条件，**不改** rubric 自身 overall target=4.0，也不影响 `switch_search` 会话。
+
+**失败重试**：报告生成仍是每 case 最多 3 次重试（共 4 次尝试）；通用 Judge/LLM 默认从 0 改为 2 次传输重试（`LLM_RETRIES` 可覆盖）；LLM Rewrite 独立默认 2 次（`LLM_REWRITE_RETRIES` 可覆盖）。HTTP 408/429/5xx、超时/网络错误会指数退避；整批 Judge 部分失败仍可在 UI 再点一次续跑未完成 case。
+
+**沙箱与验证**：
+- V0 已编译到 `generation_runs/_session_skills/president-report-llm/v0/ec45e61f6d27/research-report/`，目录 hash=`92d713416dced5fcc26ae85a94692a87b54b3494093ed1c77d451840fdfff7b5`。
+- App 46 项测试、Harness 20 项测试全绿；`node --check app/app.js` 与相关 Python `py_compile` 通过；两个离线 demo 仍为 research 2.17→4.56、旧 report-assistant 2.58→4.75。
+- 本地服务启动方式：`cd app && source ./start_real.sh && python3 server.py --host 127.0.0.1 --port 8080`。打开页面后选 `president-report-llm`，先跑 v0 的 20-case 生成 + 批量真实 Judge，再点 LLM 改写下一版；之后按同样循环推进，满足任一 early-stop 自动停。

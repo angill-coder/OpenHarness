@@ -55,17 +55,75 @@ def _migrate_human_labels(hl):
     return out
 
 
+def _normalize_optimizer_stop(value=None):
+    """校验会话级 early-stop；它独立于 rubric.target，不改评分标准。"""
+    value = value or {}
+    target = value.get("overall_target")
+    patience = value.get("max_no_improvement")
+    if target in ("", None):
+        target = None
+    else:
+        target = float(target)
+        if not 1.0 <= target <= 5.0:
+            raise ValueError("停止条件 overall_target 必须在 1.0–5.0 之间")
+    if patience in ("", None):
+        patience = None
+    else:
+        if isinstance(patience, bool):
+            raise ValueError("max_no_improvement 必须是正整数")
+        patience = int(patience)
+        if patience < 1:
+            raise ValueError("max_no_improvement 必须是正整数")
+    return {
+        "overall_target": target,
+        "max_no_improvement": patience,
+    }
+
+
+def _new_optimization_progress():
+    return {
+        "best_overall": None,
+        "no_improvement_streak": 0,
+        "evaluated_candidates": 0,
+        "last_candidate": None,
+        "last_candidate_overall": None,
+        "last_outcome": None,
+        "stopped": False,
+        "reason": None,
+    }
+
+
 class SessionCore:
     """状态骨架 mixin。方法体依赖的 evaluate/_rec_view/_check_calibration 等由其它 mixin 提供。"""
 
-    def __init__(self, sid: str, requirement: str, product_id: str, prefer_real=False,
-                 _restoring=False):
+    def __init__(
+        self,
+        sid: str,
+        requirement: str,
+        product_id: str,
+        prefer_real=False,
+        _restoring=False,
+        optimizer_mode="switch_search",
+        optimizer_stop=None,
+        v0_strategy="base_skill",
+    ):
         self.id = sid
         self.requirement = requirement
         self.product_id = product_id
+        self.optimizer_mode = optimizer_mode or "switch_search"
+        self.v0_strategy = v0_strategy or "base_skill"
+        self.optimizer_stop = _normalize_optimizer_stop(optimizer_stop)
+        self.optimization_progress = _new_optimization_progress()
+        self.pending_idx = None       # llm_rewrite 的评测游标(候选态);None 时 = _current()
         self._persist = True          # 落盘开关(恢复时先关, 重建完再开)
 
-        gen = generator_mod.generate_v0(requirement, product_id, prefer_real=prefer_real)
+        gen = generator_mod.generate_v0(
+            requirement,
+            product_id,
+            prefer_real=prefer_real,
+            optimizer_mode=self.optimizer_mode,
+            v0_strategy=self.v0_strategy,
+        )
         self.rubric = gen["rubric"]
         generator_mod.hydrate_research_optimizer_metadata(self.rubric)
         clustering_mod.validate_optimizer_mappings(self.rubric)
@@ -83,6 +141,11 @@ class SessionCore:
         self.failure_history: List[List[Dict]] = []
 
         self.cases: List[Dict[str, Any]] = []
+        # 数据集分组: {ds_id: {"id","name","case_ids":[...],"created_at"}}。
+        # 一份 session 可并存多个数据集分组(同一份 data.json 里的不同 case 子集);
+        # 每个版本通过 version_entry["dataset_id"] 绑定到其中一个分组来评测/生成/判分。
+        self.datasets: Dict[str, Dict[str, Any]] = {}
+        self.active_dataset_id: Optional[str] = None
         self.human_labels: Dict[str, Dict[str, Dict[str, int]]] = {}  # {version: {case_id: {dim: score}}}
         self.report_outputs: Dict[str, Dict[str, str]] = {}  # {version: {case_id: report_text}} 平台真实报告
         self.report_judgments: Dict[str, Dict[str, Dict]] = {}  # {version: {case_id: {scores,reasoning,flagged}}} 平台LLM-judge
@@ -97,23 +160,282 @@ class SessionCore:
             persist.init_session(sid, requirement, product_id)
             persist.append_event(sid, "created", {
                 "product_id": product_id, "detected": self.detected,
+                "optimizer_mode": self.optimizer_mode,
+                "v0_strategy": self.v0_strategy,
                 "rubric_version": self.rubric["version"],
                 "v0_skill": v0.to_dict(), "rubric": self.rubric,
             })
             self._save()
 
     # ---------- 版本管理 ----------
-    def _add_version(self, skill, adopted, proposal):
+    def _add_version(self, skill, adopted, proposal, dataset_id=None):
         self.versions.append({
             "skill": skill, "version": skill.version, "parent": skill.parent_version,
             "changelog": skill.changelog, "adopted": adopted, "proposal": proposal,
             "dev": None, "test": None, "eval": None, "failures": None, "calib": None,
             "failure_report": None, "failure_mapping_error": [],
             "workflow_block": None,
+            # 该版本评测/生成/判分所用的数据集分组;None 时回退到 active/全集(向后兼容)。
+            "dataset_id": dataset_id if dataset_id is not None else self.active_dataset_id,
+            # llm_rewrite 异步 gate 用:pending -> adopted/rejected
+            "candidate_state": None, "verdict": None, "verdict_reasons": None,
         })
 
     def _current(self):
         return self.versions[self.current_idx]
+
+    # ---------- 数据集分组 ----------
+    def _new_dataset_id(self) -> str:
+        import time as _t
+        n = len(self.datasets) + 1
+        return "ds%d-%s" % (n, _t.strftime("%H%M%S"))
+
+    def add_dataset(self, case_ids, name=None) -> str:
+        """登记一份数据集分组(引用 self.cases 里的一批 case_id), 返回 dataset_id。"""
+        import time as _t
+        ds_id = self._new_dataset_id()
+        ordered = list(dict.fromkeys(str(c) for c in case_ids))
+        self.datasets[ds_id] = {
+            "id": ds_id,
+            "name": name or ("数据集 %d" % len(self.datasets),),
+            "case_ids": ordered,
+            "created_at": _t.time(),
+        }
+        # name 上面误写成 tuple 的兜底(保持字符串)
+        if isinstance(self.datasets[ds_id]["name"], tuple):
+            self.datasets[ds_id]["name"] = self.datasets[ds_id]["name"][0]
+        return ds_id
+
+    def _dataset_case_ids(self, dataset_id):
+        """某数据集分组的 case_id 集合;分组不存在则 None(表示回退全集)。"""
+        if not dataset_id or dataset_id not in self.datasets:
+            return None
+        return set(self.datasets[dataset_id]["case_ids"])
+
+    def _case_ids_for(self, version_entry):
+        """某版本参与评测/判分的 case_id 集合。未绑定分组则回退到 self.cases 全集。"""
+        ids = self._dataset_case_ids((version_entry or {}).get("dataset_id"))
+        all_ids = {str(c["case_id"]) for c in self.cases}
+        if ids is None:
+            return all_ids
+        # 只保留仍存在于 self.cases 里的(防止陈旧引用)
+        return {cid for cid in all_ids if cid in ids}
+
+    def _cases_for(self, version_entry):
+        """某版本参与评测的 case 列表(按其绑定分组过滤 self.cases)。"""
+        ids = self._case_ids_for(version_entry)
+        return [c for c in self.cases if str(c["case_id"]) in ids]
+
+    def _eval_target(self):
+        """评测/生成/判分面向的版本:有 pending 候选时指向候选,否则 = 当前最优。
+
+        switch_search 从不设置 pending_idx,故恒等于 _current(),行为零变化。
+        """
+        if getattr(self, "pending_idx", None) is not None:
+            return self.versions[self.pending_idx]
+        return self._current()
+
+    def settle_pending_candidate(self, account=None):
+        """llm_rewrite 异步 gate 结算:候选真实判分完 -> 对比当前最优 -> 采纳或回滚。
+
+        判分未全完则不结算(幂等,返回 None)。采纳则 current_idx 移到候选;
+        回滚则 current_idx 留在 parent(候选标 rejected)。两种结果都写 opt_history。
+        """
+        import optimizer_pipeline
+        pidx = getattr(self, "pending_idx", None)
+        if pidx is None:
+            return None
+        cand = self.versions[pidx]
+        cand_ver = cand["version"]
+        if not self._version_real_judge_complete(cand_ver):
+            return None  # 判分未全完 -> 不结算
+
+        saved = self.current_idx
+        # 父版 = 候选分叉自的当前最优(按版本号定位;兜底用 saved)
+        parent_idx = saved
+        for i, v in enumerate(self.versions):
+            if v["version"] == cand.get("parent"):
+                parent_idx = i
+                break
+        # 算候选真实分
+        self.current_idx = pidx
+        self.evaluate(account)
+        cand_dims = cand.get("dev") or {}
+        # 算/取父版(当前最优)真实分
+        self.current_idx = parent_idx
+        self.evaluate(account)
+        parent = self.versions[parent_idx]
+        parent_dims = parent.get("dev") or {}
+
+        target_dims = (cand.get("proposal") or {}).get("affected_dims") or []
+        tol = optimizer_pipeline.no_regression_tol(self.rubric)
+        adopt, verdict, reasons = optimizer_pipeline.evaluate_gate(
+            parent_dims, cand_dims, target_dims, tol, list(self.dims)
+        )
+        cand["verdict"] = verdict
+        cand["verdict_reasons"] = reasons
+        if adopt:
+            cand["adopted"] = True
+            cand["candidate_state"] = "adopted"
+            self.current_idx = pidx
+        else:
+            cand["candidate_state"] = "rejected"
+            self.current_idx = parent_idx   # 天然回滚:指针留在最优
+
+        # 回写 opt_history 中该候选那条 pending 记录
+        for h in reversed(self.opt_history):
+            if h.get("candidate") == cand_ver and h.get("result") == "pending_real_evaluation":
+                h["result"] = verdict
+                h["reasons"] = reasons
+                break
+
+        self.pending_idx = None
+        persist.append_event(self.id, "candidate_settled", {
+            "candidate": cand_ver,
+            "parent": parent["version"],
+            "verdict": verdict,
+            "reasons": reasons,
+            "cand_dev": cand_dims,
+            "parent_dev": parent_dims,
+            "optimizer_stop": self._record_optimizer_outcome(
+                cand,
+                parent,
+                adopt,
+            ),
+        })
+        self._save()
+        return {
+            "candidate": cand_ver,
+            "verdict": verdict,
+            "reasons": reasons,
+            "optimizer_stop": self._optimizer_stop_state(),
+        }
+
+    def _optimizer_stop_state(self):
+        """返回 LLM 优化 loop 的会话级停止状态（不修改 rubric）。"""
+        config = getattr(
+            self,
+            "optimizer_stop",
+            _normalize_optimizer_stop(),
+        )
+        is_llm_rewrite = (
+            getattr(self, "optimizer_mode", "switch_search")
+            == "llm_rewrite"
+        )
+        progress = getattr(
+            self,
+            "optimization_progress",
+            _new_optimization_progress(),
+        )
+        current_version = self._current().get("version")
+        scores_are_real = (
+            self.rubric.get("product") != "research_insight"
+            or self._version_real_judge_complete(current_version)
+        )
+        cur_dev = (self._current().get("dev") or {})
+        current_overall = (
+            cur_dev.get("overall") if scores_are_real else None
+        )
+        best_overall = progress.get("best_overall")
+        if best_overall is None and current_overall is not None:
+            best_overall = current_overall
+
+        target = config.get("overall_target")
+        patience = config.get("max_no_improvement")
+        streak = int(progress.get("no_improvement_streak") or 0)
+        reached_target = (
+            is_llm_rewrite
+            and target is not None
+            and current_overall is not None
+            and current_overall >= target - 0.001
+        )
+        plateau = (
+            is_llm_rewrite
+            and patience is not None
+            and streak >= patience
+        )
+        stopped = bool(reached_target or plateau)
+        if reached_target:
+            reason = (
+                "当前最佳已采纳版 overall %.2f ≥ 停止目标 %.2f"
+                % (current_overall, target)
+            )
+            code = "overall_target_reached"
+        elif plateau:
+            reason = (
+                "连续 %d 个候选版本未提升已采纳最佳 overall"
+                % patience
+            )
+            code = "no_improvement_patience_reached"
+        else:
+            reason = None
+            code = None
+        return {
+            "enabled": is_llm_rewrite and (
+                target is not None or patience is not None
+            ),
+            "stopped": stopped,
+            "code": code,
+            "reason": reason,
+            "overall_target": target,
+            "max_no_improvement": patience,
+            "current_overall": current_overall,
+            "best_overall": best_overall,
+            "no_improvement_streak": streak,
+            "evaluated_candidates": int(
+                progress.get("evaluated_candidates") or 0
+            ),
+        }
+
+    def _record_optimizer_outcome(self, candidate, parent, adopted):
+        """候选结算后更新 patience：只有已采纳版 overall 创新高才算提升。"""
+        progress = self.optimization_progress
+        parent_overall = (parent.get("dev") or {}).get("overall")
+        candidate_overall = (candidate.get("dev") or {}).get("overall")
+        best = progress.get("best_overall")
+        if best is None:
+            best = parent_overall
+        improved = (
+            bool(adopted)
+            and candidate_overall is not None
+            and (best is None or candidate_overall - best > 0.001)
+        )
+        if improved:
+            best = candidate_overall
+            progress["no_improvement_streak"] = 0
+        else:
+            progress["no_improvement_streak"] = (
+                int(progress.get("no_improvement_streak") or 0) + 1
+            )
+        progress["best_overall"] = best
+        progress["evaluated_candidates"] = (
+            int(progress.get("evaluated_candidates") or 0) + 1
+        )
+        progress["last_candidate"] = candidate.get("version")
+        progress["last_candidate_overall"] = candidate_overall
+        progress["last_outcome"] = (
+            "overall_improved" if improved else "overall_not_improved"
+        )
+
+        state = self._optimizer_stop_state()
+        newly_stopped = state["stopped"] and not progress.get("stopped")
+        progress["stopped"] = state["stopped"]
+        progress["reason"] = state["reason"]
+        if newly_stopped:
+            persist.append_event(self.id, "optimization_stopped", state)
+        return state
+
+    def _mark_optimizer_stopped_if_needed(self):
+        """在生成候选前同步 target 型停止条件，并只记录一次事件。"""
+        state = self._optimizer_stop_state()
+        progress = self.optimization_progress
+        newly_stopped = state["stopped"] and not progress.get("stopped")
+        progress["stopped"] = state["stopped"]
+        progress["reason"] = state["reason"]
+        if newly_stopped:
+            persist.append_event(self.id, "optimization_stopped", state)
+            self._save()
+        return state
 
     def _human_for(self, version: str, account: str) -> Dict[str, Dict[str, int]]:
         """某账号在某版本的维度级人工标注 {case_id: {dim: score}}(可变, 供写入)。"""
@@ -136,6 +458,19 @@ class SessionCore:
         """可序列化的持久态: 只存 durable 输入, 不存可重算的派生量。"""
         return {
             "id": self.id, "requirement": self.requirement, "product_id": self.product_id,
+            "optimizer_mode": getattr(self, "optimizer_mode", "switch_search"),
+            "v0_strategy": getattr(self, "v0_strategy", "base_skill"),
+            "optimizer_stop": getattr(
+                self,
+                "optimizer_stop",
+                _normalize_optimizer_stop(),
+            ),
+            "optimization_progress": getattr(
+                self,
+                "optimization_progress",
+                _new_optimization_progress(),
+            ),
+            "pending_idx": getattr(self, "pending_idx", None),
             "rubric": self.rubric, "gen_rationale": self.gen_rationale, "detected": self.detected,
             "current_idx": self.current_idx,
             "opt_history": self.opt_history,
@@ -152,6 +487,9 @@ class SessionCore:
                     [],
                 ),
                 "workflow_block": v.get("workflow_block"),
+                "candidate_state": v.get("candidate_state"),
+                "verdict": v.get("verdict"),
+                "verdict_reasons": v.get("verdict_reasons"),
             } for v in self.versions],
         }
 
@@ -162,6 +500,16 @@ class SessionCore:
         self.id = snap["id"]
         self.requirement = snap["requirement"]
         self.product_id = snap["product_id"]
+        self.optimizer_mode = snap.get("optimizer_mode", "switch_search")
+        self.v0_strategy = snap.get("v0_strategy", "base_skill")
+        self.optimizer_stop = _normalize_optimizer_stop(
+            snap.get("optimizer_stop")
+        )
+        self.optimization_progress = _new_optimization_progress()
+        self.optimization_progress.update(
+            snap.get("optimization_progress") or {}
+        )
+        self.pending_idx = snap.get("pending_idx")
         self._persist = False          # 重建期间不写盘
         self.rubric = generator_mod.hydrate_research_optimizer_metadata(
             snap["rubric"]
@@ -179,6 +527,10 @@ class SessionCore:
         self.human_checks = persist.load_check_labels(self.id)   # 逐check人工标注由 check_labels.jsonl 恢复
         self.judge_checks = persist.load_check_judgments(self.id)  # 逐check judge 由 check_judgments.jsonl 恢复
         self.generation_imports = snap.get("generation_imports", {})
+        # __init__ 设了但 restore 早期漏了这两个 -> 恢复后 advance 调 _add_version
+        # 读 self.active_dataset_id 会 AttributeError。二者默认态与新建会话一致。
+        self.datasets = snap.get("datasets", {})
+        self.active_dataset_id = snap.get("active_dataset_id")
         self.failure_history = []
         self.versions = []
         for vd in snap["versions"]:
@@ -194,12 +546,19 @@ class SessionCore:
                     [],
                 ),
                 "workflow_block": vd.get("workflow_block"),
+                "candidate_state": vd.get("candidate_state"),
+                "verdict": vd.get("verdict"),
+                "verdict_reasons": vd.get("verdict_reasons"),
             })
         self.current_idx = snap.get("current_idx", 0)
-        if self.cases:                 # 有数据则重算每个采纳版本的派生量(恢复分数曲线)
+        if self.cases:                 # 有数据则重算曲线所需版本的派生量
             saved_idx = self.current_idx
             for i, v in enumerate(self.versions):
-                if not v["adopted"]:
+                judged_rejected = (
+                    v.get("candidate_state") == "rejected"
+                    and self._version_real_judge_complete(v["version"])
+                )
+                if not v["adopted"] and not judged_rejected:
                     continue
                 self.current_idx = i
                 try:
@@ -213,12 +572,12 @@ class SessionCore:
     # ---------- 视图 ----------
     def view(self, account=None):
         adopted = [v for v in self.versions if v["adopted"]]
-        cur = self._current()
+        cur = self._eval_target()
         recs = cur.get("_recs") or []
         # Web 流程已切换为纯模型 Judge；旧人工标注仍可恢复，但不再参与视图和门禁。
         current_eval = [self._rec_view(r, None) for r in recs]
         version = cur["version"]
-        case_ids = {str(case["case_id"]) for case in self.cases}
+        case_ids = self._case_ids_for(cur)
         reports = self.report_outputs.get(version, {})
         check_judgments = self.judge_checks.get(version, {})
         direct_judgments = self.report_judgments.get(version, {})
@@ -232,6 +591,16 @@ class SessionCore:
             or case_id in direct_judgments
         }
         requires_model_judge = self.rubric.get("product") == "research_insight"
+        curve_versions = (
+            [
+                item
+                for item in self.versions
+                if item["adopted"]
+                or item.get("candidate_state") == "rejected"
+            ]
+            if requires_model_judge
+            else adopted
+        )
         judge_complete = bool(case_ids) and judged == case_ids
         judge_progress = {
             "required": requires_model_judge,
@@ -249,6 +618,13 @@ class SessionCore:
             judged,
             requires_model_judge,
         )
+        optimizer_stop = self._optimizer_stop_state()
+        if optimizer_stop["stopped"]:
+            version_status = "converged"
+            actions["advance"] = {
+                "enabled": False,
+                "reason": optimizer_stop["reason"],
+            }
         return {
             "session_id": self.id,
             "requirement": self.requirement,
@@ -267,9 +643,14 @@ class SessionCore:
                     "version": v["version"],
                     "dev": v["dev"],
                     "test": v["test"],
+                    "adopted": v["adopted"],
+                    "candidate_state": v.get("candidate_state"),
+                    "verdict": v.get("verdict"),
+                    "verdict_reasons": v.get("verdict_reasons"),
                 }
-                for v in adopted
-                if (
+                for v in curve_versions
+                if v["dev"] is not None
+                and (
                     not requires_model_judge
                     or self._version_real_judge_complete(v["version"])
                 )
@@ -296,6 +677,20 @@ class SessionCore:
             "target": self.rubric["target"],
             "can_advance": actions["advance"]["enabled"],
             "opt_history": self.opt_history,
+            "optimizer_mode": getattr(self, "optimizer_mode", "switch_search"),
+            "v0_strategy": getattr(self, "v0_strategy", "base_skill"),
+            "optimizer_stop": optimizer_stop,
+            "pending_candidate": (
+                {
+                    "version": cur["version"],
+                    "parent": cur.get("parent"),
+                    "candidate_state": cur.get("candidate_state"),
+                    "proposal": cur.get("proposal"),
+                }
+                if getattr(self, "pending_idx", None) is not None
+                else None
+            ),
+            "best_version": self._current()["version"],
             "history": persist.load_events(self.id),
         }
 
@@ -307,6 +702,15 @@ class SessionCore:
             "directives_on": [k for k, on in sk.directives().items() if on],
             "dev": v["dev"], "test": v["test"],
             "proposal": v["proposal"],
+            "instructions_prose": (
+                sk.instructions or {}
+            ).get("prose", ""),
+            "requirement_contract": (
+                sk.instructions or {}
+            ).get("requirement_contract", ""),
+            "candidate_state": v.get("candidate_state"),
+            "verdict": v.get("verdict"),
+            "verdict_reasons": v.get("verdict_reasons"),
             "evaluation_status": self._version_status(v),
         }
 

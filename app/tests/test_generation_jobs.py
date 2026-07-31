@@ -280,7 +280,7 @@ class GenerationJobServiceTest(unittest.TestCase):
                 / "instructions.md"
             ).is_file()
         )
-        self.assertEqual(done.compiler_version, "session-skill/v2")
+        self.assertEqual(done.compiler_version, "session-skill/v3")
         self.assertIsNotNone(done.base_skill_hash)
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])

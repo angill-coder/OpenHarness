@@ -47,6 +47,10 @@ class SkillCompilerTest(unittest.TestCase):
             "---\nname: research-report\n---\n# Base Skill\n",
             encoding="utf-8",
         )
+        (self.base / "DRAFT_from_old_version.md").write_text(
+            "历史草稿，不应进入执行目录。\n",
+            encoding="utf-8",
+        )
         (references / "instructions.md").write_text(
             "# Base Instructions\n\n"
             "<!-- OPENHARNESS_DIRECTIVES: [\"summary_format\"] -->\n\n"
@@ -80,6 +84,9 @@ class SkillCompilerTest(unittest.TestCase):
         self.assertEqual(
             (first.path / "SKILL.md").read_text(encoding="utf-8"),
             (self.base / "SKILL.md").read_text(encoding="utf-8"),
+        )
+        self.assertFalse(
+            (first.path / "DRAFT_from_old_version.md").exists()
         )
         instructions = (
             first.path / "references" / "instructions.md"

@@ -42,13 +42,49 @@ function bar(v,max=5){return `<div class="barwrap"><div class="bar" style="width
 function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // ---- 1. 生成 V0 ----
+function syncV0StrategyVisibility(){
+  const llmMode=(document.getElementById('optModeSel')||{}).value==='llm_rewrite';
+  const wrap=document.getElementById('v0StrategyWrap');
+  if(wrap)wrap.style.display=llmMode?'block':'none';
+}
+document.getElementById('optModeSel').onchange=syncV0StrategyVisibility;
+syncV0StrategyVisibility();
 document.getElementById('genBtn').onclick=async()=>{
+  const btn=document.getElementById('genBtn');
   const req=document.getElementById('reqInput').value.trim();
   if(!req){toast('请先填写需求描述');return;}
   const pid=document.getElementById('pidInput').value.trim();
-  const j=await api('/api/session','POST',{requirement:req,product_id:pid});
-  SID=j.session_id; STATE=j; GEN_JOB=null; JUDGE_SUMMARY=null; JUDGE_RESULTS=[]; render();
-  toast('已生成 V0：'+j.product_id);
+  const optMode=(document.getElementById('optModeSel')||{}).value||'switch_search';
+  const v0Strategy=optMode==='llm_rewrite'
+    ?((document.getElementById('v0StrategySel')||{}).value||'base_skill')
+    :'base_skill';
+  const stopOverall=Number(document.getElementById('stopOverall').value);
+  const stopPatience=Number(document.getElementById('stopPatience').value);
+  if(optMode==='llm_rewrite'&&(!(stopOverall>=1&&stopOverall<=5)||!Number.isInteger(stopPatience)||stopPatience<1)){
+    toast('LLM loop 停止 overall 须为 1–5，连续无提升版本数须为正整数');return;
+  }
+  const optimizerStop=optMode==='llm_rewrite'
+    ?{overall_target:stopOverall,max_no_improvement:stopPatience}
+    :{};
+  const oldText=btn.textContent;
+  btn.disabled=true;
+  btn.textContent=v0Strategy==='llm_scratch'?'⏳ LLM 正在起草 V0…':'⏳ 正在生成 V0…';
+  try{
+    const j=await api('/api/session','POST',{
+      requirement:req,
+      product_id:pid,
+      optimizer_mode:optMode,
+      v0_strategy:v0Strategy,
+      optimizer_stop:optimizerStop
+    });
+    SID=j.session_id; STATE=j; GEN_JOB=null; JUDGE_SUMMARY=null; JUDGE_RESULTS=[]; render();
+    await loadSessions();
+    const sessSel=document.getElementById('sessSel'); if(sessSel)sessSel.value=SID;
+    toast('已生成 V0：'+j.product_id);
+  }finally{
+    btn.disabled=false;
+    btn.textContent=oldText;
+  }
 };
 
 // ---- 2. 导入数据 ----
@@ -152,15 +188,35 @@ document.getElementById('rubricSaveBtn').onclick=async()=>{
 
 // ---- 推进下一版 ----
 document.getElementById('advanceBtn').onclick=async()=>{
-  const j=await api('/api/advance','POST',{id:SID}); STATE=j; render();
-  const r=j.advance_result;
-  if(r){ toast(r.message, 4200);
-    document.getElementById('advanceMsg').innerHTML =
-      (r.status==='adopted'?'<span class="ok-txt">✅ 采纳</span> ':
-       r.status==='proposed'?'<span class="warn-txt">🧪 待真实验证</span> ':
-       r.status==='rejected'?'<span class="warn-txt">❌ 被 gate 拒绝</span> ':
-       r.status==='blocked'?'<span class="warn-txt">⚠️ 无法推进</span> ':
-       '<span class="mut">■ 收敛</span> ')+r.message;
+  const btn=document.getElementById('advanceBtn');
+  const msg=document.getElementById('advanceMsg');
+  const oldText=btn.textContent;
+  const llmMode=STATE&&STATE.optimizer_mode==='llm_rewrite';
+  // 进入 loading 态: 禁用按钮 + 明确提示(LLM 改写可能耗时数十秒, 避免"点了没反应"的错觉)
+  btn.disabled=true;
+  btn.textContent=llmMode?'⏳ 改写中…':'⏳ 生成中…';
+  if(msg)msg.innerHTML='<span class="mut">⏳ '+(llmMode?'正在调用 LLM 改写下一版，通常需数十秒，请稍候…':'正在生成下一版，请稍候…')+'</span>';
+  try{
+    const j=await api('/api/advance','POST',{id:SID}); STATE=j; render();
+    const r=j.advance_result;
+    if(r){ toast(r.message, 5000);
+      document.getElementById('advanceMsg').innerHTML =
+        (r.status==='adopted'?'<span class="ok-txt">✅ 采纳</span> ':
+         r.status==='proposed'?'<span class="warn-txt">🧪 待真实验证</span> ':
+         r.status==='rejected'?'<span class="warn-txt">❌ 被 gate 拒绝</span> ':
+         r.status==='blocked'?'<span class="warn-txt">⚠️ 无法推进</span> ':
+         '<span class="mut">■ 收敛</span> ')+r.message;
+    }else{
+      // 理论上 llm_rewrite/switch_search 都会带 advance_result; 兜底避免"无任何显示"
+      if(msg)msg.innerHTML='<span class="mut">已处理，但未返回结果说明。</span>';
+    }
+  }catch(e){
+    // 请求本身失败(如 LLM 未配置 key / 超时 / 500): 明确报错, 不再静默
+    toast('推进失败：'+(e.message||e), 6000);
+    const m2=document.getElementById('advanceMsg');
+    if(m2)m2.innerHTML='<span class="warn-txt">❌ 请求失败</span> '+(e.message||String(e));
+    // render() 未跑到, 手动恢复按钮可用态
+    btn.disabled=false; btn.textContent=oldText;
   }
 };
 
@@ -352,30 +408,66 @@ function render(){
   if(STATE.dim_zh)ZH=STATE.dim_zh;
   document.getElementById('backendBadge').textContent='backend: '+STATE.backend;
   document.getElementById('sessBadge').textContent='会话 '+STATE.session_id+' · '+STATE.product_id;
-  document.getElementById('genRationale').innerHTML='<b>生成依据：</b><br>'+(STATE.gen_rationale||'').replace(/\n/g,'<br>');
+  const v0StrategyLabel=STATE.v0_strategy==='llm_scratch'
+    ?'LLM 从零起草（需求 + Rubric）'
+    :'从基础 Skill 开始';
+  document.getElementById('genRationale').innerHTML='<b>V0 起草方式：</b>'+esc(v0StrategyLabel)+'<br><b>生成依据：</b><br>'+esc(STATE.gen_rationale||'').replace(/\n/g,'<br>');
   ['dataCard','rubricCard','skillCard','realRunCard','outputCard'].forEach(id=>document.getElementById(id).classList.add('active'));
 
   // 版本 pills
   const pills=STATE.versions.map((v,i)=>{
     const cur=v.version===STATE.current_version?'cur':'';
     const rej=v.adopted?'':'rej';
-    return `<span class="ver-pill ${cur} ${rej}" title="${(v.changelog||'').replace(/"/g,'')}">${v.version}${v.adopted?'':' (拒)'}</span>`;
+    const cs=v.candidate_state?(' ['+v.candidate_state+']'):'';
+    return `<span class="ver-pill ${cur} ${rej}" title="${(v.changelog||'').replace(/"/g,'')}">${v.version}${v.adopted?'':' (拒)'}${cs}</span>`;
   }).join('');
+  const stop=STATE.optimizer_stop||{};
+  const stopInfo=stop.enabled
+    ?`<div class="small ${stop.stopped?'ok-txt':'mut'}" style="margin-top:6px">实验停止条件：overall ≥ ${fmt(stop.overall_target,1)}，或连续 ${stop.max_no_improvement} 版无提升；当前最佳 ${fmt(stop.best_overall,2)}，连续无提升 ${stop.no_improvement_streak}/${stop.max_no_improvement}${stop.stopped?' · 已停止：'+esc(stop.reason):''}</div>`
+    :'';
   document.getElementById('versionPills').innerHTML = pills +
-    `<div class="small mut" style="margin-top:6px">数据 ${STATE.n_cases} 条 ${JSON.stringify(STATE.splits)}</div>`;
+    `<div class="small mut" style="margin-top:6px">数据 ${STATE.n_cases} 条 ${JSON.stringify(STATE.splits)}</div>`+
+    stopInfo;
   const advanceAction=STATE.actions&&STATE.actions.advance;
-  document.getElementById('advanceBtn').disabled=!(advanceAction?advanceAction.enabled:STATE.can_advance)||generationActive()||JUDGE_RUNNING;
+  const llmMode=STATE.optimizer_mode==='llm_rewrite';
+  const advBtn=document.getElementById('advanceBtn');
+  advBtn.textContent=llmMode?'✍️ LLM 改写下一版（自由改写 + 自动 gate）':'▶ 生成下一版 skill（optimizer + gate）';
+  advBtn.disabled=!(advanceAction?advanceAction.enabled:STATE.can_advance)||generationActive()||JUDGE_RUNNING;
+  if(stop.stopped){
+    document.getElementById('advanceMsg').innerHTML='<span class="ok-txt">■ 优化 loop 已停止</span> '+esc(stop.reason);
+  }
+
+  // pending 候选提示条（llm_rewrite 异步 gate）
+  const pc=STATE.pending_candidate;
+  const pcBanner=pc?`<div class="small warn-txt" style="margin-top:6px">🧪 待验证候选 <b>${pc.version}</b>（父 ${pc.parent||'—'}）：请对该候选跑 WB 生成 + 批量真实 Judge，判分完成后平台自动结算采纳/回滚。</div>`:'';
 
   // 当前 skill
   const cv=STATE.versions.find(v=>v.version===STATE.current_version);
-  const onDir=cv.directives_on.length?cv.directives_on.map(d=>`<span class="chip on">${d}</span>`).join(''):'<span class="mut">（全部关闭，等待优化打开）</span>';
-  document.getElementById('skillView').innerHTML=`
+  let skillBody;
+  if(llmMode||(cv.proposal&&cv.proposal.target==='instructions_freeform')){
+    const prose=cv.instructions_prose||(cv.proposal&&cv.proposal.instructions_text)||'';
+    const contract=cv.requirement_contract||'';
+    skillBody=`
+    <div class="kv"><span>版本</span><b>${cv.version}</b> <span class="mut">(freeform · LLM 改写)</span></div>
+    <div class="kv"><span>父版本</span><span>${cv.parent||'—'}</span></div>
+    <div class="small mut" style="margin:6px 0">${cv.changelog||''}</div>
+    ${pcBanner}
+    ${cv.verdict?`<div class="small">gate 判定：<b>${cv.verdict}</b> — ${(cv.verdict_reasons&&cv.verdict_reasons.message)||''}</div>`:''}
+    ${cv.proposal?`<details><summary>本版改写理由（rationale）</summary><pre>${JSON.stringify({change_summary:cv.proposal.change_summary,targets_failures:cv.proposal.targets_failures,preserved:cv.proposal.preserved,hypothesis:cv.proposal.hypothesis,self_check_no_hack:cv.proposal.self_check_no_hack},null,2)}</pre></details>`:''}
+    ${contract?`<details open><summary>查看冻结任务契约（需求 + Rubric）</summary><pre style="white-space:pre-wrap">${esc(contract)}</pre></details>`:''}
+    ${prose?`<details><summary>查看可改写质量规则</summary><pre style="white-space:pre-wrap">${esc(prose)}</pre></details>`:''}`;
+  }else{
+    const onDir=cv.directives_on.length?cv.directives_on.map(d=>`<span class="chip on">${d}</span>`).join(''):'<span class="mut">（全部关闭，等待优化打开）</span>';
+    skillBody=`
     <div class="kv"><span>版本</span><b>${cv.version}</b></div>
     <div class="kv"><span>父版本</span><span>${cv.parent||'—'}</span></div>
     <div class="small mut" style="margin:6px 0">${cv.changelog||''}</div>
+    ${pcBanner}
     <div class="mut small">已打开的 directive（优化动作 L1）：</div><div>${onDir}</div>
-    ${cv.proposal?`<details><summary>本版来自的优化提议</summary><pre>${JSON.stringify(cv.proposal,null,2)}</pre></details>`:''}
-    <details><summary>查看版本结构策略</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
+    ${cv.proposal?`<details><summary>本版来自的优化提议</summary><pre>${JSON.stringify(cv.proposal,null,2)}</pre></details>`:''}`;
+  }
+  document.getElementById('skillView').innerHTML=skillBody+
+    `<details><summary>查看版本结构策略</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
 
   renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard(); renderGenerationPanel();
 }
@@ -466,18 +558,25 @@ function cv_structure(){
 function renderCurve(){
   const el=document.getElementById('curveView');
   const jp=STATE.judge_progress;
-  if(jp&&jp.required&&!jp.complete){
-    el.innerHTML=`<span class="mut">等待当前版本完成批量模型 Judge（${jp.judged_cases}/${jp.total_cases}）。完成前不展示 mock 占位分。</span>`;
+  const waitingJudge=!!(jp&&jp.required&&!jp.complete);
+  if(!STATE.curve||!STATE.curve.length||!STATE.curve[0].dev){
+    el.innerHTML=waitingJudge
+      ?`<span class="mut">当前版本等待批量模型 Judge（${jp.judged_cases}/${jp.total_cases}），完成后显示首版真实分数。</span>`
+      :'<span class="mut">导入数据后显示</span>';
     return;
   }
-  if(!STATE.curve||!STATE.curve.length||!STATE.curve[0].dev){el.innerHTML='<span class="mut">导入数据后显示</span>';return;}
-  let h='<table><tr><th>版本</th>'+DIMS.map(d=>`<th>${ZH[d]}</th>`).join('')+'<th>overall</th><th>红线</th></tr>';
+  let h=waitingJudge
+    ?`<div class="small mut" style="margin-bottom:6px">当前版本正在等待模型 Judge（${jp.judged_cases}/${jp.total_cases}）；下表继续显示此前已完成 Judge 的版本。</div>`
+    :'';
+  h+='<table><tr><th>版本</th>'+DIMS.map(d=>`<th>${ZH[d]}</th>`).join('')+'<th>overall</th><th>红线</th></tr>';
   STATE.curve.forEach(pt=>{
     const dev=pt.dev,test=pt.test;
+    const gateRejected=pt.candidate_state==='rejected'||pt.verdict==='rejected';
+    const status=gateRejected?'<span class="warn-txt">（Gate 拒绝，未采纳）</span>':'';
     let tds='';DIMS.forEach(d=>{const dv=dev[d],tv=test?test[d]:null;tds+=`<td>${fmt(dv,1)}${tv!=null?'<span class="mut">/'+fmt(tv,1)+'</span>':''}</td>`;});
-    h+=`<tr><td><b>${pt.version}</b></td>${tds}<td><b>${fmt(dev.overall,2)}</b>${test?'<span class="mut">/'+fmt(test.overall,2)+'</span>':''}</td><td>${dev.red_line_fails||0}</td></tr>`;
+    h+=`<tr><td><b>${esc(pt.version)}</b>${status}</td>${tds}<td><b>${fmt(dev.overall,2)}</b>${test?'<span class="mut">/'+fmt(test.overall,2)+'</span>':''}</td><td>${dev.red_line_fails||0}</td></tr>`;
   });
-  h+='</table><div class="small mut" style="margin-top:4px">D=dev / <span class="mut">T=test(held-out)</span></div>';
+  h+='</table><div class="small mut" style="margin-top:4px">D=dev / <span class="mut">T=test(held-out)</span> · “Gate 拒绝，未采纳”表示该版已完成 Judge，但因维度回退等门禁条件未被采纳；后续仍从最佳采纳版生成</div>';
   // 目标行
   const t=STATE.target;
   h+=`<div class="small" style="margin-top:8px">目标：${DIMS.map(d=>`${ZH[d]}≥${t[d]}`).join(' · ')} · overall≥${t.overall}</div>`;
