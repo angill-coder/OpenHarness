@@ -1,0 +1,1374 @@
+# -*- coding: utf-8 -*-
+"""Private source-metadata and data-quality audit engine.
+
+The module deliberately has no OpenHarness app dependency.  It accepts either
+an OpenHarness ``data.json`` or one standalone case, then runs Codex-backed
+stages behind the public :mod:`data_workflow` API.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import statistics
+import subprocess
+import tempfile
+import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ASSET_ROOT = Path(__file__).resolve().parent / "data_quality_assets"
+METADATA_SKILL = ASSET_ROOT / "metadata_prompt.md"
+METADATA_SCHEMA = ASSET_ROOT / "metadata.schema.json"
+AUDIT_DIMENSIONS = (
+    REPO_ROOT / "skills" / "data-quality-audit" / "references" / "dimensions.md"
+)
+AUDIT_SCHEMA_DOC = (
+    REPO_ROOT / "skills" / "data-quality-audit" / "references" / "result-schema.md"
+)
+AUDIT_SCHEMA = ASSET_ROOT / "audit.schema.json"
+METADATA_REPAIR_SCHEMA = ASSET_ROOT / "metadata_repair.schema.json"
+
+DEFAULT_STAGES = ("metadata", "audit")
+SCORE_VERSION = "dq-v2.1"
+
+
+class DataQualityError(RuntimeError):
+    """Raised for invalid inputs or invalid Codex outputs."""
+
+
+class DataQualityCancelled(DataQualityError):
+    """Raised when a caller cancels an in-progress workflow."""
+
+
+ProgressCallback = Callable[[dict[str, Any]], None]
+CancelCallback = Callable[[], bool]
+
+
+def _notify(
+    callback: ProgressCallback | None,
+    event: str,
+    **details: Any,
+) -> None:
+    if callback is not None:
+        callback({"event": event, **details})
+
+
+def _check_cancelled(callback: CancelCallback | None) -> None:
+    if callback is not None and callback():
+        raise DataQualityCancelled("数据质检已取消")
+
+
+@dataclass(frozen=True)
+class DataQualityRequest:
+    """One standalone or OpenHarness-backed data-quality run."""
+
+    output_root: Path
+    dataset: Path | None = None
+    case_ids: tuple[str, ...] = ()
+    source_paths: tuple[Path, ...] = ()
+    groundtruth: Path | None = None
+    case_id: str | None = None
+    background: str = ""
+    metadata: Path | None = None
+    stages: tuple[str, ...] = DEFAULT_STAGES
+    model: str = "gpt-5.6-sol"
+    effort: str = "medium"
+    parallel: int = 1
+    timeout_seconds: float = 1800.0
+    retries: int = 1
+    force_metadata: bool = False
+    force_audit: bool = False
+    force_repair: bool = False
+    publish_metadata: bool = False
+    codex_command: tuple[str, ...] = ("codex",)
+    metadata_skill: Path = METADATA_SKILL
+    metadata_schema: Path = METADATA_SCHEMA
+    audit_dimensions: Path = AUDIT_DIMENSIONS
+    audit_schema_doc: Path = AUDIT_SCHEMA_DOC
+    audit_schema: Path = AUDIT_SCHEMA
+    metadata_repair_schema: Path = METADATA_REPAIR_SCHEMA
+
+    def __post_init__(self) -> None:
+        if bool(self.dataset) == bool(self.source_paths):
+            raise ValueError("dataset 与 source_paths 必须且只能提供一种")
+        if self.dataset is None and not (self.case_id or "").strip():
+            raise ValueError("Standalone 模式必须提供 case_id")
+        unknown = set(self.stages) - {"metadata", "audit", "repair"}
+        if unknown or not self.stages:
+            raise ValueError(f"不支持的 stages: {sorted(unknown)}")
+        if "repair" in self.stages and "audit" not in self.stages:
+            raise ValueError("repair 阶段必须同时运行 audit")
+        if "audit" in self.stages and self.dataset is None and self.groundtruth is None:
+            raise ValueError("Standalone audit 必须提供 groundtruth")
+        if self.parallel < 1:
+            raise ValueError("parallel 必须至少为 1")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds 必须大于 0")
+        if self.retries < 0:
+            raise ValueError("retries 不能小于 0")
+        if not self.codex_command:
+            raise ValueError("codex_command 不能为空")
+
+
+@dataclass
+class DataQualityCaseResult:
+    case_id: str
+    project: str
+    status: str
+    output_dir: str
+    metadata_status: str | None = None
+    audit_status: str | None = None
+    repair_status: str | None = None
+    metadata_items: int = 0
+    metadata_gap_count: int = 0
+    repaired_metadata_items: int = 0
+    overall_score: float | None = None
+    elapsed_seconds: float = 0.0
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class DataQualityBatchResult:
+    status: str
+    output_root: str
+    started_at: str
+    finished_at: str
+    cases: list[DataQualityCaseResult] = field(default_factory=list)
+
+    @property
+    def succeeded(self) -> bool:
+        return bool(self.cases) and all(item.status == "success" for item in self.cases)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "output_root": self.output_root,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "case_count": len(self.cases),
+            "succeeded_count": sum(item.status == "success" for item in self.cases),
+            "failed_count": sum(item.status != "success" for item in self.cases),
+            "cases": [item.to_dict() for item in self.cases],
+        }
+
+
+@dataclass(frozen=True)
+class _CaseBundle:
+    case_id: str
+    project: str
+    background: str
+    source_paths: tuple[Path, ...]
+    groundtruth_text: str
+    groundtruth_file: Path | None
+    existing_metadata: Path | None
+
+
+def _safe_name(value: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-.")
+    return clean or "case"
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DataQualityError(f"无法读取 JSON {path}: {exc}") from exc
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _background(case: dict[str, Any]) -> str:
+    lines = []
+    for turn in case.get("turns") or []:
+        if not isinstance(turn, dict) or turn.get("round") not in (0, 1, "0", "1"):
+            continue
+        text = str(turn.get("prompt") or turn.get("content") or "").strip()
+        if text:
+            lines.append(f"[round {turn.get('round')}] {text}")
+    if lines:
+        return "\n\n".join(lines)
+    source = case.get("input") or {}
+    return "\n\n".join(
+        str(source.get(key) or "").strip()
+        for key in ("brief", "intake")
+        if str(source.get(key) or "").strip()
+    )
+
+
+def _resolve_source_paths(case: dict[str, Any], base: Path) -> tuple[Path, ...]:
+    paths = []
+    for item in case.get("input_files") or []:
+        if not isinstance(item, dict) or not item.get("source"):
+            continue
+        path = Path(str(item["source"])).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        path = path.resolve()
+        if not path.exists():
+            raise DataQualityError(f"原始资料不存在: {path}")
+        paths.append(path)
+    if not paths:
+        raise DataQualityError(
+            f"{case.get('case_id') or case.get('id')} 没有可用 input_files"
+        )
+    return tuple(paths)
+
+
+def _project_and_metadata(
+    sources: tuple[Path, ...],
+) -> tuple[str, Path | None]:
+    parents = {
+        path.parent.resolve()
+        for path in sources
+        if path.is_dir() and path.name in {"source", "sources"}
+    }
+    if len(parents) == 1:
+        case_dir = next(iter(parents))
+        return case_dir.name, case_dir / "evidence_metadata.json"
+    first = sources[0]
+    return (first.parent.name if first.is_file() else first.name), None
+
+
+def _load_bundles(request: DataQualityRequest) -> list[_CaseBundle]:
+    if request.dataset is None:
+        sources = tuple(path.expanduser().resolve() for path in request.source_paths)
+        missing = [str(path) for path in sources if not path.exists()]
+        if missing:
+            raise DataQualityError("原始资料不存在: " + ", ".join(missing))
+        groundtruth = request.groundtruth
+        if groundtruth is not None:
+            groundtruth = groundtruth.expanduser().resolve()
+            if not groundtruth.is_file():
+                raise DataQualityError(f"groundtruth 不存在: {groundtruth}")
+        project, discovered = _project_and_metadata(sources)
+        return [
+            _CaseBundle(
+                case_id=str(request.case_id),
+                project=project,
+                background=request.background.strip(),
+                source_paths=sources,
+                groundtruth_text="",
+                groundtruth_file=groundtruth,
+                existing_metadata=(
+                    request.metadata.expanduser().resolve()
+                    if request.metadata is not None
+                    else discovered
+                ),
+            )
+        ]
+
+    dataset = request.dataset.expanduser().resolve()
+    payload = _read_json(dataset)
+    cases = payload.get("cases") if isinstance(payload, dict) else payload
+    if not isinstance(cases, list):
+        raise DataQualityError("dataset 必须是数组或包含 cases 数组")
+    selected = set(request.case_ids)
+    bundles = []
+    available = set()
+    for case in cases:
+        if not isinstance(case, dict):
+            raise DataQualityError("dataset cases 中存在非对象元素")
+        case_id = str(case.get("case_id") or case.get("id") or "").strip()
+        if not case_id:
+            raise DataQualityError("case 缺少 case_id")
+        available.add(case_id)
+        if selected and case_id not in selected:
+            continue
+        sources = _resolve_source_paths(case, dataset.parent)
+        project, metadata_path = _project_and_metadata(sources)
+        ground_truth = case.get("ground_truth") or {}
+        gt_text = str(ground_truth.get("reference_report_text") or "").strip()
+        gt_file_value = str(ground_truth.get("reference_report_file") or "").strip()
+        gt_file = None
+        if gt_file_value:
+            gt_file = Path(gt_file_value).expanduser()
+            if not gt_file.is_absolute():
+                gt_file = dataset.parent / gt_file
+            gt_file = gt_file.resolve()
+            if not gt_file.is_file():
+                gt_file = None
+        if "audit" in request.stages and not gt_text and gt_file is None:
+            raise DataQualityError(f"{case_id} 缺少可用 groundtruth")
+        bundles.append(
+            _CaseBundle(
+                case_id=case_id,
+                project=project,
+                background=_background(case),
+                source_paths=sources,
+                groundtruth_text=gt_text,
+                groundtruth_file=gt_file,
+                existing_metadata=metadata_path,
+            )
+        )
+    missing_ids = sorted(selected - available)
+    if missing_ids:
+        raise DataQualityError("dataset 中没有 case: " + ", ".join(missing_ids))
+    if not bundles:
+        raise DataQualityError("没有需要处理的 case")
+    return bundles
+
+
+class CodexJsonRunner:
+    """One reusable, read-only Codex CLI JSON runner."""
+
+    def __init__(self, request: DataQualityRequest) -> None:
+        self.request = request
+
+    def run(
+        self,
+        *,
+        prompt: str,
+        schema_path: Path,
+        cwd: Path,
+    ) -> tuple[dict[str, Any], float]:
+        last_error = ""
+        for attempt in range(1, self.request.retries + 2):
+            started = time.monotonic()
+            with tempfile.TemporaryDirectory(prefix="data-quality-") as temporary:
+                result_path = Path(temporary) / "result.json"
+                command = [
+                    *self.request.codex_command,
+                    "exec",
+                    "--ephemeral",
+                    "--ignore-user-config",
+                    "--sandbox",
+                    "read-only",
+                    "--skip-git-repo-check",
+                    "--color",
+                    "never",
+                    "--model",
+                    self.request.model,
+                    "--config",
+                    f'model_reasoning_effort="{self.request.effort}"',
+                    "--output-schema",
+                    str(schema_path),
+                    "--output-last-message",
+                    str(result_path),
+                    "-C",
+                    str(cwd),
+                    "-",
+                ]
+                try:
+                    completed = subprocess.run(
+                        command,
+                        input=prompt,
+                        text=True,
+                        capture_output=True,
+                        timeout=self.request.timeout_seconds,
+                        check=False,
+                    )
+                    if completed.returncode != 0:
+                        detail = completed.stderr.strip() or completed.stdout.strip()
+                        raise DataQualityError(
+                            f"Codex CLI exit={completed.returncode}: {detail[-3000:]}"
+                        )
+                    payload = _read_json(result_path)
+                    if not isinstance(payload, dict):
+                        raise DataQualityError("Codex 输出不是 JSON 对象")
+                    return payload, round(time.monotonic() - started, 1)
+                except (
+                    OSError,
+                    subprocess.TimeoutExpired,
+                    DataQualityError,
+                ) as exc:
+                    last_error = f"attempt {attempt}: {exc}"
+        raise DataQualityError(last_error)
+
+
+def _validate_metadata(payload: Any, case_id: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise DataQualityError("Metadata 不是 JSON 对象")
+    if payload.get("schema") != "openharness-evidence/v1":
+        raise DataQualityError("Metadata schema 不正确")
+    if payload.get("case_id") != case_id:
+        raise DataQualityError("Metadata case_id 不一致")
+    if set(payload) != {"schema", "case_id", "items", "unresolved"}:
+        raise DataQualityError("Metadata 包含未约定字段")
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise DataQualityError("Metadata items 为空")
+    ids = []
+    for index, item in enumerate(items, 1):
+        if not isinstance(item, dict) or set(item) != {
+            "id",
+            "type",
+            "source_ref",
+            "content",
+        }:
+            raise DataQualityError(f"Metadata items[{index}] 字段不合法")
+        if not all(isinstance(value, str) and value.strip() for value in item.values()):
+            raise DataQualityError(f"Metadata items[{index}] 存在空字段")
+        if not re.fullmatch(r"EV-\d{3,}", item["id"]):
+            raise DataQualityError(f"Evidence ID 不合法: {item['id']}")
+        ids.append(item["id"])
+    if len(ids) != len(set(ids)):
+        raise DataQualityError("Evidence ID 重复")
+    unresolved = payload.get("unresolved")
+    if not isinstance(unresolved, list) or any(
+        not isinstance(item, str) or not item.strip() for item in unresolved
+    ):
+        raise DataQualityError("Metadata unresolved 不合法")
+    return payload
+
+
+def _load_valid_metadata(path: Path | None, case_id: str) -> dict[str, Any] | None:
+    if path is None or not path.is_file():
+        return None
+    try:
+        return _validate_metadata(_read_json(path), case_id)
+    except DataQualityError:
+        return None
+
+
+def _metadata_prompt(bundle: _CaseBundle, skill_path: Path) -> str:
+    sources = "\n".join(f"- {path}" for path in bundle.source_paths)
+    return f"""先完整阅读并严格执行这个 Skill：
+{skill_path}
+
+为下面这个 case 生成 Evidence Metadata。
+
+case_id:
+{bundle.case_id}
+
+round 0-1 背景信息：
+{bundle.background or "未提供额外背景"}
+
+原始资料路径：
+{sources}
+
+要求：
+- 实际检查上述路径中的全部相关文件。
+- 只读取原始资料和背景信息，不读取 ground truth、参考报告或候选报告。
+- 不写入或修改任何原始资料，不使用 shell heredoc 或临时文件。
+- 最终只输出符合 Skill 和 output schema 的 JSON。
+"""
+
+
+def _audit_prompt(
+    bundle: _CaseBundle,
+    metadata_path: Path,
+    dimensions_path: Path,
+    schema_doc_path: Path,
+) -> str:
+    sources = "\n".join(f"- {path}" for path in bundle.source_paths)
+    if bundle.groundtruth_text:
+        groundtruth = f"""groundtruth 文本如下：
+<groundtruth>
+{bundle.groundtruth_text}
+</groundtruth>"""
+    else:
+        groundtruth = f"完整读取 groundtruth 文件：{bundle.groundtruth_file}"
+    return f"""你正在执行研究数据质检。只读分析，不修改任何文件。
+
+先完整读取：
+1. Evidence Metadata：{metadata_path}
+2. 判定规则：{dimensions_path}
+3. 输出字段：{schema_doc_path}
+
+项目：{bundle.project}
+case_id：{bundle.case_id}
+背景：
+{bundle.background or "未提供额外背景"}
+
+{groundtruth}
+
+原始 source：
+{sources}
+
+任务：
+- 从 groundtruth 抽取最多 40 条真正影响摘要、结论、建议或章节主论点的关键论据。
+- 对 metadata 中每一个 EV id 恰好分类一次：used / noise / conflict。
+- 对每条 GT 关键论据同时检查 metadata 和原始 source；metadata 与 source
+  都无充分支撑才列 omission。
+- 如果事实已存在于 source，但 metadata 完全漏掉或遗漏关键数字、分群、
+  反例、限定条件，则列入 metadata_gaps，不得误判为数据遗漏。
+- metadata_gaps.source_fact 必须重新从 source 提取并可独立核验，不得复制
+  只存在于 groundtruth 的内容；ID 使用 MG-001 起连续编号。
+- 发现冲突时，核对对象、时间、样本、地域和口径；可解释差异只写 scope_risks。
+- 数值相对误差不超过1%，或比例绝对差不超过0.5个百分点时，不得判 conflict。
+- 若差异只是四舍五入且排序、方向或约数结论不变，归入 used，并把精确计数差异写入 scope_risks。
+- “来源不足以推出GT结论”属于 omission，不属于 conflict。
+- metadata 是 source 的结构化索引，不重复计数。
+- 不使用 shell heredoc 或任何临时文件；优先使用只读命令。
+- quote 只保留足够核验的短摘录，中文输出。
+- 严格返回 output schema 要求的 JSON，不要返回 Markdown。
+"""
+
+
+def _metadata_gaps_payload(
+    bundle: _CaseBundle,
+    project: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema": "openharness-metadata-gaps/v1",
+        "case_id": bundle.case_id,
+        "items": [
+            {
+                "id": item["id"],
+                "gap_type": item["gap_type"],
+                "importance": item["importance"],
+                "source_fact": item["source_fact"],
+                "source_ref": item["source_ref"],
+            }
+            for item in project["metadata_gaps"]
+        ],
+    }
+
+
+def _repair_prompt(
+    bundle: _CaseBundle,
+    metadata_path: Path,
+    gaps_path: Path,
+) -> str:
+    sources = "\n".join(f"- {path}" for path in bundle.source_paths)
+    return f"""你正在修复 Evidence Metadata 的抽取遗漏。只读分析，不修改文件。
+
+完整读取：
+1. 原始 Evidence Metadata：{metadata_path}
+2. 待核验的 Metadata 缺口：{gaps_path}
+3. 原始 source：
+{sources}
+
+case_id：{bundle.case_id}
+
+要求：
+- 不读取 groundtruth、audit.json、audit.raw.json 或参考报告。
+- 对每个 MG id 重新回查 source；只有 source 可独立核验时才生成 addition。
+- addition 必须是 source-grounded 的完整事实，并使用真实文件名及准确页码、
+  Sheet、表格或数据区域作为 source_ref。
+- 不复制缺口描述的措辞；以 source 为准重新表述，不增加 source 中没有的数字、
+  结论、因果或技术机制。
+- 不重复现有 Metadata 已充分覆盖的事实；若多个 MG 可由同一条独立证据覆盖，
+  可合并到一个 addition 的 gap_ids。
+- 无法从 source 复核、与现有 Evidence 实质重复或定位不可靠时放入 skipped，
+  并说明原因。
+- 只输出新增 Evidence，不修改、删除或重新编号现有 Evidence；Python 会负责
+  合并和分配 EV id。
+- 每个 MG id 必须恰好出现在一个 addition.gap_ids 或一个 skipped.gap_id 中。
+- 严格返回 output schema 要求的 JSON，不要返回 Markdown。
+"""
+
+
+def _validate_repair(
+    raw: dict[str, Any],
+    case_id: str,
+    expected_gap_ids: set[str],
+) -> dict[str, Any]:
+    if raw.get("case_id") != case_id:
+        raise DataQualityError("Metadata repair case_id 不一致")
+    additions = raw.get("additions")
+    skipped = raw.get("skipped")
+    if not isinstance(additions, list) or not isinstance(skipped, list):
+        raise DataQualityError("Metadata repair additions/skipped 不合法")
+    covered: list[str] = []
+    for index, item in enumerate(additions, 1):
+        if not isinstance(item, dict) or set(item) != {
+            "gap_ids",
+            "type",
+            "source_ref",
+            "content",
+        }:
+            raise DataQualityError(f"Metadata repair additions[{index}] 字段不合法")
+        gap_ids = item.get("gap_ids")
+        if not isinstance(gap_ids, list) or not gap_ids:
+            raise DataQualityError(f"Metadata repair additions[{index}] gap_ids 为空")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for key, value in item.items()
+            if key != "gap_ids"
+        ):
+            raise DataQualityError(f"Metadata repair additions[{index}] 存在空字段")
+        covered.extend(gap_ids)
+    for index, item in enumerate(skipped, 1):
+        if not isinstance(item, dict) or set(item) != {"gap_id", "reason"}:
+            raise DataQualityError(f"Metadata repair skipped[{index}] 字段不合法")
+        if not all(isinstance(value, str) and value.strip() for value in item.values()):
+            raise DataQualityError(f"Metadata repair skipped[{index}] 存在空字段")
+        covered.append(item["gap_id"])
+    if len(covered) != len(set(covered)) or set(covered) != expected_gap_ids:
+        raise DataQualityError("Metadata repair 未唯一处理全部 Metadata gap")
+    return raw
+
+
+def _merge_metadata(
+    metadata: dict[str, Any],
+    repair: dict[str, Any],
+) -> dict[str, Any]:
+    merged = {
+        "schema": metadata["schema"],
+        "case_id": metadata["case_id"],
+        "items": [dict(item) for item in metadata["items"]],
+        "unresolved": list(metadata["unresolved"]),
+    }
+    next_number = max(
+        int(item["id"].split("-", 1)[1])
+        for item in merged["items"]
+    ) + 1
+    for addition in repair["additions"]:
+        merged["items"].append(
+            {
+                "id": f"EV-{next_number:03d}",
+                "type": addition["type"],
+                "source_ref": addition["source_ref"],
+                "content": addition["content"],
+            }
+        )
+        next_number += 1
+    return _validate_metadata(merged, metadata["case_id"])
+
+
+def _validate_and_score_audit(
+    raw: dict[str, Any],
+    bundle: _CaseBundle,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    if raw.get("project") != bundle.project or raw.get("case_id") != bundle.case_id:
+        raise DataQualityError("Audit 项目标识不一致")
+    expected_ids = {item["id"] for item in metadata["items"]}
+    classifications = raw.get("evidence_classifications")
+    if not isinstance(classifications, list):
+        raise DataQualityError("Audit evidence_classifications 不合法")
+    actual_ids = [item.get("evidence_id") for item in classifications]
+    if len(actual_ids) != len(set(actual_ids)) or set(actual_ids) != expected_ids:
+        raise DataQualityError("Audit 未对全部 Evidence 唯一分类")
+    gt_core = raw.get("gt_core")
+    if not isinstance(gt_core, list) or not gt_core:
+        raise DataQualityError("Audit gt_core 为空")
+    gt_ids = {item.get("id") for item in gt_core}
+    omissions = raw.get("omissions")
+    conflicts = raw.get("conflicts")
+    metadata_gaps = raw.get("metadata_gaps")
+    if (
+        not isinstance(omissions, list)
+        or not isinstance(conflicts, list)
+        or not isinstance(metadata_gaps, list)
+    ):
+        raise DataQualityError("Audit omissions/conflicts/metadata_gaps 不合法")
+    if any(item.get("gt_id") not in gt_ids for item in omissions):
+        raise DataQualityError("Audit omission 引用了未知 GT")
+    gap_ids = [item.get("id") for item in metadata_gaps]
+    expected_gap_ids = [f"MG-{index:03d}" for index in range(1, len(gap_ids) + 1)]
+    if gap_ids != expected_gap_ids:
+        raise DataQualityError("Audit Metadata gap ID 不合法或重复")
+    for index, item in enumerate(metadata_gaps, 1):
+        if not isinstance(item, dict) or set(item) != {
+            "id",
+            "gt_ids",
+            "gap_type",
+            "importance",
+            "source_fact",
+            "source_ref",
+            "reason",
+        }:
+            raise DataQualityError(f"Audit Metadata gap[{index}] 字段不合法")
+        if (
+            not item["gt_ids"]
+            or any(gt_id not in gt_ids for gt_id in item["gt_ids"])
+        ):
+            raise DataQualityError("Audit Metadata gap 引用了未知 GT")
+        if item["gap_type"] not in {"missing", "underrepresented"}:
+            raise DataQualityError("Audit Metadata gap 类型不合法")
+        if item["importance"] not in {"critical", "material"}:
+            raise DataQualityError("Audit Metadata gap 重要性不合法")
+        if not all(
+            isinstance(item[key], str) and item[key].strip()
+            for key in ("source_fact", "source_ref", "reason")
+        ):
+            raise DataQualityError("Audit Metadata gap 存在空字段")
+    classified_conflicts = {
+        item["evidence_id"]
+        for item in classifications
+        if item.get("classification") == "conflict"
+    }
+    detailed_conflicts = {item.get("evidence_id") for item in conflicts}
+    if classified_conflicts != detailed_conflicts:
+        raise DataQualityError("Audit conflict 分类与明细不一致")
+    for item in conflicts:
+        reason = str(item.get("reason") or "")
+        rounding_only = (
+            "四舍五入" in reason
+            or re.search(r"相差\s*(?:1|一)(?:个|例|条|题)?", reason)
+        )
+        unchanged = any(
+            marker in reason
+            for marker in ("不受影响", "方向不变", "结论不变", "排序不变")
+        )
+        if "容差内" in reason or "不构成冲突" in reason or (
+            rounding_only and unchanged
+        ):
+            raise DataQualityError(
+                f"Audit 将容差内/取整差异误判为 conflict: {item.get('evidence_id')}"
+            )
+
+    counts = Counter(item["classification"] for item in classifications)
+    gt_total = len(gt_core)
+    source_total = len(classifications)
+    omission_count = len(omissions)
+    critical_omissions = sum(item.get("severity") == "critical" for item in omissions)
+    ordinary_omissions = omission_count - critical_omissions
+    conflict_severity: dict[str, str] = {}
+    for item in conflicts:
+        evidence_id = item["evidence_id"]
+        if item.get("severity") == "critical" or evidence_id not in conflict_severity:
+            conflict_severity[evidence_id] = item.get("severity", "material")
+    critical_conflicts = sum(value == "critical" for value in conflict_severity.values())
+    ordinary_conflicts = len(conflict_severity) - critical_conflicts
+    conflict_count = len(conflict_severity)
+
+    omission_ratio = omission_count / gt_total
+    conflict_ratio = conflict_count / gt_total
+    noise_rate = counts["noise"] / source_total
+    omission_score = 100 * (1 - omission_ratio)
+    conflict_score = max(
+        0.0,
+        100 - 20 * critical_conflicts - 10 * ordinary_conflicts,
+    )
+    signal_score = 100 * (1 - noise_rate)
+    overall_score = (
+        0.40 * omission_score
+        + 0.40 * conflict_score
+        + 0.20 * signal_score
+    )
+
+    result = dict(raw)
+    result.pop("confidence", None)
+    result.pop("confidence_notes", None)
+    result["metrics"] = {
+        "source_evidence_total": source_total,
+        "used_count": counts["used"],
+        "noise_count": counts["noise"],
+        "conflict_count": conflict_count,
+        "conflict_detail_count": len(conflicts),
+        "gt_core_total": gt_total,
+        "omission_count": omission_count,
+        "critical_omission_count": critical_omissions,
+        "ordinary_omission_count": ordinary_omissions,
+        "critical_conflict_count": critical_conflicts,
+        "ordinary_conflict_count": ordinary_conflicts,
+        "omission_ratio": round(omission_ratio, 4),
+        "conflict_ratio": round(conflict_ratio, 4),
+        "noise_rate": round(noise_rate, 4),
+        "omission_score": round(omission_score, 1),
+        "conflict_score": round(conflict_score, 1),
+        "signal_score": round(signal_score, 1),
+        "overall_score": round(overall_score, 1),
+        "source_file_count": sum(
+            1
+            for source in bundle.source_paths
+            for path in ([source] if source.is_file() else source.rglob("*"))
+            if path.is_file()
+        ),
+        "unresolved_count": len(metadata["unresolved"]),
+        "metadata_gap_count": len(metadata_gaps),
+    }
+    return result
+
+
+_OMISSION_SEVERITY = {"critical": "关键遗漏", "material": "普通遗漏"}
+_CONFLICT_SEVERITY = {"critical": "关键冲突", "material": "普通冲突"}
+_CLASSIFICATION = {"used": "已采用", "noise": "噪声", "conflict": "冲突"}
+
+
+def _clean(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ").strip()
+
+
+def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
+    """Render one scored project without document-generation dependencies."""
+
+    metrics = project["metrics"]
+    lines = [
+        f"# {project['project']} 数据质检报告",
+        "",
+        f"- 审计日期：{audit_date}",
+        f"- 评分版本：{SCORE_VERSION}",
+        "",
+        "## 结论",
+        "",
+        project["assessment"],
+        "",
+        "## 分数",
+        "",
+        "| 指标 | 结果 |",
+        "|---|---:|",
+        f"| 综合质量分 | {metrics['overall_score']:.1f} / 100 |",
+        f"| 遗漏覆盖分 | {metrics['omission_score']:.1f} / 100 |",
+        f"| 冲突一致性分 | {metrics['conflict_score']:.1f} / 100 |",
+        f"| 信噪分 | {metrics['signal_score']:.1f} / 100 |",
+        (
+            f"| 遗漏项 | {metrics['omission_count']}/{metrics['gt_core_total']}"
+            f"（{metrics['omission_ratio'] * 100:.1f}%）；关键遗漏 "
+            f"{metrics['critical_omission_count']} 条，普通遗漏 "
+            f"{metrics['ordinary_omission_count']} 条 |"
+        ),
+        (
+            f"| 冲突项 | {metrics['conflict_count']}/{metrics['gt_core_total']}"
+            f"（{metrics['conflict_ratio'] * 100:.1f}%）；关键冲突 "
+            f"{metrics['critical_conflict_count']} 条，普通冲突 "
+            f"{metrics['ordinary_conflict_count']} 条 |"
+        ),
+        (
+            f"| 信噪比（噪声占比） | {metrics['noise_count']}/"
+            f"{metrics['source_evidence_total']}"
+            f"（{metrics['noise_rate'] * 100:.1f}%） |"
+        ),
+        "",
+        "综合分 = 遗漏覆盖分×40% + 冲突一致性分×40% + 信噪分×20%。",
+        "",
+        f"## 遗漏项（{len(project['omissions'])}）",
+        "",
+    ]
+    for index, item in enumerate(project["omissions"], 1):
+        lines.extend(
+            [
+                (
+                    f"### O-{index:02d} "
+                    f"[{_OMISSION_SEVERITY[item['severity']]}] {item['gt_text']}"
+                ),
+                "",
+                f"- GT 原文：{item['gt_quote']}",
+                f"- 位置：{item['gt_location']}",
+                f"- 回查范围：{item['search_note']}",
+                f"- 判定：{item['reason']}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            (
+                f"## 冲突项（{metrics['conflict_count']} 项；"
+                f"{len(project['conflicts'])} 条 GT 对照明细）"
+            ),
+            "",
+        ]
+    )
+    for index, item in enumerate(project["conflicts"], 1):
+        lines.extend(
+            [
+                (
+                    f"### C-{index:02d} "
+                    f"[{_CONFLICT_SEVERITY[item['severity']]}] "
+                    f"{item['conflict_type']}"
+                ),
+                "",
+                f"- Groundtruth：{item['gt_quote']}",
+                f"- 来源论据：{item['source_text']}",
+                f"- 来源位置：{item['source_ref']}",
+                f"- 冲突说明：{item['reason']}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"## Metadata 完整性缺口（{len(project['metadata_gaps'])}）",
+            "",
+        ]
+    )
+    for item in project["metadata_gaps"]:
+        gap_label = (
+            "完全漏提"
+            if item["gap_type"] == "missing"
+            else "提取不完整"
+        )
+        lines.extend(
+            [
+                f"### {item['id']} [{gap_label}] {item['source_fact']}",
+                "",
+                f"- 对应 GT：{'、'.join(item['gt_ids'])}",
+                f"- 来源位置：{item['source_ref']}",
+                f"- 判定：{item['reason']}",
+                "",
+            ]
+        )
+    noise_items = [
+        item
+        for item in project["evidence_classifications"]
+        if item["classification"] == "noise"
+    ]
+    lines.extend(
+        [
+            (
+                f"## 噪声项（{len(noise_items)}；"
+                f"噪声率 {metrics['noise_rate'] * 100:.1f}%）"
+            ),
+            "",
+            "| 主题 | 证据 ID | 代表内容 | 未采用原因 |",
+            "|---|---|---|---|",
+        ]
+    )
+    for cluster in project["noise_clusters"]:
+        lines.append(
+            f"| {_clean(cluster['theme'])} | "
+            f"{_clean('、'.join(cluster['evidence_ids']))} | "
+            f"{_clean(cluster['representative_text'])} | "
+            f"{_clean(cluster['reason'])} |"
+        )
+    lines.extend(["", "## 口径与可核验风险", ""])
+    lines.extend(f"- {item}" for item in project["scope_risks"])
+    lines.extend(["", "## 整改建议", ""])
+    lines.extend(f"- {item}" for item in project["recommendations"])
+    lines.extend(
+        [
+            "",
+            "## 来源论据分类",
+            "",
+            "| ID | 分类 | 对应 GT | 判定依据 |",
+            "|---|---|---|---|",
+        ]
+    )
+    for item in project["evidence_classifications"]:
+        lines.append(
+            f"| {_clean(item['evidence_id'])} | "
+            f"{_CLASSIFICATION[item['classification']]} | "
+            f"{_clean('、'.join(item['gt_ids']) or '—')} | "
+            f"{_clean(item['reason'])} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _audit_payload(project: dict[str, Any], dataset_root: str) -> dict[str, Any]:
+    return {
+        "schema": "data-quality-audit/v2",
+        "audit_date": date.today().isoformat(),
+        "dataset_root": dataset_root,
+        "dataset_summary": {
+            "project_count": 1,
+            "overall_score": project["metrics"]["overall_score"],
+            "median_project_score": project["metrics"]["overall_score"],
+            "total_source_evidence": project["metrics"]["source_evidence_total"],
+            "total_gt_core": project["metrics"]["gt_core_total"],
+            "total_omissions": project["metrics"]["omission_count"],
+            "total_conflicts": project["metrics"]["conflict_count"],
+            "total_noise": project["metrics"]["noise_count"],
+            "total_metadata_gaps": project["metrics"]["metadata_gap_count"],
+        },
+        "methodology": {
+            "categories": ["omission", "conflict", "noise"],
+            "weights": {"omission": 0.40, "conflict": 0.40, "signal": 0.20},
+            "noise_rate": "noise / source_evidence_total",
+            "score_version": SCORE_VERSION,
+        },
+        "projects": [project],
+    }
+
+
+def _process_case(
+    bundle: _CaseBundle,
+    request: DataQualityRequest,
+    runner: CodexJsonRunner,
+    progress_callback: ProgressCallback | None = None,
+    should_cancel: CancelCallback | None = None,
+) -> DataQualityCaseResult:
+    started = time.monotonic()
+    output_dir = request.output_root.expanduser().resolve() / _safe_name(bundle.case_id)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = output_dir / "evidence_metadata.json"
+    audit_raw_path = output_dir / "audit.raw.json"
+    audit_path = output_dir / "audit.json"
+    report_path = output_dir / "audit.md"
+    gaps_path = output_dir / "metadata_gaps.json"
+    repair_raw_path = output_dir / "metadata_repair.raw.json"
+    repaired_metadata_path = output_dir / "evidence_metadata.repaired.json"
+    timings: dict[str, float] = {}
+    metadata_status = None
+    audit_status = None
+    repair_status = None
+    metadata_gap_count = 0
+    repaired_metadata_items = 0
+    try:
+        _check_cancelled(should_cancel)
+        _notify(progress_callback, "case_started", case_id=bundle.case_id)
+        metadata = None
+        if not request.force_metadata:
+            metadata = _load_valid_metadata(metadata_path, bundle.case_id)
+            if metadata is not None:
+                metadata_status = "skipped"
+            if metadata is None:
+                metadata = _load_valid_metadata(bundle.existing_metadata, bundle.case_id)
+                if metadata is not None:
+                    _write_json(metadata_path, metadata)
+                    metadata_status = "reused"
+        if metadata is None:
+            _notify(
+                progress_callback,
+                "stage_started",
+                case_id=bundle.case_id,
+                stage="metadata",
+            )
+            raw_metadata, elapsed = runner.run(
+                prompt=_metadata_prompt(
+                    bundle,
+                    request.metadata_skill.expanduser().resolve(),
+                ),
+                schema_path=request.metadata_schema.expanduser().resolve(),
+                cwd=REPO_ROOT,
+            )
+            timings["metadata"] = elapsed
+            metadata = _validate_metadata(raw_metadata, bundle.case_id)
+            _write_json(metadata_path, metadata)
+            metadata_status = "generated"
+        _notify(
+            progress_callback,
+            "stage_completed",
+            case_id=bundle.case_id,
+            stage="metadata",
+            status=metadata_status,
+        )
+
+        overall_score = None
+        audit_project = None
+        if "audit" in request.stages:
+            _check_cancelled(should_cancel)
+            _notify(
+                progress_callback,
+                "stage_started",
+                case_id=bundle.case_id,
+                stage="audit",
+            )
+            audit_payload = None
+            if audit_path.is_file() and not request.force_audit:
+                candidate = _read_json(audit_path)
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("schema") == "data-quality-audit/v2"
+                    and candidate.get("projects")
+                    and candidate["projects"][0].get("case_id") == bundle.case_id
+                    and isinstance(
+                        candidate["projects"][0].get("metadata_gaps"),
+                        list,
+                    )
+                ):
+                    audit_payload = candidate
+                    audit_status = "skipped"
+            if audit_payload is None:
+                prompt = _audit_prompt(
+                    bundle,
+                    metadata_path,
+                    request.audit_dimensions.expanduser().resolve(),
+                    request.audit_schema_doc.expanduser().resolve(),
+                )
+                audit_elapsed = 0.0
+                for semantic_attempt in range(request.retries + 1):
+                    raw_audit, elapsed = runner.run(
+                        prompt=prompt,
+                        schema_path=request.audit_schema.expanduser().resolve(),
+                        cwd=REPO_ROOT,
+                    )
+                    audit_elapsed += elapsed
+                    try:
+                        project = _validate_and_score_audit(
+                            raw_audit,
+                            bundle,
+                            metadata,
+                        )
+                        break
+                    except DataQualityError as exc:
+                        if semantic_attempt >= request.retries:
+                            raise
+                        prompt += (
+                            "\n\n上一次结构化结果未通过确定性校验："
+                            f"{exc}。请重新核验全部分类后输出完整 JSON。"
+                        )
+                timings["audit"] = round(audit_elapsed, 1)
+                _write_json(audit_raw_path, raw_audit)
+                dataset_root = str(
+                    request.dataset.expanduser().resolve().parent
+                    if request.dataset is not None
+                    else bundle.source_paths[0].parent
+                )
+                audit_payload = _audit_payload(project, dataset_root)
+                _write_json(audit_path, audit_payload)
+                report_path.write_text(
+                    render_audit_markdown(project, audit_payload["audit_date"]),
+                    encoding="utf-8",
+                )
+                audit_status = "generated"
+            audit_project = audit_payload["projects"][0]
+            overall_score = audit_project["metrics"]["overall_score"]
+            metadata_gap_count = len(audit_project["metadata_gaps"])
+            _write_json(
+                gaps_path,
+                _metadata_gaps_payload(bundle, audit_project),
+            )
+            _notify(
+                progress_callback,
+                "stage_completed",
+                case_id=bundle.case_id,
+                stage="audit",
+                status=audit_status,
+                overall_score=overall_score,
+            )
+
+        final_metadata = metadata
+        if "repair" in request.stages:
+            _check_cancelled(should_cancel)
+            _notify(
+                progress_callback,
+                "stage_started",
+                case_id=bundle.case_id,
+                stage="repair",
+            )
+            cached_repair = None
+            if repaired_metadata_path.is_file() and not any(
+                (
+                    request.force_metadata,
+                    request.force_audit,
+                    request.force_repair,
+                )
+            ):
+                cached_repair = _load_valid_metadata(
+                    repaired_metadata_path,
+                    bundle.case_id,
+                )
+            if cached_repair is not None:
+                final_metadata = cached_repair
+                repair_status = "skipped"
+            elif not audit_project["metadata_gaps"]:
+                _write_json(repaired_metadata_path, metadata)
+                final_metadata = metadata
+                repair_status = "not_needed"
+            else:
+                raw_repair, elapsed = runner.run(
+                    prompt=_repair_prompt(
+                        bundle,
+                        metadata_path,
+                        gaps_path,
+                    ),
+                    schema_path=request.metadata_repair_schema.expanduser().resolve(),
+                    cwd=REPO_ROOT,
+                )
+                timings["repair"] = elapsed
+                expected_gap_ids = {
+                    item["id"]
+                    for item in audit_project["metadata_gaps"]
+                }
+                repair = _validate_repair(
+                    raw_repair,
+                    bundle.case_id,
+                    expected_gap_ids,
+                )
+                final_metadata = _merge_metadata(metadata, repair)
+                _write_json(repair_raw_path, repair)
+                _write_json(repaired_metadata_path, final_metadata)
+                repair_status = "generated"
+            repaired_metadata_items = len(final_metadata["items"])
+            _notify(
+                progress_callback,
+                "stage_completed",
+                case_id=bundle.case_id,
+                stage="repair",
+                status=repair_status,
+            )
+
+        if request.publish_metadata and bundle.existing_metadata is not None:
+            _write_json(bundle.existing_metadata, final_metadata)
+
+        elapsed_total = round(time.monotonic() - started, 1)
+        _write_json(
+            output_dir / "run_manifest.json",
+            {
+                "schema": "openharness-data-quality-run/v1",
+                "case_id": bundle.case_id,
+                "project": bundle.project,
+                "stages": list(request.stages),
+                "model": request.model,
+                "effort": request.effort,
+                "metadata_status": metadata_status,
+                "audit_status": audit_status,
+                "repair_status": repair_status,
+                "stage_elapsed_seconds": timings,
+                "elapsed_seconds": elapsed_total,
+                "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "artifacts": {
+                    "metadata": str(metadata_path),
+                    "audit": str(audit_path) if "audit" in request.stages else None,
+                    "report": str(report_path) if "audit" in request.stages else None,
+                    "metadata_gaps": (
+                        str(gaps_path) if "audit" in request.stages else None
+                    ),
+                    "repaired_metadata": (
+                        str(repaired_metadata_path)
+                        if "repair" in request.stages
+                        else None
+                    ),
+                },
+            },
+        )
+        result = DataQualityCaseResult(
+            case_id=bundle.case_id,
+            project=bundle.project,
+            status="success",
+            output_dir=str(output_dir),
+            metadata_status=metadata_status,
+            audit_status=audit_status,
+            repair_status=repair_status,
+            metadata_items=len(metadata["items"]),
+            metadata_gap_count=metadata_gap_count,
+            repaired_metadata_items=repaired_metadata_items,
+            overall_score=overall_score,
+            elapsed_seconds=elapsed_total,
+        )
+        _notify(
+            progress_callback,
+            "case_completed",
+            case_id=bundle.case_id,
+            status=result.status,
+            overall_score=result.overall_score,
+        )
+        return result
+    except DataQualityCancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        result = DataQualityCaseResult(
+            case_id=bundle.case_id,
+            project=bundle.project,
+            status="failed",
+            output_dir=str(output_dir),
+            metadata_status=metadata_status,
+            audit_status=audit_status,
+            repair_status=repair_status,
+            metadata_gap_count=metadata_gap_count,
+            elapsed_seconds=round(time.monotonic() - started, 1),
+            error=str(exc),
+        )
+        _notify(
+            progress_callback,
+            "case_completed",
+            case_id=bundle.case_id,
+            status=result.status,
+            error=result.error,
+        )
+        return result
+
+
+def _batch_summary(result: DataQualityBatchResult) -> dict[str, Any]:
+    scored = [item.overall_score for item in result.cases if item.overall_score is not None]
+    return {
+        **result.to_dict(),
+        "average_case_score": (
+            round(statistics.mean(scored), 1) if scored else None
+        ),
+        "median_case_score": (
+            round(statistics.median(scored), 1) if scored else None
+        ),
+        "elapsed_seconds": round(
+            sum(item.elapsed_seconds for item in result.cases),
+            1,
+        ),
+    }
+
+
+def run_data_quality(
+    request: DataQualityRequest,
+    progress_callback: ProgressCallback | None = None,
+    should_cancel: CancelCallback | None = None,
+) -> DataQualityBatchResult:
+    """Run requested stages and return a serializable batch result."""
+
+    _check_cancelled(should_cancel)
+    required = [
+        request.metadata_skill,
+        request.metadata_schema,
+    ]
+    if "audit" in request.stages:
+        required.extend(
+            [
+                request.audit_dimensions,
+                request.audit_schema_doc,
+                request.audit_schema,
+            ]
+        )
+    if "repair" in request.stages:
+        required.append(request.metadata_repair_schema)
+    for raw_path in required:
+        path = raw_path.expanduser().resolve()
+        if not path.is_file():
+            raise DataQualityError(f"缺少工具资源: {path}")
+    bundles = _load_bundles(request)
+    request.output_root.expanduser().resolve().mkdir(parents=True, exist_ok=True)
+    started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    _notify(
+        progress_callback,
+        "workflow_started",
+        case_count=len(bundles),
+        stages=list(request.stages),
+    )
+    runner = CodexJsonRunner(request)
+    cases: list[DataQualityCaseResult] = []
+    workers = min(request.parallel, len(bundles))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(
+                _process_case,
+                bundle,
+                request,
+                runner,
+                progress_callback,
+                should_cancel,
+            ): bundle.case_id
+            for bundle in bundles
+        }
+        for future in as_completed(futures):
+            try:
+                cases.append(future.result())
+            except DataQualityCancelled:
+                for pending in futures:
+                    pending.cancel()
+                raise
+    order = {bundle.case_id: index for index, bundle in enumerate(bundles)}
+    cases.sort(key=lambda item: order[item.case_id])
+    if all(item.status == "success" for item in cases):
+        status = "success"
+    elif any(item.status == "success" for item in cases):
+        status = "partial"
+    else:
+        status = "failed"
+    result = DataQualityBatchResult(
+        status=status,
+        output_root=str(request.output_root.expanduser().resolve()),
+        started_at=started_at,
+        finished_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+        cases=cases,
+    )
+    _write_json(
+        request.output_root.expanduser().resolve() / "summary.json",
+        _batch_summary(result),
+    )
+    _notify(
+        progress_callback,
+        "workflow_completed",
+        status=result.status,
+        output_root=result.output_root,
+    )
+    return result
+
+
+__all__ = [
+    "CodexJsonRunner",
+    "DataQualityBatchResult",
+    "DataQualityCancelled",
+    "DataQualityCaseResult",
+    "DataQualityError",
+    "DataQualityRequest",
+    "render_audit_markdown",
+    "run_data_quality",
+]
