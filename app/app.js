@@ -7,6 +7,7 @@ let DIMS=["data_accuracy","completeness","insight","conciseness"];
 let ZH={data_accuracy:"数据准确性",completeness:"完整性",insight:"洞察质量",conciseness:"简洁性"};
 let SID=null, STATE=null;
 let GEN_JOB=null, GEN_CONFIG=null, GEN_POLL=null;
+let DQ_JOB=null, DQ_CONFIG=null, DQ_POLL=null;
 let JUDGE_SUMMARY=null, JUDGE_RESULTS=[], JUDGE_RUNNING=false;
 const GEN_TERMINAL_SEEN=new Set();
 
@@ -16,6 +17,22 @@ async function api(path,method,body){
   const opt={method,headers:{'Content-Type':'application/json'}};
   if(body)opt.body=JSON.stringify(body);
   const r=await fetch(path,opt);
+  if(r.status===401){authWall();throw new Error('未登录');}
+  const j=await r.json();
+  if(!r.ok){
+    toast(j.error||('错误 '+r.status));
+    const err=new Error(j.error||String(r.status));
+    err.status=r.status;
+    throw err;
+  }
+  return j;
+}
+async function uploadFile(path,file){
+  const r=await fetch(path,{
+    method:'POST',
+    headers:{'Content-Type':'application/octet-stream'},
+    body:file
+  });
   if(r.status===401){authWall();throw new Error('未登录');}
   const j=await r.json();
   if(!r.ok){
@@ -77,7 +94,8 @@ document.getElementById('genBtn').onclick=async()=>{
       v0_strategy:v0Strategy,
       optimizer_stop:optimizerStop
     });
-    SID=j.session_id; STATE=j; GEN_JOB=null; JUDGE_SUMMARY=null; JUDGE_RESULTS=[]; render();
+    stopQualityPoll();
+    SID=j.session_id; STATE=j; GEN_JOB=null; DQ_JOB=null; JUDGE_SUMMARY=null; JUDGE_RESULTS=[]; render();
     await loadSessions();
     const sessSel=document.getElementById('sessSel'); if(sessSel)sessSel.value=SID;
     toast('已生成 V0：'+j.product_id);
@@ -88,15 +106,129 @@ document.getElementById('genBtn').onclick=async()=>{
 };
 
 // ---- 2. 导入数据 ----
+const dataPackageInput=document.getElementById('dataPackageInput');
+const dataPackageDropZone=document.getElementById('dataPackageDropZone');
+const chooseDataPackageBtn=document.getElementById('chooseDataPackageBtn');
+
+async function readDroppedEntry(entry){
+  if(entry.isFile){
+    const file=await new Promise((resolve,reject)=>entry.file(resolve,reject));
+    return [{file,path:(entry.fullPath||file.name).replace(/^\/+/,'')}];
+  }
+  if(!entry.isDirectory)return [];
+  const reader=entry.createReader();
+  const children=[];
+  while(true){
+    const batch=await new Promise((resolve,reject)=>reader.readEntries(resolve,reject));
+    if(!batch.length)break;
+    children.push(...batch);
+  }
+  const nested=await Promise.all(children.map(readDroppedEntry));
+  return nested.flat();
+}
+
+async function importDataPackage(kind,items,name){
+  if(!SID){toast('请先生成 V0');return;}
+  if(!items.length){toast('没有读取到可上传文件');return;}
+  const btn=chooseDataPackageBtn;
+  const status=document.getElementById('dataUploadStatus');
+  btn.disabled=true;
+  try{
+    const upload=await api('/api/data-package/start','POST',{
+      id:SID,kind,name
+    });
+    let next=0,completed=0,totalBytes=0;
+    status.textContent=`正在上传 0/${items.length}`;
+    async function worker(){
+      while(next<items.length){
+        const index=next++;
+        const {file,path}=items[index];
+        const query=new URLSearchParams({
+          id:SID,upload_id:upload.upload_id,path
+        });
+        await uploadFile('/api/data-package/file?'+query.toString(),file);
+        completed++;totalBytes+=file.size;
+        status.textContent=`正在上传 ${completed}/${items.length} · ${(totalBytes/1024/1024).toFixed(1)} MB`;
+      }
+    }
+    await Promise.all(
+      Array.from({length:Math.min(4,items.length)},()=>worker())
+    );
+    status.textContent='正在解析项目并构造统一数据集…';
+    const result=await api('/api/data-package/finalize','POST',{
+      id:SID,upload_id:upload.upload_id
+    });
+    stopQualityPoll();
+    STATE=result.state;DQ_JOB=null;GEN_JOB=null;
+    render();
+    status.textContent=`已导入 ${result.case_count} 个真实项目`;
+    toast('真实项目包导入完成：'+result.case_count+' 个 case');
+  }catch(e){
+    status.textContent='导入失败：'+e.message;
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+chooseDataPackageBtn.onclick=()=>dataPackageInput.click();
+dataPackageInput.onchange=async()=>{
+  const files=Array.from(dataPackageInput.files||[]);
+  if(files.length!==1||!files[0].name.toLowerCase().endsWith('.zip')){
+    toast('请选择一个 ZIP 文件');return;
+  }
+  await importDataPackage(
+    'zip',
+    [{file:files[0],path:files[0].name}],
+    files[0].name
+  );
+  dataPackageInput.value='';
+};
+for(const eventName of ['dragenter','dragover']){
+  dataPackageDropZone.addEventListener(eventName,event=>{
+    event.preventDefault();
+    dataPackageDropZone.classList.add('dragging');
+  });
+}
+for(const eventName of ['dragleave','drop']){
+  dataPackageDropZone.addEventListener(eventName,event=>{
+    event.preventDefault();
+    dataPackageDropZone.classList.remove('dragging');
+  });
+}
+dataPackageDropZone.addEventListener('drop',async event=>{
+  const transferItems=Array.from(event.dataTransfer.items||[]);
+  const entries=transferItems
+    .map(item=>item.webkitGetAsEntry&&item.webkitGetAsEntry())
+    .filter(Boolean);
+  try{
+    if(entries.length===1&&entries[0].isFile){
+      const items=await readDroppedEntry(entries[0]);
+      if(items.length===1&&items[0].file.name.toLowerCase().endsWith('.zip')){
+        await importDataPackage('zip',items,items[0].file.name);
+        return;
+      }
+    }
+    if(entries.length===1&&entries[0].isDirectory){
+      const items=await readDroppedEntry(entries[0]);
+      await importDataPackage('folder',items,entries[0].name);
+      return;
+    }
+    toast('请一次拖入一个项目文件夹或一个 ZIP');
+  }catch(e){
+    toast('读取拖入数据失败：'+e.message);
+  }
+});
 document.getElementById('sampleBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0');return;}
   const j=await api('/api/data','POST',{id:SID,use_sample:true});
-  STATE=j; render(); toast('已导入内置样例：'+j.n_cases+' 条');
+  stopQualityPoll();
+  STATE=j; DQ_JOB=null; render(); toast('已导入内置样例：'+j.n_cases+' 条');
 };
 document.getElementById('configuredDataBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0');return;}
   const j=await api('/api/data','POST',{id:SID,use_configured:true});
-  STATE=j; render(); toast('已加载当前 WB 数据集：'+j.n_cases+' 条');
+  stopQualityPoll();
+  STATE=j; DQ_JOB=null; render(); toast('已加载当前 WB 数据集：'+j.n_cases+' 条');
 };
 document.getElementById('importBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0');return;}
@@ -109,8 +241,103 @@ document.getElementById('importBtn').onclick=async()=>{
       :raw.split('\n').filter(x=>x.trim()).map(x=>JSON.parse(x));
   }
   catch(e){toast('解析失败：'+e.message);return;}
-  const j=await api('/api/data','POST',{id:SID,rows}); STATE=j; render(); toast('已导入 '+j.n_cases+' 条');
+  const j=await api('/api/data','POST',{id:SID,rows});
+  stopQualityPoll(); STATE=j; DQ_JOB=null; render(); toast('已导入 '+j.n_cases+' 条');
 };
+
+// ---- 2a. 数据清洗与质检 ----
+function qualityActive(){return !!(DQ_JOB&&DQ_JOB.active);}
+function stopQualityPoll(){
+  if(DQ_POLL){clearInterval(DQ_POLL);DQ_POLL=null;}
+}
+async function pollQuality(){
+  if(!DQ_JOB)return;
+  try{
+    DQ_JOB=await api('/api/data-quality?id='+encodeURIComponent(DQ_JOB.job_id),'GET');
+    renderDataQualityPanel();
+    if(!DQ_JOB.active){
+      stopQualityPoll();
+      if(DQ_JOB.status==='completed')toast('数据质检完成：平均 '+fmt(DQ_JOB.average_score,1)+' 分');
+      else if(DQ_JOB.status==='failed')toast('数据质检失败：'+(DQ_JOB.error||'未知错误'),5000);
+    }
+  }catch(e){stopQualityPoll();}
+}
+function startQualityPoll(){
+  stopQualityPoll();
+  DQ_POLL=setInterval(pollQuality,1000);
+}
+async function loadLatestQuality(){
+  stopQualityPoll();
+  if(!SID){DQ_JOB=null;renderDataQualityPanel();return;}
+  try{
+    const j=await api('/api/data-quality?session_id='+encodeURIComponent(SID),'GET');
+    DQ_JOB=j.job||null;
+    renderDataQualityPanel();
+    if(qualityActive())startQualityPoll();
+  }catch(e){DQ_JOB=null;renderDataQualityPanel();}
+}
+document.getElementById('runQualityBtn').onclick=async()=>{
+  if(!SID||!STATE||!STATE.n_cases){toast('请先导入数据');return;}
+  const available=STATE.data_quality&&STATE.data_quality.available;
+  if(!available){toast((STATE.data_quality&&STATE.data_quality.reason)||'当前数据不可质检');return;}
+  const parallel=Number(document.getElementById('qualityParallel').value);
+  if(!Number.isInteger(parallel)||parallel<1){toast('清洗质检并发必须为正整数');return;}
+  const repair=document.getElementById('qualityRepair').checked;
+  DQ_JOB=await api('/api/data-quality/start','POST',{
+    id:SID,parallel,repair_metadata:repair
+  });
+  renderDataQualityPanel();startQualityPoll();toast('数据清洗与质检已启动');
+};
+document.getElementById('cancelQualityBtn').onclick=async()=>{
+  if(!DQ_JOB)return;
+  DQ_JOB=await api('/api/data-quality/cancel','POST',{job_id:DQ_JOB.job_id});
+  renderDataQualityPanel();toast('已请求停止数据质检');
+};
+function renderDataQualityPanel(){
+  const btn=document.getElementById('runQualityBtn');
+  const cancel=document.getElementById('cancelQualityBtn');
+  const status=document.getElementById('qualityStatus');
+  if(!btn||!status)return;
+  const capability=STATE&&STATE.data_quality;
+  const configReady=!DQ_CONFIG||DQ_CONFIG.ready;
+  btn.disabled=!(capability&&capability.available&&configReady)||qualityActive();
+  cancel.style.display=qualityActive()?'inline-block':'none';
+  if(!STATE||!STATE.n_cases){
+    status.innerHTML='<span class="mut">导入数据后可运行。</span>';return;
+  }
+  if(!capability||!capability.available){
+    status.innerHTML='<span class="mut">'+esc((capability&&capability.reason)||'当前数据不可质检')+'</span>';return;
+  }
+  if(DQ_CONFIG&&!DQ_CONFIG.ready){
+    status.innerHTML='<span class="warn-txt">'+esc(DQ_CONFIG.error||'数据质检配置不可用')+'</span>';return;
+  }
+  if(!DQ_JOB){
+    status.innerHTML='<span class="mut">将生成 Evidence Metadata，检查遗漏/冲突/噪声，并输出 Markdown 报告。</span>';return;
+  }
+  const done=DQ_JOB.completed_count||0,total=DQ_JOB.case_count||0;
+  const pct=total?Math.round(done/total*100):0;
+  const score=DQ_JOB.average_score==null?'—':fmt(DQ_JOB.average_score,1);
+  const omissionScore=DQ_JOB.average_omission_score==null?'—':fmt(DQ_JOB.average_omission_score,1);
+  const conflictScore=DQ_JOB.average_conflict_score==null?'—':fmt(DQ_JOB.average_conflict_score,1);
+  const signalScore=DQ_JOB.average_signal_score==null?'—':fmt(DQ_JOB.average_signal_score,1);
+  const statusZh={queued:'排队中',running:'质检中',cancel_requested:'停止中',completed:'已完成',partial:'部分完成',failed:'失败',cancelled:'已取消'};
+  status.innerHTML=
+    `<div class="kv"><span>状态</span><b>${esc(statusZh[DQ_JOB.status]||DQ_JOB.status)}</b></div>`+
+    `<div class="kv"><span>进度</span><span>${done}/${total}</span></div>`+
+    `<div class="kv"><span>平均质检得分</span><b class="${DQ_JOB.average_score!=null?'ok-txt':''}">${score}</b></div>`+
+    `<div class="kv"><span>遗漏覆盖分（40%）</span><span>${omissionScore}</span></div>`+
+    `<div class="kv"><span>冲突一致性分（40%）</span><span>${conflictScore}</span></div>`+
+    `<div class="kv"><span>信噪分（20%）</span><span>${signalScore}</span></div>`+
+    `<div class="barwrap" style="margin-top:6px"><div class="bar" style="width:${pct}%"></div></div>`+
+    (DQ_JOB.error?`<div class="warn-txt" style="margin-top:5px">${esc(DQ_JOB.error)}</div>`:'')+
+    `<details><summary>逐 case 结果</summary>${(DQ_JOB.cases||[]).map(c=>
+      `<div style="padding:5px 0;border-bottom:1px dashed var(--line)">`+
+      `<div class="kv"><span><span class="status-dot ${esc(c.status)}"></span>${esc(c.case_id)}</span>`+
+      `<b>${c.overall_score==null?esc(c.stage||c.status):fmt(c.overall_score,1)}</b></div>`+
+      (c.overall_score==null?'':`<div class="mut">遗漏 ${fmt(c.omission_score,1)} · 冲突 ${fmt(c.conflict_score,1)} · 信噪 ${fmt(c.signal_score,1)}</div>`)+
+      `</div>`
+    ).join('')}</details>`;
+}
 
 // ---- 3. 导入/补充报告文本 ----
 document.getElementById('importOutBtn').onclick=async()=>{
@@ -435,6 +662,7 @@ function render(){
     :'从基础 Skill 开始';
   document.getElementById('genRationale').innerHTML='<b>V0 起草方式：</b>'+esc(v0StrategyLabel)+'<br><b>生成依据：</b><br>'+esc(STATE.gen_rationale||'').replace(/\n/g,'<br>');
   ['dataCard','rubricCard','skillCard','realRunCard','outputCard'].forEach(id=>document.getElementById(id).classList.add('active'));
+  renderDataQualityPanel();
 
   // 版本 pills
   const pills=STATE.versions.map((v,i)=>{
@@ -664,8 +892,8 @@ async function loadSessions(){
 async function openSession(id){
   if(!id)return;
   const j=await api('/api/session?id='+encodeURIComponent(id),'GET');
-  SID=id; STATE=j; GEN_JOB=null; JUDGE_SUMMARY=null; JUDGE_RESULTS=[]; JUDGE_RUNNING=false;
-  render(); await loadLatestGeneration(); toast('已打开会话 '+id);
+  SID=id; STATE=j; GEN_JOB=null; DQ_JOB=null; JUDGE_SUMMARY=null; JUDGE_RESULTS=[]; JUDGE_RUNNING=false;
+  render(); await Promise.all([loadLatestGeneration(),loadLatestQuality()]); toast('已打开会话 '+id);
 }
 document.getElementById('openSessBtn').onclick=()=>openSession(document.getElementById('sessSel').value);
 document.getElementById('refreshSessBtn').onclick=loadSessions;
@@ -686,7 +914,15 @@ document.getElementById('refreshSessBtn').onclick=loadSessions;
         :('无法读取 WB 运行配置：'+(e.message||'未知错误'))
     };
   }
+  try{
+    DQ_CONFIG=await api('/api/data-quality/config','GET');
+    const qp=document.getElementById('qualityParallel');
+    if(qp&&DQ_CONFIG.parallel)qp.value=DQ_CONFIG.parallel;
+  }catch(e){
+    DQ_CONFIG={ready:false,error:'无法读取数据质检配置：'+(e.message||'未知错误')};
+  }
   renderGenerationPanel();
+  renderDataQualityPanel();
   await loadSessions();
   const qid=new URLSearchParams(location.search).get('id');
   if(qid){ document.getElementById('sessSel').value=qid; openSession(qid); }

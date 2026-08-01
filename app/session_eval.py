@@ -37,7 +37,12 @@ class SessionEval:
     """评估与推进 mixin。"""
 
     # ---------- 数据导入 ----------
-    def import_data(self, rows: List[Dict[str, Any]], account=None):
+    def import_data(
+        self,
+        rows: List[Dict[str, Any]],
+        account=None,
+        data_source=None,
+    ):
         # 同一份 openharness-wb/v1 JSON 同时服务 WB 生成和平台评测。
         # 旧数组/JSONL 在迁移期仍可读取，但不再静默跳过坏数据。
         normalized = openharness_rows(rows)
@@ -62,8 +67,11 @@ class SessionEval:
             r.setdefault("key_finding_ids", [])
             clean.append(r)
         self.cases = clean
+        self.data_source = dict(data_source or {"kind": "inline"})
         persist.append_event(self.id, "import_data", {
-            "n_cases": len(clean), "splits": self._split_counts(),
+            "n_cases": len(clean),
+            "splits": self._split_counts(),
+            "data_source": self.data_source,
         })
         # 重新评估当前版本
         r = self.evaluate(account)

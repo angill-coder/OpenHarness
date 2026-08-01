@@ -21,6 +21,24 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("configuredDataBtn", html)
         self.assertIn("JSON.parse(raw)", source)
 
+    def test_frontend_uploads_raw_folder_or_zip(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="dataPackageDropZone"', html)
+        self.assertIn('id="chooseDataPackageBtn"', html)
+        self.assertIn(">导入数据</button>", html)
+        self.assertIn("支持项目文件夹或 ZIP", html)
+        self.assertIn('id="dataPackageInput"', html)
+        self.assertIn('accept=".zip,application/zip"', html)
+        self.assertIn("readDroppedEntry", source)
+        self.assertIn("webkitGetAsEntry", source)
+        self.assertIn("importDataPackage('folder'", source)
+        self.assertNotIn("chooseProjectFolderBtn", html)
+        self.assertNotIn("chooseProjectZipBtn", html)
+        self.assertIn("'/api/data-package/start','POST'", source)
+        self.assertIn("'/api/data-package/file?'+query.toString()", source)
+        self.assertIn("'/api/data-package/finalize','POST'", source)
+
     def test_frontend_uses_backend_actions_for_loop_buttons(self):
         source = (APP / "app.js").read_text(encoding="utf-8")
         self.assertIn("STATE.actions&&STATE.actions.advance", source)
@@ -56,3 +74,16 @@ class FrontendContractTest(unittest.TestCase):
             "id:SID,version:STATE.current_version,parallel",
             source,
         )
+
+    def test_data_quality_workflow_is_available_after_data_import(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="runQualityBtn"', html)
+        self.assertIn('id="qualityStatus"', html)
+        self.assertIn("'/api/data-quality/start','POST'", source)
+        self.assertIn("renderDataQualityPanel", source)
+        self.assertIn("平均质检得分", source)
+        self.assertIn("遗漏覆盖分（40%）", source)
+        self.assertIn("冲突一致性分（40%）", source)
+        self.assertIn("信噪分（20%）", source)
+        self.assertIn("repair_metadata:repair", source)

@@ -126,6 +126,7 @@ class SessionCore:
         self.failure_history: List[List[Dict]] = []
 
         self.cases: List[Dict[str, Any]] = []
+        self.data_source: Dict[str, Any] = {"kind": "none"}
         # 数据集分组: {ds_id: {"id","name","case_ids":[...],"created_at"}}。
         # 一份 session 可并存多个数据集分组(同一份 data.json 里的不同 case 子集);
         # 每个版本通过 version_entry["dataset_id"] 绑定到其中一个分组来评测/生成/判分。
@@ -448,6 +449,7 @@ class SessionCore:
             "current_idx": self.current_idx,
             "opt_history": self.opt_history,
             "cases": self.cases,
+            "data_source": getattr(self, "data_source", {"kind": "none"}),
             "generation_imports": self.generation_imports,
             "versions": [{
                 "skill": v["skill"].to_dict(),
@@ -493,6 +495,7 @@ class SessionCore:
         self.backend = backend_mod.get_backend(product_id=self.rubric.get("product"))
         self.opt_history = snap.get("opt_history", [])
         self.cases = snap.get("cases", [])
+        self.data_source = snap.get("data_source") or {"kind": "legacy"}
         self.report_outputs = persist.load_outputs(self.id)   # 真实报告文本由 outputs.jsonl 恢复
         self.report_judgments = persist.load_judgments(self.id)  # 真实报告的 LLM-judge 评分由 judgments.jsonl 恢复
         self.judge_checks = persist.load_check_judgments(self.id)  # 逐check judge 由 check_judgments.jsonl 恢复
@@ -594,6 +597,25 @@ class SessionCore:
                 "enabled": False,
                 "reason": optimizer_stop["reason"],
             }
+        source = getattr(self, "data_source", {}) or {}
+        dataset_path = source.get("dataset_path")
+        quality_available = bool(
+            self.cases
+            and source.get("kind") in {"configured", "uploaded"}
+            and dataset_path
+            and os.path.isfile(dataset_path)
+        )
+        if quality_available:
+            quality_reason = None
+        elif not self.cases:
+            quality_reason = "请先导入数据"
+        elif source.get("kind") not in {"configured", "uploaded"}:
+            quality_reason = (
+                "当前数据没有可解析的本地素材路径；"
+                "请上传 source 项目文件夹或 ZIP"
+            )
+        else:
+            quality_reason = "原始数据集路径不存在"
         return {
             "session_id": self.id,
             "requirement": self.requirement,
@@ -604,6 +626,12 @@ class SessionCore:
             "gen_rationale": self.gen_rationale,
             "n_cases": len(self.cases),
             "splits": self._split_counts(),
+            "data_quality": {
+                "available": quality_available,
+                "reason": quality_reason,
+                "source_kind": source.get("kind"),
+                "dataset_path": dataset_path,
+            },
             "current_version": cur["version"],
             "rubric": self.rubric,
             "versions": [self._version_view(v) for v in self.versions],

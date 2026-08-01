@@ -223,6 +223,24 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertNotIn("echo", settings.models)
         self.assertEqual(settings.models, SUPPORTED_WB_MODELS)
 
+    def test_configuration_allows_dataset_to_come_from_session_upload(self):
+        settings = GenerationSettings(
+            **{
+                **self.settings.__dict__,
+                "dataset_path": self.root / "missing-default.json",
+            }
+        )
+        service = GenerationJobService(
+            {"test-session": self.session},
+            settings,
+            FakeRunner(),
+        )
+
+        configuration = service.configuration()
+
+        self.assertTrue(configuration["ready"])
+        self.assertIsNone(configuration["error"])
+
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
         original = self.session.evaluate
@@ -298,6 +316,32 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertIsNotNone(done.base_skill_hash)
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
+
+    def test_job_uses_uploaded_session_dataset(self):
+        uploaded = self.root / "uploaded.json"
+        uploaded.write_text(
+            self.dataset.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        self.session.data_source = {
+            "kind": "uploaded",
+            "dataset_path": str(uploaded),
+        }
+        fake = FakeRunner()
+        service = GenerationJobService(
+            {"test-session": self.session},
+            self.settings,
+            fake,
+        )
+
+        job, _ = service.start("test-session", "tester")
+        done = service.wait(job.job_id)
+
+        self.assertEqual(done.dataset_path, str(uploaded.resolve()))
+        self.assertEqual(
+            fake.requests[0].case_file,
+            uploaded.resolve(),
+        )
 
     def test_each_report_is_imported_before_the_batch_finishes(self):
         first_imported = threading.Event()

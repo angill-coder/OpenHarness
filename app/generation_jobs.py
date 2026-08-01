@@ -182,8 +182,11 @@ class GenerationSettings:
             ),
         )
 
-    def validate(self) -> None:
-        if not self.dataset_path.expanduser().is_file():
+    def validate(self, require_dataset: bool = True) -> None:
+        if (
+            require_dataset
+            and not self.dataset_path.expanduser().is_file()
+        ):
             raise GenerationJobError(
                 "WB dataset 不存在: %s" % self.dataset_path
             )
@@ -349,14 +352,14 @@ class GenerationJobService:
     def configuration(self) -> Dict:
         payload = self.settings.public_dict()
         try:
-            self._validate_runtime()
+            self._validate_runtime(require_dataset=False)
             payload.update({"ready": True, "error": None})
         except (GenerationJobError, OSError, ValueError) as exc:
             payload.update({"ready": False, "error": str(exc)})
         return payload
 
-    def _validate_runtime(self) -> None:
-        self.settings.validate()
+    def _validate_runtime(self, require_dataset: bool = True) -> None:
+        self.settings.validate(require_dataset=require_dataset)
         if not self._uses_real_runner:
             return
         try:
@@ -372,11 +375,15 @@ class GenerationJobService:
                 "WorkBuddy CLI 不存在: %s" % executable
             )
 
-    def _dataset_index(self) -> Dict[str, Dict[str, str]]:
+    def _dataset_index(
+        self,
+        dataset_path: Optional[Path] = None,
+    ) -> Dict[str, Dict[str, str]]:
+        selected_path = (
+            dataset_path or self.settings.dataset_path
+        ).expanduser().resolve()
         try:
-            cases = load_cases(
-                self.settings.dataset_path.expanduser().resolve()
-            )
+            cases = load_cases(selected_path)
         except Exception as exc:
             raise GenerationJobError(
                 "WB dataset 解析失败: %s" % exc
@@ -477,7 +484,7 @@ class GenerationJobService:
         idempotency_key: Optional[str] = None,
         parent_job_id: Optional[str] = None,
     ) -> tuple[GenerationJob, bool]:
-        self._validate_runtime()
+        self._validate_runtime(require_dataset=False)
         session = self.sessions.get(session_id)
         if session is None:
             raise GenerationJobError("会话不存在: %s" % session_id)
@@ -527,12 +534,26 @@ class GenerationJobService:
                     return active, True
                 self._active_by_session.pop(session_id, None)
 
-        dataset = self._dataset_index()
         with self.session_lock(session_id):
             if not session.cases:
                 raise GenerationJobError(
                     "请先给 Session 导入评测数据"
                 )
+            source = getattr(session, "data_source", {}) or {}
+            source_path = source.get("dataset_path")
+            selected_dataset_path = (
+                Path(source_path).expanduser().resolve()
+                if (
+                    source.get("kind") in {"configured", "uploaded"}
+                    and source_path
+                )
+                else self.settings.dataset_path.expanduser().resolve()
+            )
+            if not selected_dataset_path.is_file():
+                raise GenerationJobError(
+                    "Session 数据集不存在: %s" % selected_dataset_path
+                )
+            dataset = self._dataset_index(selected_dataset_path)
             session_cases = {
                 str(item["case_id"]): str(
                     item.get("split") or "dev"
@@ -590,9 +611,7 @@ class GenerationJobService:
             skill_version=version,
             skill_artifact_hash=skill_artifact_hash,
             execution_skill_hash=frozen_skill.directory_hash,
-            dataset_path=str(
-                self.settings.dataset_path.expanduser().resolve()
-            ),
+            dataset_path=str(selected_dataset_path),
             skill_mode="session_artifact",
             skill_ref=str(frozen_skill.path),
             model=selected_model,
@@ -602,9 +621,7 @@ class GenerationJobService:
             stall_timeout_seconds=self.settings.stall_timeout_seconds,
             created_at=now,
             updated_at=now,
-            dataset_sha256=_file_hash(
-                self.settings.dataset_path
-            ),
+            dataset_sha256=_file_hash(selected_dataset_path),
             compiler_version=frozen_skill.compiler_version,
             base_skill_hash=frozen_skill.base_skill_hash,
             cases=[

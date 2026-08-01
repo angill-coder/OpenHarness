@@ -1,6 +1,9 @@
 # OpenHarness · Skill 评测与迭代平台（Web）
 
-页面化工作台把「需求 → 生成 v0 → 导入数据 → WB CLI 批量生成/导入报告 → 模型批量 Judge → 迭代出下一版」串成一条链路。Web 层为 Python 标准库 + 单页原生 JS；真实报告生成需要本机可用的 WorkBuddy CLI，真实评分需要配置 Judge 模型。
+页面化工作台把「需求 → 生成 v0 → 导入数据 → 数据清洗与质检 → WB CLI
+批量生成/导入报告 → 模型批量 Judge → 迭代出下一版」串成一条链路。Web 层为
+Python 标准库 + 单页原生 JS；真实报告生成需要本机可用的 WorkBuddy CLI，真实
+评分需要配置 Judge 模型。
 
 ## 启动
 
@@ -68,8 +71,24 @@ Web UI 可为每次报告生成任务从 WorkBuddy 支持列表中选择模型�
 
 1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。调研洞察产品固定读取 `skills/research-report` 唯一基线，并按基线实际内容初始化已启用 directive；其它产品仍由 generator 生成 v0。
 2. **导入数据**：调研报告可直接点「加载当前 WB 数据集」，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `ground_truth` 作为评测参考：不会发送给 WB 生成模型，但会与报告、Rubric 一起发送给模型 Judge。
-3. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；case 启动后立即显示为生成中，无有效报告自动额外重试 3 次，每份成功报告产出后立即导入冻结版本。
-4. **批量模型 Judge**：点击「批量 Judge 全部 case」。系统以有限并发为每个 case 单独调用模型，并把逐-check结果汇总为六维分。
+3. **自动清洗并质检**：通过“加载当前 WB 数据集”导入后，可在步骤 2
+   运行 Metadata → Audit → 可选 Repair。任务在后台执行，页面展示逐 case
+   阶段、进度和平均质检得分，报告写为 Markdown。
+4. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；case 启动后立即显示为生成中，无有效报告自动额外重试 3 次，每份成功报告产出后立即导入冻结版本。
+5. **批量模型 Judge**：点击「批量 Judge 全部 case」。系统以有限并发为每个 case 单独调用模型，并把逐-check结果汇总为六维分。
+
+数据清洗与质检可用以下环境变量覆盖：
+
+```bash
+export OPENHARNESS_DATA_QUALITY_MODEL=gpt-5.6-sol
+export OPENHARNESS_DATA_QUALITY_EFFORT=medium
+export OPENHARNESS_DATA_QUALITY_PARALLEL=2
+export OPENHARNESS_DATA_QUALITY_OUTPUT=../quality_runs
+export OPENHARNESS_DATA_QUALITY_CODEX_CLI=codex
+```
+
+粘贴数据和内置样例没有可靠的本地素材基准路径，因此页面不会误启动质检；
+需要质检时使用“加载当前 WB 数据集”。
 
 ## 一键生成并导入报告
 
@@ -138,6 +157,7 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 | `session_generation.py` | 真实报告的批量、幂等导入 |
 | `generation_models.py` | GenerationJob/Case 状态契约 |
 | `generation_jobs.py` | 后台执行、进度、取消、重试、版本校验 |
+| `data_quality_jobs.py` | 后台执行数据清洗/质检、逐 case 进度、取消和得分汇总 |
 | `judge_batch.py` | 当前版本全部 case 的独立 Prompt、并发模型 Judge 与失败隔离 |
 | `server.py` | stdlib `http.server`，JSON API + 托管页面 |
 | `index.html` | 单页 UI（输入 + 版本演进 + 报告生成 + 批量 Judge + 看板）|
@@ -151,6 +171,10 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 | `POST /api/session` `{requirement, product_id?}` | 建会话，生成 v0 |
 | `GET /api/session?id=` | 当前会话完整状态 |
 | `POST /api/data` `{id, rows? / use_sample?}` | 导入数据 |
+| `GET /api/data-quality/config` | 查看数据清洗/质检运行配置 |
+| `POST /api/data-quality/start` `{id, repair_metadata?, parallel?}` | 后台启动数据清洗与质检 |
+| `GET /api/data-quality?id=<job_id>` | 查询任务、逐 case 阶段和质检得分 |
+| `POST /api/data-quality/cancel` `{job_id}` | 请求安全停止数据质检 |
 | `POST /api/rubric` `{id, weights?, target?}` | 编辑 rubric（存新版本）|
 | `POST /api/advance` `{id}` | 全部 case 模型 Judge 完成后生成下一版 skill |
 | `POST /api/import_output` `{id, case_id, report_text, version?}` | 存平台跑出的真实报告文本 |

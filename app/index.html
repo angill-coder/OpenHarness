@@ -53,7 +53,7 @@
   .job-case-error{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px 0 0 14px}
   .status-dot{display:inline-block;flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:var(--mut);margin-right:6px}
   .status-dot.running,.status-dot.retrying,.status-dot.importing{background:var(--warn)}
-  .status-dot.generated,.status-dot.imported,.status-dot.completed{background:var(--ok)}
+  .status-dot.generated,.status-dot.imported,.status-dot.completed,.status-dot.success{background:var(--ok)}
   .status-dot.failed,.status-dot.retry_exhausted,.status-dot.interrupted{background:var(--bad)}
   #generationConfig .kv span:last-child{max-width:70%;text-align:right;word-break:break-all}
   .kv{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dashed var(--line)}
@@ -66,6 +66,13 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);
        border:1px solid var(--acc);padding:10px 18px;border-radius:8px;z-index:9;max-width:70%}
   details summary{cursor:pointer;color:var(--acc);font-size:12px;margin-top:6px}
+  details summary.button-like{list-style:none;background:var(--panel2);color:var(--fg);
+       border:1px solid var(--line);border-radius:7px;padding:8px 14px;font-size:13px;
+       font-weight:600;margin:0}
+  details summary.button-like::-webkit-details-marker{display:none}
+  .upload-zone{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;
+       border:1px dashed var(--line);border-radius:9px;background:#141920}
+  .upload-zone.dragging{border-color:var(--acc);background:#172538}
   /* 打印：白底黑字、聚焦报告与模型 Judge 结果 */
   @media print{
     body{background:#fff;color:#000}
@@ -145,16 +152,44 @@
 
     <div class="card step" id="dataCard">
       <h2><span class="n">2</span>导入数据</h2>
-      <p class="small mut">调研报告使用统一 openharness-wb/v1 数据：同一份 JSON 同时驱动 WB 生成和模型 Judge；ground_truth 保留评测参考内容，且只发送给 Judge。</p>
-      <div class="row">
-        <button class="ghost" id="sampleBtn">用内置样例数据集</button>
-        <button class="ghost" id="configuredDataBtn">加载当前 WB 数据集</button>
+      <p class="small mut">上传真实项目文件夹或 ZIP。每个项目需包含一个 source 素材目录，以及一个 PDF/PPTX groundtruth；系统会自动构造统一数据集，供清洗质检、WB 生成和 Judge 共用。</p>
+      <div id="dataPackageDropZone" class="upload-zone">
+        <button id="chooseDataPackageBtn" type="button">导入数据</button>
+        <input id="dataPackageInput" type="file" accept=".zip,application/zip" hidden>
+        <span class="small mut">支持项目文件夹或 ZIP；文件夹可直接拖入此处</span>
+        <span id="dataUploadStatus" class="small mut"></span>
       </div>
-      <label style="margin-top:8px">或粘贴 JSONL / JSON 数组 / {cases:[...]}</label>
-      <textarea id="dataInput" placeholder='JSONL、JSON 数组，或 openharness-wb/v1 的 {cases:[...]}'></textarea>
-      <div class="row" style="margin-top:8px">
-        <button class="ghost" id="importBtn">导入</button>
+      <details style="margin-top:12px">
+        <summary class="small mut">开发调试 / 兼容旧数据导入</summary>
+        <div class="row" style="margin-top:8px">
+          <button class="ghost" id="sampleBtn">用内置样例数据集</button>
+          <button class="ghost" id="configuredDataBtn">加载当前 WB 数据集</button>
+        </div>
+        <label style="margin-top:8px">或粘贴 JSONL / JSON 数组 / {cases:[...]}</label>
+        <textarea id="dataInput" placeholder='JSONL、JSON 数组，或 openharness-wb/v1 的 {cases:[...]}'></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="ghost" id="importBtn">导入 JSON</button>
+        </div>
+      </details>
+      <div class="row">
         <span id="dataInfo" class="small mut"></span>
+      </div>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
+        <div class="row" style="align-items:flex-end">
+          <div style="flex:1">
+            <label for="qualityParallel">清洗质检最大并发</label>
+            <input id="qualityParallel" type="number" min="1" step="1" value="2">
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;margin:0 0 8px">
+            <input id="qualityRepair" type="checkbox" style="width:auto">
+            自动修复 Metadata
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="ok" id="runQualityBtn" disabled>▶ 自动清洗并质检</button>
+          <button class="ghost" id="cancelQualityBtn" style="display:none">停止</button>
+        </div>
+        <div id="qualityStatus" class="small mut" style="margin-top:8px"></div>
       </div>
     </div>
 

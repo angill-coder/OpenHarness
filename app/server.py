@@ -11,6 +11,9 @@ API:
   POST /api/session           {requirement, product_id?}  -> 建会话, 生成 v0 skill+rubric
   GET  /api/session?id=       -> 当前会话完整状态
   POST /api/data              {id, rows?, use_sample?, use_configured?} -> 导入数据
+  POST /api/data-quality/start {id, repair_metadata?, parallel?} -> 后台清洗与质检
+  GET  /api/data-quality?id=  -> 查询数据质检任务
+  POST /api/data-quality/cancel {job_id} -> 取消数据质检
   POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
   POST /api/advance           {id}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
@@ -47,6 +50,14 @@ from generation_jobs import (  # noqa: E402
     GenerationJobError,
     GenerationJobService,
 )
+from data_quality_jobs import (  # noqa: E402
+    DataQualityJobError,
+    DataQualityJobService,
+)
+from data_package_uploads import (  # noqa: E402
+    DataPackageUploadError,
+    DataPackageUploadService,
+)
 from judge_batch import (  # noqa: E402
     JUDGE_STRATEGY_PER_DIMENSION,
     judge_cases,
@@ -64,6 +75,8 @@ DATA_DIRS = {
 SESSIONS = {}          # sid -> Session
 PREFER_REAL = False
 GENERATION_SERVICE = None
+DATA_QUALITY_SERVICE = None
+DATA_PACKAGE_SERVICE = None
 _JUDGE_ACTIVE = set()
 _JUDGE_ACTIVE_LOCK = threading.Lock()
 
@@ -78,6 +91,12 @@ def _active_generation(sid):
     if GENERATION_SERVICE is None:
         return None
     return GENERATION_SERVICE.active_for_session(sid)
+
+
+def _active_data_quality(sid):
+    if DATA_QUALITY_SERVICE is None:
+        return None
+    return DATA_QUALITY_SERVICE.active_for_session(sid)
 
 
 def _claim_judge(sid):
@@ -449,6 +468,40 @@ class Handler(BaseHTTPRequestHandler):
                 }
             )
             return self._send(200, payload)
+        if u.path == "/api/data-quality/config":
+            if DATA_QUALITY_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "DataQualityJobService 尚未初始化"},
+                )
+            return self._send(200, DATA_QUALITY_SERVICE.configuration())
+        if u.path == "/api/data-quality":
+            if DATA_QUALITY_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "DataQualityJobService 尚未初始化"},
+                )
+            q = parse_qs(u.query)
+            job_id = (q.get("id") or [None])[0]
+            sid = (q.get("session_id") or [None])[0]
+            try:
+                if job_id:
+                    return self._send(
+                        200,
+                        DATA_QUALITY_SERVICE.get(job_id).to_dict(),
+                    )
+                if sid:
+                    latest = DATA_QUALITY_SERVICE.latest_for_session(sid)
+                    return self._send(
+                        200,
+                        {"job": latest.to_dict() if latest else None},
+                    )
+                return self._send(
+                    400,
+                    {"error": "缺少 id 或 session_id"},
+                )
+            except DataQualityJobError as exc:
+                return self._send(404, {"error": str(exc)})
         if u.path == "/api/generation":
             if GENERATION_SERVICE is None:
                 return self._send(
@@ -508,12 +561,41 @@ class Handler(BaseHTTPRequestHandler):
     # ---------------- POST ----------------
     def do_POST(self):
         u = urlparse(self.path)
-        b = self._body()
 
         # 所有写接口一律需要 iOA 身份
         acct = self._account()
         if not acct:
             return
+
+        if u.path == "/api/data-package/file":
+            if DATA_PACKAGE_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "DataPackageUploadService 尚未初始化"},
+                )
+            q = parse_qs(u.query)
+            sid = (q.get("id") or [""])[0]
+            upload_id = (q.get("upload_id") or [""])[0]
+            relative_path = (q.get("path") or [""])[0]
+            s = self._sess(sid)
+            if not s:
+                return
+            try:
+                content_length = int(
+                    self.headers.get("Content-Length", "-1")
+                )
+                upload = DATA_PACKAGE_SERVICE.upload_file(
+                    upload_id,
+                    sid,
+                    relative_path,
+                    self.rfile,
+                    content_length,
+                )
+            except (DataPackageUploadError, TypeError, ValueError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(200, upload.to_dict())
+
+        b = self._body()
 
         if u.path == "/api/session":
             req = (b.get("requirement") or "").strip()
@@ -567,6 +649,15 @@ class Handler(BaseHTTPRequestHandler):
                     409,
                     {"error": "批量 Judge 进行中，暂不能替换数据集"},
                 )
+            quality_job = _active_data_quality(s.id)
+            if quality_job:
+                return self._send(
+                    409,
+                    {
+                        "error": "数据质检进行中，暂不能替换数据集",
+                        "job_id": quality_job.job_id,
+                    },
+                )
             active = _active_generation(s.id)
             if active:
                 return self._send(
@@ -577,8 +668,10 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
             rows = b.get("rows")
+            data_source = {"kind": "inline"}
             if b.get("use_sample"):
                 rows = _load_sample(s.rubric.get("product"))
+                data_source = {"kind": "sample"}
             if b.get("use_configured"):
                 if GENERATION_SERVICE is None:
                     return self._send(
@@ -586,11 +679,16 @@ class Handler(BaseHTTPRequestHandler):
                         {"error": "GenerationJobService 尚未初始化"},
                     )
                 try:
-                    rows = load_openharness_rows(
+                    configured_path = (
                         GENERATION_SERVICE.settings.dataset_path
                         .expanduser()
                         .resolve()
                     )
+                    rows = load_openharness_rows(configured_path)
+                    data_source = {
+                        "kind": "configured",
+                        "dataset_path": str(configured_path),
+                    }
                 except (OSError, ValueError, json.JSONDecodeError) as exc:
                     return self._send(
                         400,
@@ -608,10 +706,147 @@ class Handler(BaseHTTPRequestHandler):
                 )
             try:
                 with _session_lock(s.id):
-                    result = s.import_data(rows, account=acct)
+                    result = s.import_data(
+                        rows,
+                        account=acct,
+                        data_source=data_source,
+                    )
             except ValueError as exc:
                 return self._send(400, {"error": str(exc)})
             return self._send(200, result)
+
+        if u.path == "/api/data-package/start":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            if DATA_PACKAGE_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "DataPackageUploadService 尚未初始化"},
+                )
+            if (
+                _active_judge(s.id)
+                or _active_data_quality(s.id)
+                or _active_generation(s.id)
+            ):
+                return self._send(
+                    409,
+                    {"error": "当前会话有任务运行中，暂不能替换数据集"},
+                )
+            try:
+                upload = DATA_PACKAGE_SERVICE.start(
+                    s.id,
+                    str(b.get("name") or "project-package"),
+                    str(b.get("kind") or ""),
+                )
+            except (DataPackageUploadError, OSError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(201, upload.to_dict())
+
+        if u.path == "/api/data-package/finalize":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            if DATA_PACKAGE_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "DataPackageUploadService 尚未初始化"},
+                )
+            if (
+                _active_judge(s.id)
+                or _active_data_quality(s.id)
+                or _active_generation(s.id)
+            ):
+                return self._send(
+                    409,
+                    {"error": "当前会话有任务运行中，暂不能替换数据集"},
+                )
+            try:
+                upload, case_count = DATA_PACKAGE_SERVICE.finalize(
+                    str(b.get("upload_id") or ""),
+                    s.id,
+                )
+                dataset_path = Path(str(upload.dataset_path))
+                rows = load_openharness_rows(dataset_path)
+                with _session_lock(s.id):
+                    state = s.import_data(
+                        rows,
+                        account=acct,
+                        data_source={
+                            "kind": "uploaded",
+                            "dataset_path": str(dataset_path.resolve()),
+                            "upload_id": upload.upload_id,
+                            "upload_name": upload.name,
+                        },
+                    )
+            except (
+                DataPackageUploadError,
+                OSError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(
+                200,
+                {
+                    "state": state,
+                    "upload": upload.to_dict(),
+                    "case_count": case_count,
+                },
+            )
+
+        if u.path == "/api/data-quality/start":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            if DATA_QUALITY_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "DataQualityJobService 尚未初始化"},
+                )
+            source = getattr(s, "data_source", {}) or {}
+            dataset_path = source.get("dataset_path")
+            if (
+                source.get("kind") not in {"configured", "uploaded"}
+                or not dataset_path
+            ):
+                return self._send(
+                    409,
+                    {
+                        "error": (
+                            "当前数据没有可解析的本地素材路径；"
+                            "请先上传 source 项目文件夹或 ZIP"
+                        )
+                    },
+                )
+            try:
+                job = DATA_QUALITY_SERVICE.start(
+                    session_id=s.id,
+                    dataset_path=Path(dataset_path),
+                    case_ids=[
+                        str(case["case_id"])
+                        for case in s.cases
+                    ],
+                    repair_metadata=bool(b.get("repair_metadata")),
+                    parallel=b.get("parallel"),
+                )
+            except (DataQualityJobError, OSError, ValueError) as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(202, job.to_dict())
+
+        if u.path == "/api/data-quality/cancel":
+            if DATA_QUALITY_SERVICE is None:
+                return self._send(
+                    503,
+                    {"error": "DataQualityJobService 尚未初始化"},
+                )
+            try:
+                job = DATA_QUALITY_SERVICE.cancel(
+                    str(b.get("job_id") or "")
+                )
+            except DataQualityJobError as exc:
+                return self._send(404, {"error": str(exc)})
+            return self._send(200, job.to_dict())
 
         if u.path == "/api/rubric":
             s = self._sess(b.get("id"))
@@ -915,10 +1150,12 @@ class Handler(BaseHTTPRequestHandler):
                         {"error": "GenerationJobService 尚未初始化"},
                     )
                 try:
-                    cases = _load_evidence_metadata(
-                        cases,
-                        GENERATION_SERVICE.settings.dataset_path,
+                    source = getattr(s, "data_source", {}) or {}
+                    dataset_path = (
+                        source.get("dataset_path")
+                        or GENERATION_SERVICE.settings.dataset_path
                     )
+                    cases = _load_evidence_metadata(cases, dataset_path)
                 except ValueError as exc:
                     return self._send(409, {"error": str(exc)})
 
@@ -1018,7 +1255,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global PREFER_REAL, GENERATION_SERVICE
+    global PREFER_REAL, GENERATION_SERVICE, DATA_QUALITY_SERVICE
+    global DATA_PACKAGE_SERVICE
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--host", default="127.0.0.1")
@@ -1028,6 +1266,8 @@ def main():
 
     _restore_all()
     GENERATION_SERVICE = GenerationJobService(SESSIONS)
+    DATA_QUALITY_SERVICE = DataQualityJobService()
+    DATA_PACKAGE_SERVICE = DataPackageUploadService()
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print("OpenHarness 平台已启动: http://%s:%d" % (args.host, args.port))

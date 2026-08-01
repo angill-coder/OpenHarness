@@ -14,6 +14,7 @@ data/
 
 # WorkBuddy 真实生成 trace/workspace（体积大，仅本地保留）
 generation_runs/
+quality_runs/
 app/sessions/*/generation_jobs/
 
 # 本地开发设计文档（不随产品代码发布）
