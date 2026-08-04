@@ -45,23 +45,65 @@ MAC_WORKBUDDY_CLI = Path(
 )
 
 
+def _windows_desktop_command(path: Path | None = None) -> tuple[str, ...] | None:
+    """Return the CLI embedded in a Windows WorkBuddy desktop install."""
+    if os.name != "nt":
+        return None
+    candidates = []
+    if path:
+        expanded = path.expanduser()
+        if expanded.name.lower() == "workbuddy.exe":
+            candidates.append(expanded.parent)
+        elif expanded.name.lower() == "codebuddy":
+            try:
+                candidates.append(expanded.parents[4])
+            except IndexError:
+                pass
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    candidates.append(Path.home() / "WorkBuddy")
+    if local_app_data:
+        candidates.append(Path(local_app_data) / "Programs" / "WorkBuddy")
+    for root in candidates:
+        executable = root / "WorkBuddy.exe"
+        cli = (
+            root
+            / "resources"
+            / "app.asar.unpacked"
+            / "cli"
+            / "bin"
+            / "codebuddy"
+        )
+        if executable.is_file() and cli.is_file():
+            return (str(executable), str(cli))
+    return None
+
+
+def _explicit_command(value: str) -> tuple[str, ...]:
+    path = Path(value).expanduser()
+    desktop = _windows_desktop_command(path)
+    return desktop or (str(path),)
+
+
 def discover_command(explicit: str | None = None) -> tuple[str, ...]:
     if explicit:
-        return (str(Path(explicit).expanduser()),)
+        return _explicit_command(explicit)
     from_environment = os.environ.get("WORKBUDDY_CLI")
     if from_environment:
-        return (str(Path(from_environment).expanduser()),)
+        return _explicit_command(from_environment)
     workbuddy = shutil.which("workbuddy")
     if workbuddy:
         return (workbuddy,)
     if MAC_WORKBUDDY_CLI.exists():
         return (str(MAC_WORKBUDDY_CLI),)
+    windows_desktop = _windows_desktop_command()
+    if windows_desktop:
+        return windows_desktop
     for name in ("codebuddy", "cbc"):
         candidate = shutil.which(name)
         if candidate:
             return (candidate,)
     raise FileNotFoundError(
-        "找不到 WorkBuddy CLI。请设置 WORKBUDDY_CLI 或传入 --cli-path。"
+        "找不到 WorkBuddy CLI。请设置 OPENHARNESS_WB_CLI_PATH/WORKBUDDY_CLI，或传入 --cli-path。"
     )
 
 
@@ -69,6 +111,9 @@ def infer_product_config(command: tuple[str, ...]) -> Path | None:
     if not command:
         return None
     cli = Path(command[0])
+    if len(command) > 1 and Path(command[1]).name.lower() == "codebuddy":
+        candidate = Path(command[1]).parent.parent / "product.json"
+        return candidate if candidate.exists() else None
     if "WorkBuddy.app" not in str(cli):
         return None
     candidate = cli.parent.parent / "product.json"
@@ -86,6 +131,12 @@ def build_environment(
     environment["CODEBUDDY_MEMORY_RELEVANCE_DISABLED"] = "1"
     environment["CODEBUDDY_MEMORY_EXTRACTION_DISABLED"] = "1"
     environment["CODEBUDDY_TEAM_MEMORY_ENABLED"] = "0"
+    if (
+        len(config.command) > 1
+        and Path(config.command[0]).name.lower() == "workbuddy.exe"
+        and Path(config.command[1]).name.lower() == "codebuddy"
+    ):
+        environment["ELECTRON_RUN_AS_NODE"] = "1"
     if config.workbuddy_home:
         environment["CODEBUDDY_CONFIG_DIR"] = str(config.workbuddy_home)
     if config.product_config:
