@@ -42,7 +42,7 @@ class UnifiedDatasetTest(unittest.TestCase):
                         "topic": "A",
                         "brief": "生成报告 A",
                     },
-                    "ground_truth": {},
+                    "human_report": {},
                     "input_files": [
                         {
                             "source": "./materials",
@@ -84,7 +84,7 @@ class UnifiedDatasetTest(unittest.TestCase):
         case = load_cases(self.dataset)[0]
 
         self.assertNotIn("input", case.data)
-        self.assertNotIn("ground_truth", case.data)
+        self.assertNotIn("human_report", case.data)
         self.assertNotIn("split", case.data)
         self.assertEqual(
             case.metadata["openharness_case_id"],
@@ -121,7 +121,7 @@ class UnifiedDatasetTest(unittest.TestCase):
 
         self.assertEqual(rows[0]["case_id"], "case-a")
         self.assertEqual(rows[0]["split"], "test")
-        self.assertEqual(rows[0]["ground_truth"], {})
+        self.assertEqual(rows[0]["human_report"], {})
 
 
 if __name__ == "__main__":

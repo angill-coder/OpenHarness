@@ -37,8 +37,8 @@ class ExternalRunConfigurationError(ValueError):
 
 
 _FORBIDDEN_GENERATION_KEYS = {
-    "ground_truth",
-    "ground_truth_findings",
+    "human_report",
+    "human_report_findings",
     "expected_insights",
     "supported_claims",
     "key_claim_ids",
@@ -123,7 +123,7 @@ def compile_execution_directive(contract: ReportOutputContract) -> str:
             "1. 必须显式加载并使用本次 workspace 中指定的 WorkBuddy Skill，"
             "不得替换为其他 Skill。",
             "2. 生成任务只能使用本 case workspace 中提供的材料；不得尝试读取"
-            " OpenHarness ground truth、Rubric、Judge 结果或人工评分。",
+            " OpenHarness human report、Rubric、Judge 结果或人工评分。",
             f"3. 最终报告必须写入 {contract.required_glob}。",
             "4. 报告文件完整写入且非空之前，不得宣布任务完成。",
             "5. 最终回复只需简要说明完成状态和报告路径；报告正文以文件为准。",

@@ -18,7 +18,7 @@
 
 **铁律共识（用户认同，别违反）**：
 - **结构定质量上限**：flow/subagent/memory schema 由人 v0 设对；Optimizer(MVP) 只翻 directive，不动结构。
-- **rubric 和数据是杠杆，不能外包给弱工程师**；ground_truth 与人工分是用户不可外包的核心。
+- **rubric 和数据是杠杆，不能外包给弱工程师**；human_report 与人工分是用户不可外包的核心。
 - **judge 校准一致率 ≥0.85 才允许开 Optimizer**（离线 `run_loop` 强制；app 的 advance 不强制）。
 
 **两个产品并存**（按 `rubric["product"]` / `product_id` 派发，互不干扰）：
@@ -43,7 +43,7 @@
 
 ### app/（stdlib http.server + 单页原生 JS，无依赖无 key）
 - `generator.py` 需求→v0 skill+rubric（`research_insight` 分支读 rubric_research.json）。
-- `session.py` 会话编排：产品无关维度（`self.dims` 从 rubric 取）；`import_data`（research 认 `ground_truth`）；`import_output`（贴真实报告文本）；`import_judgment`（贴平台 LLM-judge 六维分，**RecordedJudge**）；`_apply_recorded` 在 evaluate 后把真实报告/评分**覆盖** mock 分（有 judgment 的 case `score_source=recorded`，无则 `mock` 占位）。
+- `session.py` 会话编排：产品无关维度（`self.dims` 从 rubric 取）；`import_data`（research 认 `human_report`）；`import_output`（贴真实报告文本）；`import_judgment`（贴平台 LLM-judge 六维分，**RecordedJudge**）；`_apply_recorded` 在 evaluate 后把真实报告/评分**覆盖** mock 分（有 judgment 的 case `score_source=recorded`，无则 `mock` 占位）。
 - `persistence.py` 落盘：`sessions/<sid>/` 下 meta.json/events.jsonl/state.json/**outputs.jsonl**(真实报告)/**judgments.jsonl**(真实评分)。启动 `_restore_all` 恢复。
 - `server.py` API：`/api/session`(建/查)、`/api/data`、`/api/labels`、`/api/rubric`、`/api/advance`、`/api/import_output`、`/api/import_judgment`、`/api/sessions`、`/api/sample_data`。
 - `index.html` 单页 UI：左列（打开已有会话选择器 / 需求→V0 / 导入数据 / 编辑Rubric）、中列（版本演进+生成下一版 / 当前skill / 人工标注表 / 第4步导入报告文本+六维评分）、右列看板（校准/曲线/失败模式/当前Rubric）。`rubricDimsHtml()` 在左中右三处展开六维判据+目标+**checks**。
@@ -64,7 +64,7 @@
 - 完整锚点：`调研洞察汇报助手_Rubric落地文档.md`（人读）＝ `rubric_research.json`（机读）。checks 是本维展开的检查点，**仍汇成一个 1–5 分**（不单独打分、不改权重）。
 - overall 目标 4.0，校准门槛 0.85。
 
-**ground_truth 四条边界原则（用户拍板，建新 case 沿用）**：
+**human_report 四条边界原则（用户拍板，建新 case 沿用）**：
 1. 策略启示应答（列 expected_insight）、具体动作/投放留白（列 unsupportable_questions，硬答扣①）；
 2. noise_source_ids 只放**明显无关**（被引用=剔噪失败扣④）；
 3. 「≥2 独立信源否则降级待验证」只对**推断/归因类**（第三方面板单源可定论；仅访谈的机制类须标"定性/待验证"）；
@@ -78,9 +78,9 @@
 - `rr-ds-timelen` DeepSeek 用户时长分析
 - `rr-surge-eff` Surge AI 高人效
 - `rr-retention` 元宝/DS/豆包留存
-每条含 sources[](切片配 S-id) + ground_truth(supported_claims/key_claim_ids/expected_insights/unsupportable_questions/noise_source_ids/traps)。原始素材+抽出的正文在 `data/<案名>/`（`vF报告_正文.md`、`原始素材_正文.txt`）。
+每条含 sources[](切片配 S-id) + human_report(supported_claims/key_claim_ids/expected_insights/unsupportable_questions/noise_source_ids/traps)。原始素材+抽出的正文在 `data/<案名>/`（`vF报告_正文.md`、`原始素材_正文.txt`）。
 
-**`make_bad_variants.py`**：读某 case 的 ground_truth 半自动派生坏报告骨架+建议六维分+reasoning，`--into-session <sid>` 合并进会话。已支持缺陷：hardanswer/overclaim/single_source/conflict/metric_caveat/selection_bias/outlier/noise/listing/summary/style。生成物 `bad_variants.<case>.jsonl`（骨架含【填写】）。
+**`make_bad_variants.py`**：读某 case 的 human_report 半自动派生坏报告骨架+建议六维分+reasoning，`--into-session <sid>` 合并进会话。已支持缺陷：hardanswer/overclaim/single_source/conflict/metric_caveat/selection_bias/outlier/noise/listing/summary/style。生成物 `bad_variants.<case>.jsonl`（骨架含【填写】）。
 
 **三个 app 会话**（`app/sessions/`）：
 - **`research-calib`** 27 案 = 3 好报告(真实正文+judge草案分, overall 4.57/4.63/4.85) + 24 坏变体(已补具体正文, overall 3.22~3.78, 10 条红线)。**用途=校准**（judge分 vs 用户人工分）。driven by recorded → **跑不动优化器**。

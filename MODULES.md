@@ -154,7 +154,7 @@ signals 是 **judge/clustering 的唯一事实源**（HANDOFF §2）。`Research
 - WB `repetition=1`；无有效报告的条件重试由 façade 负责。
 - `status=success` 不代表报告成功；只有 `report_artifact.py` 验收通过
   才能进入 import/Judge。
-- `ground_truth`、rubric、人工/Judge 分不得进入 CaseSpec、workspace
+- `human_report`、rubric、人工/Judge 分不得进入 CaseSpec、workspace
   或生成 prompt。
 - `harness/workbuddy_batch/*` 是内部实现，协议调整需同步契约测试。
 - Web 侧只调用 façade；`generation_jobs.py` 负责异步 Job、Session 锁、

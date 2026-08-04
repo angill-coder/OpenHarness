@@ -33,7 +33,7 @@
 
 ## 关键字段:为什么 judge 靠它打分
 
-每条 case 的核心是 `ground_truth_findings` —— **正确计算出的事实,每条带 `id` / `value` / `source_ref`**。
+每条 case 的核心是 `human_report_findings` —— **正确计算出的事实,每条带 `id` / `value` / `source_ref`**。
 
 - judge 靠它核对**可回溯性**:报告里的数字能不能对上某条 finding。
 - judge 靠它抓**编造**:报告里出现了 `input.raw` 和 findings 里都没有的数字 = 编造 → 数据准确性红线(<3)。
@@ -44,7 +44,7 @@ case = {
   case_id, report_type, audience, required_sections,
   hard_case_tags: [...],
   input: { raw: {...含缺口/异常/矛盾...}, notes: [...] },
-  ground_truth_findings: [ {id, metric, value, unit, source_ref, [is_gap|is_conflict]} ],
+  human_report_findings: [ {id, metric, value, unit, source_ref, [is_gap|is_conflict]} ],
   key_finding_ids: [...],   # 必须覆盖,否则算漏报
   split: train|dev|test
 }

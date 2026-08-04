@@ -48,7 +48,7 @@ def run_data_workflow(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> DataWorkflowResult:
-    """Run Metadata -> Audit -> optional Repair for one or more cases."""
+    """Run Structured Data -> Audit -> optional Repair for one or more cases."""
 
     return run_data_quality(
         request,
@@ -71,32 +71,32 @@ def _add_audit_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         help="dataset 模式可重复筛选；Standalone 模式只允许一个",
     )
-    parser.add_argument("--groundtruth", type=Path, help="Standalone groundtruth 文件")
+    parser.add_argument("--human-report", type=Path, help="Standalone human_report 文件")
     parser.add_argument("--background", default="", help="Standalone 研究背景")
-    parser.add_argument("--metadata", type=Path, help="复用已有 Metadata")
+    parser.add_argument("--structured-data", type=Path, help="复用已有 Structured Data")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
-        "--metadata-only",
+        "--structured-data-only",
         action="store_true",
-        help="只生成 Metadata，不运行质检",
+        help="只生成 Structured Data，不运行质检",
     )
     parser.add_argument(
-        "--repair-metadata",
+        "--repair-structured-data",
         action="store_true",
-        help="质检后回查 source，补充 Metadata 抽取遗漏（3.1）",
+        help="质检后回查 source，补充 Structured Data 抽取遗漏（3.1）",
     )
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--effort", default="medium")
     parser.add_argument("--parallel", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=1800)
     parser.add_argument("--retries", type=int, default=1)
-    parser.add_argument("--force-metadata", action="store_true")
+    parser.add_argument("--force-structured-data", action="store_true")
     parser.add_argument("--force-audit", action="store_true")
     parser.add_argument("--force-repair", action="store_true")
     parser.add_argument(
-        "--publish-metadata",
+        "--publish-structured-data",
         action="store_true",
-        help="同时把 Metadata 发布到 OpenHarness case 目录",
+        help="同时把 Structured Data 发布到 OpenHarness case 目录",
     )
     parser.add_argument("--codex-cli", default="codex")
 
@@ -120,13 +120,13 @@ def _parser() -> argparse.ArgumentParser:
 
     audit = commands.add_parser(
         "audit",
-        help="运行 Metadata 与质量审计",
+        help="运行 Structured Data 与质量审计",
     )
     _add_audit_arguments(audit)
 
     run = commands.add_parser(
         "run",
-        help="运行完整质量 workflow（Metadata -> Audit -> 可选 Repair）",
+        help="运行完整质量 workflow（Structured Data -> Audit -> 可选 Repair）",
     )
     _add_audit_arguments(run)
     return parser
@@ -137,17 +137,17 @@ def _run_audit_command(args: argparse.Namespace) -> int:
     if args.source and len(case_ids) != 1:
         print("error: Standalone 模式必须且只能提供一个 --case-id", file=sys.stderr)
         return 2
-    if args.metadata_only and args.repair_metadata:
-        print("error: --metadata-only 不能与 --repair-metadata 同时使用", file=sys.stderr)
+    if args.structured_data_only and args.repair_structured_data:
+        print("error: --structured-data-only 不能与 --repair-structured-data 同时使用", file=sys.stderr)
         return 2
     try:
         stages = (
-            ("metadata",)
-            if args.metadata_only
+            ("structured_data",)
+            if args.structured_data_only
             else (
-                ("metadata", "audit", "repair")
-                if args.repair_metadata
-                else ("metadata", "audit")
+                ("structured_data", "audit", "repair")
+                if args.repair_structured_data
+                else ("structured_data", "audit")
             )
         )
         request = DataWorkflowRequest(
@@ -155,20 +155,20 @@ def _run_audit_command(args: argparse.Namespace) -> int:
             dataset=args.dataset,
             case_ids=case_ids if args.dataset else (),
             source_paths=tuple(args.source or ()),
-            groundtruth=args.groundtruth,
+            human_report=args.human_report,
             case_id=case_ids[0] if args.source else None,
             background=args.background,
-            metadata=args.metadata,
+            structured_data=args.structured_data,
             stages=stages,
             model=args.model,
             effort=args.effort,
             parallel=args.parallel,
             timeout_seconds=args.timeout,
             retries=args.retries,
-            force_metadata=args.force_metadata,
+            force_structured_data=args.force_structured_data,
             force_audit=args.force_audit,
             force_repair=args.force_repair,
-            publish_metadata=args.publish_metadata,
+            publish_structured_data=args.publish_structured_data,
             codex_command=(args.codex_cli,),
         )
         result = run_data_workflow(request)

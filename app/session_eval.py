@@ -45,9 +45,9 @@ class SessionEval:
         clean = []
         for source in normalized:
             r = copy.deepcopy(source)
-            if not is_research and "ground_truth_findings" not in r:
+            if not is_research and "human_report_findings" not in r:
                 raise ValueError(
-                    "算数字型 case %s 缺少 ground_truth_findings"
+                    "算数字型 case %s 缺少 human_report_findings"
                     % r["case_id"]
                 )
             r.setdefault("split", "dev")

@@ -35,7 +35,7 @@ class MockBackend(Backend):
 
     def run(self, skill, case):
         d = skill.directives()
-        gt = {f["id"]: f for f in case["ground_truth_findings"]}
+        human_report = {f["id"]: f for f in case["human_report_findings"]}
         tags = case.get("hard_case_tags", [])
         mem = skill.memory_content
 
@@ -44,12 +44,12 @@ class MockBackend(Backend):
         # ---- STEP 1: DataAnalyst 产出 findings ----
         findings = []
         for fid in ["F-001", "F-002", "F-003"]:
-            if fid in gt:
-                findings.append(self._emit_finding(gt[fid], d))
-        if "F-004" in gt:
-            findings.append(self._emit_finding(gt["F-004"], d))
-        if "F-005" in gt:
-            findings.append(self._emit_finding(gt["F-005"], d))
+            if fid in human_report:
+                findings.append(self._emit_finding(human_report[fid], d))
+        if "F-004" in human_report:
+            findings.append(self._emit_finding(human_report["F-004"], d))
+        if "F-005" in human_report:
+            findings.append(self._emit_finding(human_report["F-005"], d))
 
         fabricated = []
         if "missing_data" in tags:
@@ -130,10 +130,10 @@ class MockBackend(Backend):
         trace["steps"].append({"step": 5, "audience": audience, "buzzword": buzzword})
         return report, trace
 
-    def _emit_finding(self, gt_finding, directives):
-        f = {"id": gt_finding["id"], "value": gt_finding.get("value")}
+    def _emit_finding(self, human_report_finding, directives):
+        f = {"id": human_report_finding["id"], "value": human_report_finding.get("value")}
         if directives.get("require_citation"):
-            f["source_ref"] = gt_finding.get("source_ref", "")
+            f["source_ref"] = human_report_finding.get("source_ref", "")
         return f
 
 
@@ -177,10 +177,10 @@ class ResearchMockBackend(Backend):
     def run(self, skill, case):
         d = skill.directives()
         tags = set(case.get("hard_case_tags", []))
-        gt = case.get("ground_truth", {})
-        unsupportable = gt.get("unsupportable_questions", [])
-        noise = gt.get("noise_source_ids", [])
-        claims = gt.get("supported_claims", [])
+        human_report = case.get("human_report", {})
+        unsupportable = human_report.get("unsupportable_questions", [])
+        noise = human_report.get("noise_source_ids", [])
+        claims = human_report.get("supported_claims", [])
         single_source = any(len(c.get("source_ids", [])) < 2 for c in claims)
 
         sig = {

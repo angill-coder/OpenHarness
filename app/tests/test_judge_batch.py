@@ -24,7 +24,7 @@ from server import (  # noqa: E402
     _build_judge_prompt,
     _judge_parallelism,
     _judge_summary,
-    _load_evidence_metadata,
+    _load_structured_data,
     _llm_selection,
 )
 from session import Session  # noqa: E402
@@ -68,24 +68,24 @@ class JudgeBatchTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "整数"):
             _judge_parallelism(1.5)
 
-    def test_server_prompt_discards_ground_truth(self):
+    def test_server_prompt_discards_human_report(self):
         prompt = _build_judge_prompt(
             RUBRIC,
             "report",
             {
                 "case_id": "case-a",
                 "background": {"input": {"brief": "A"}},
-                "ground_truth": {"reference_report_text": "事实 A"},
+                "human_report": {"human_report_text": "事实 A"},
             },
         )
-        self.assertNotIn("Ground Truth", prompt)
+        self.assertNotIn("Human Report", prompt)
         self.assertNotIn("事实 A", prompt)
         self.assertIn('"Q1": "met"', prompt)
 
     def test_judges_all_cases_and_preserves_dataset_order(self):
         cases = [
-            {"case_id": "case-a", "ground_truth": {"answer": "A"}},
-            {"case_id": "case-b", "ground_truth": {"answer": "B"}},
+            {"case_id": "case-a", "human_report": {"answer": "A"}},
+            {"case_id": "case-b", "human_report": {"answer": "B"}},
         ]
 
         def call_model(prompt):
@@ -114,7 +114,7 @@ class JudgeBatchTest(unittest.TestCase):
         self.assertEqual([item["status"] for item in results], ["judged", "judged"])
         self.assertEqual(results[1]["checks"]["Q1"], "miss")
 
-    def test_prompt_context_excludes_ground_truth(self):
+    def test_prompt_context_excludes_human_report(self):
         prompts = []
 
         def call_model(prompt):
@@ -131,7 +131,7 @@ class JudgeBatchTest(unittest.TestCase):
                 {
                     "case_id": "case-a",
                     "input": {"brief": "A"},
-                    "ground_truth": {"secret": "answer"},
+                    "human_report": {"secret": "answer"},
                 }
             ],
             {"case-a": "report-a"},
@@ -141,7 +141,7 @@ class JudgeBatchTest(unittest.TestCase):
             extract_json,
         )
 
-        self.assertNotIn("ground_truth", prompts[0]["case_context"])
+        self.assertNotIn("human_report", prompts[0]["case_context"])
         self.assertEqual(
             prompts[0]["case_context"]["background"]["input"],
             {"brief": "A"},
@@ -150,7 +150,7 @@ class JudgeBatchTest(unittest.TestCase):
     def test_single_call_receives_all_available_context(self):
         prompts = []
         evidence = {
-            "schema": "openharness-evidence/v1",
+            "schema": "openharness-structured-data/v1",
             "case_id": "case-a",
             "items": [{"id": "EV-001"}],
             "unresolved": [],
@@ -173,8 +173,8 @@ class JudgeBatchTest(unittest.TestCase):
                         {"round": 0, "prompt": "任务"},
                         {"round": 1, "prompt": "背景"},
                     ],
-                    "ground_truth": {"reference_report_text": "GT"},
-                    "evidence_metadata": evidence,
+                    "human_report": {"human_report_text": "HR"},
+                    "structured_data": evidence,
                 }
             ],
             {"case-a": "report-a"},
@@ -191,7 +191,7 @@ class JudgeBatchTest(unittest.TestCase):
             {
                 "case_id",
                 "background",
-                "evidence_metadata",
+                "structured_data",
             },
         )
         self.assertEqual(
@@ -201,9 +201,9 @@ class JudgeBatchTest(unittest.TestCase):
 
     def test_missing_report_and_model_error_do_not_abort_batch(self):
         cases = [
-            {"case_id": "case-a", "ground_truth": {}},
-            {"case_id": "case-b", "ground_truth": {}},
-            {"case_id": "case-c", "ground_truth": {}},
+            {"case_id": "case-a", "human_report": {}},
+            {"case_id": "case-b", "human_report": {}},
+            {"case_id": "case-c", "human_report": {}},
         ]
 
         def call_model(prompt):
@@ -232,7 +232,7 @@ class JudgeBatchTest(unittest.TestCase):
 
     def test_incomplete_check_payload_is_rejected(self):
         results = judge_cases(
-            [{"case_id": "case-a", "ground_truth": {}}],
+            [{"case_id": "case-a", "human_report": {}}],
             {"case-a": "report"},
             RUBRIC,
             build_prompt,
@@ -312,9 +312,9 @@ class JudgeBatchTest(unittest.TestCase):
                         {"round": 0, "prompt": "任务"},
                         {"round": 1, "prompt": "背景"},
                     ],
-                    "ground_truth": {"reference_report_text": "GT"},
-                    "evidence_metadata": {
-                        "schema": "openharness-evidence/v1",
+                    "human_report": {"human_report_text": "HR"},
+                    "structured_data": {
+                        "schema": "openharness-structured-data/v1",
                         "case_id": "case-a",
                         "items": [{"id": "EV-001"}],
                         "unresolved": [],
@@ -331,18 +331,18 @@ class JudgeBatchTest(unittest.TestCase):
 
         self.assertEqual(
             set(prompts["traceability"]),
-            {"case_id", "background", "evidence_metadata"},
+            {"case_id", "background", "structured_data"},
         )
         self.assertEqual(
             set(prompts["insight"]),
-            {"case_id", "background", "evidence_metadata"},
+            {"case_id", "background", "structured_data"},
         )
         self.assertEqual(
             set(prompts["coverage"]),
             {
                 "case_id",
                 "background",
-                "evidence_metadata",
+                "structured_data",
             },
         )
         for dimension in ("structure", "narrative", "expression"):
@@ -442,7 +442,7 @@ class JudgeBatchTest(unittest.TestCase):
         )
         self.assertEqual(summary["model_calls_per_case"], 2)
 
-    def test_evidence_metadata_is_loaded_from_case_directory(self):
+    def test_structured_data_is_loaded_from_case_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             dataset = root / "data.json"
@@ -451,16 +451,16 @@ class JudgeBatchTest(unittest.TestCase):
             source_dir = case_dir / "source"
             source_dir.mkdir(parents=True)
             payload = {
-                "schema": "openharness-evidence/v1",
+                "schema": "openharness-structured-data/v1",
                 "case_id": "case-a",
                 "items": [{"id": "EV-001"}],
                 "unresolved": [],
             }
-            (case_dir / "evidence_metadata.json").write_text(
+            (case_dir / "structured_data.json").write_text(
                 json.dumps(payload),
                 encoding="utf-8",
             )
-            prepared = _load_evidence_metadata(
+            prepared = _load_structured_data(
                 [
                     {
                         "case_id": "case-a",
@@ -474,9 +474,9 @@ class JudgeBatchTest(unittest.TestCase):
                 ],
                 dataset,
             )
-        self.assertEqual(prepared[0]["evidence_metadata"], payload)
+        self.assertEqual(prepared[0]["structured_data"], payload)
 
-    def test_missing_evidence_metadata_fails_preflight(self):
+    def test_missing_structured_data_fails_preflight(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             dataset = root / "data.json"
@@ -484,9 +484,9 @@ class JudgeBatchTest(unittest.TestCase):
             (root / "case-a" / "source").mkdir(parents=True)
             with self.assertRaisesRegex(
                 ValueError,
-                "Evidence Metadata 预检失败",
+                "Structured Data 预检失败",
             ):
-                _load_evidence_metadata(
+                _load_structured_data(
                     [
                         {
                             "case_id": "case-a",
@@ -530,7 +530,7 @@ class ModelOnlySessionTest(unittest.TestCase):
                 {
                     "case_id": "case-a",
                     "input": {"brief": "A"},
-                    "ground_truth": {},
+                    "human_report": {},
                     "split": "dev",
                 }
             ]
@@ -571,13 +571,13 @@ class ModelOnlySessionTest(unittest.TestCase):
                 {
                     "case_id": "case-a",
                     "input": {"brief": "A"},
-                    "ground_truth": {},
+                    "human_report": {},
                     "split": "dev",
                 },
                 {
                     "case_id": "case-b",
                     "input": {"brief": "B"},
-                    "ground_truth": {},
+                    "human_report": {},
                     "split": "dev",
                 },
             ]
@@ -622,7 +622,7 @@ class ModelOnlySessionTest(unittest.TestCase):
                 {
                     "case_id": "case-a",
                     "input": {"brief": "A"},
-                    "ground_truth": {},
+                    "human_report": {},
                     "split": "dev",
                 }
             ]
@@ -664,7 +664,7 @@ class ModelOnlySessionTest(unittest.TestCase):
                 {
                     "case_id": "case-a",
                     "input": {"brief": "A"},
-                    "ground_truth": {},
+                    "human_report": {},
                 }
             ]
         )

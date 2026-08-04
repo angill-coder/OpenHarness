@@ -22,11 +22,11 @@ JUDGE_STRATEGIES = {
 }
 
 _DIMENSION_CONTEXT_KEYS = {
-    "traceability": ("background", "evidence_metadata"),
+    "traceability": ("background", "structured_data"),
     "structure": (),
     "narrative": (),
-    "insight": ("background", "evidence_metadata"),
-    "coverage": ("background", "evidence_metadata"),
+    "insight": ("background", "structured_data"),
+    "coverage": ("background", "structured_data"),
     "expression": (),
 }
 
@@ -114,8 +114,8 @@ def _full_case_context(case: Dict) -> Dict:
         "case_id": str(case.get("case_id") or ""),
         "background": _background_context(case),
     }
-    if case.get("evidence_metadata"):
-        context["evidence_metadata"] = case["evidence_metadata"]
+    if case.get("structured_data"):
+        context["structured_data"] = case["structured_data"]
     return context
 
 

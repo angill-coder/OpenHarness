@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Private source-metadata and data-quality audit engine.
+"""Private source-structured-data and data-quality audit engine.
 
 The module deliberately has no OpenHarness app dependency.  It accepts either
 an OpenHarness ``data.json`` or one standalone case, then runs Codex-backed
@@ -24,8 +24,8 @@ from typing import Any, Callable, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ASSET_ROOT = Path(__file__).resolve().parent / "data_quality_assets"
-METADATA_SKILL = ASSET_ROOT / "metadata_prompt.md"
-METADATA_SCHEMA = ASSET_ROOT / "metadata.schema.json"
+STRUCTURED_DATA_SKILL = ASSET_ROOT / "structured_data_prompt.md"
+STRUCTURED_DATA_SCHEMA = ASSET_ROOT / "structured_data.schema.json"
 AUDIT_DIMENSIONS = (
     REPO_ROOT / "skills" / "data-quality-audit" / "references" / "dimensions.md"
 )
@@ -33,9 +33,9 @@ AUDIT_SCHEMA_DOC = (
     REPO_ROOT / "skills" / "data-quality-audit" / "references" / "result-schema.md"
 )
 AUDIT_SCHEMA = ASSET_ROOT / "audit.schema.json"
-METADATA_REPAIR_SCHEMA = ASSET_ROOT / "metadata_repair.schema.json"
+STRUCTURED_DATA_REPAIR_SCHEMA = ASSET_ROOT / "structured_data_repair.schema.json"
 
-DEFAULT_STAGES = ("metadata", "audit")
+DEFAULT_STAGES = ("structured_data", "audit")
 SCORE_VERSION = "dq-v2.1"
 
 
@@ -73,40 +73,40 @@ class DataQualityRequest:
     dataset: Path | None = None
     case_ids: tuple[str, ...] = ()
     source_paths: tuple[Path, ...] = ()
-    groundtruth: Path | None = None
+    human_report: Path | None = None
     case_id: str | None = None
     background: str = ""
-    metadata: Path | None = None
+    structured_data: Path | None = None
     stages: tuple[str, ...] = DEFAULT_STAGES
     model: str = "gpt-5.6-sol"
     effort: str = "medium"
     parallel: int = 1
     timeout_seconds: float = 1800.0
     retries: int = 1
-    force_metadata: bool = False
+    force_structured_data: bool = False
     force_audit: bool = False
     force_repair: bool = False
-    publish_metadata: bool = False
+    publish_structured_data: bool = False
     codex_command: tuple[str, ...] = ("codex",)
-    metadata_skill: Path = METADATA_SKILL
-    metadata_schema: Path = METADATA_SCHEMA
+    structured_data_skill: Path = STRUCTURED_DATA_SKILL
+    structured_data_schema: Path = STRUCTURED_DATA_SCHEMA
     audit_dimensions: Path = AUDIT_DIMENSIONS
     audit_schema_doc: Path = AUDIT_SCHEMA_DOC
     audit_schema: Path = AUDIT_SCHEMA
-    metadata_repair_schema: Path = METADATA_REPAIR_SCHEMA
+    structured_data_repair_schema: Path = STRUCTURED_DATA_REPAIR_SCHEMA
 
     def __post_init__(self) -> None:
         if bool(self.dataset) == bool(self.source_paths):
             raise ValueError("dataset 与 source_paths 必须且只能提供一种")
         if self.dataset is None and not (self.case_id or "").strip():
             raise ValueError("Standalone 模式必须提供 case_id")
-        unknown = set(self.stages) - {"metadata", "audit", "repair"}
+        unknown = set(self.stages) - {"structured_data", "audit", "repair"}
         if unknown or not self.stages:
             raise ValueError(f"不支持的 stages: {sorted(unknown)}")
         if "repair" in self.stages and "audit" not in self.stages:
             raise ValueError("repair 阶段必须同时运行 audit")
-        if "audit" in self.stages and self.dataset is None and self.groundtruth is None:
-            raise ValueError("Standalone audit 必须提供 groundtruth")
+        if "audit" in self.stages and self.dataset is None and self.human_report is None:
+            raise ValueError("Standalone audit 必须提供 human_report")
         if self.parallel < 1:
             raise ValueError("parallel 必须至少为 1")
         if self.timeout_seconds <= 0:
@@ -123,12 +123,12 @@ class DataQualityCaseResult:
     project: str
     status: str
     output_dir: str
-    metadata_status: str | None = None
+    structured_data_status: str | None = None
     audit_status: str | None = None
     repair_status: str | None = None
-    metadata_items: int = 0
-    metadata_gap_count: int = 0
-    repaired_metadata_items: int = 0
+    structured_data_items: int = 0
+    structured_data_gap_count: int = 0
+    repaired_structured_data_items: int = 0
     overall_score: float | None = None
     elapsed_seconds: float = 0.0
     error: str | None = None
@@ -168,9 +168,9 @@ class _CaseBundle:
     project: str
     background: str
     source_paths: tuple[Path, ...]
-    groundtruth_text: str
-    groundtruth_file: Path | None
-    existing_metadata: Path | None
+    human_report_text: str
+    human_report_file: Path | None
+    existing_structured_data: Path | None
 
 
 def _safe_name(value: str) -> str:
@@ -232,7 +232,7 @@ def _resolve_source_paths(case: dict[str, Any], base: Path) -> tuple[Path, ...]:
     return tuple(paths)
 
 
-def _project_and_metadata(
+def _project_and_structured_data(
     sources: tuple[Path, ...],
 ) -> tuple[str, Path | None]:
     parents = {
@@ -242,7 +242,7 @@ def _project_and_metadata(
     }
     if len(parents) == 1:
         case_dir = next(iter(parents))
-        return case_dir.name, case_dir / "evidence_metadata.json"
+        return case_dir.name, case_dir / "structured_data.json"
     first = sources[0]
     return (first.parent.name if first.is_file() else first.name), None
 
@@ -253,23 +253,23 @@ def _load_bundles(request: DataQualityRequest) -> list[_CaseBundle]:
         missing = [str(path) for path in sources if not path.exists()]
         if missing:
             raise DataQualityError("原始资料不存在: " + ", ".join(missing))
-        groundtruth = request.groundtruth
-        if groundtruth is not None:
-            groundtruth = groundtruth.expanduser().resolve()
-            if not groundtruth.is_file():
-                raise DataQualityError(f"groundtruth 不存在: {groundtruth}")
-        project, discovered = _project_and_metadata(sources)
+        human_report = request.human_report
+        if human_report is not None:
+            human_report = human_report.expanduser().resolve()
+            if not human_report.is_file():
+                raise DataQualityError(f"human_report 不存在: {human_report}")
+        project, discovered = _project_and_structured_data(sources)
         return [
             _CaseBundle(
                 case_id=str(request.case_id),
                 project=project,
                 background=request.background.strip(),
                 source_paths=sources,
-                groundtruth_text="",
-                groundtruth_file=groundtruth,
-                existing_metadata=(
-                    request.metadata.expanduser().resolve()
-                    if request.metadata is not None
+                human_report_text="",
+                human_report_file=human_report,
+                existing_structured_data=(
+                    request.structured_data.expanduser().resolve()
+                    if request.structured_data is not None
                     else discovered
                 ),
             )
@@ -293,29 +293,29 @@ def _load_bundles(request: DataQualityRequest) -> list[_CaseBundle]:
         if selected and case_id not in selected:
             continue
         sources = _resolve_source_paths(case, dataset.parent)
-        project, metadata_path = _project_and_metadata(sources)
-        ground_truth = case.get("ground_truth") or {}
-        gt_text = str(ground_truth.get("reference_report_text") or "").strip()
-        gt_file_value = str(ground_truth.get("reference_report_file") or "").strip()
-        gt_file = None
-        if gt_file_value:
-            gt_file = Path(gt_file_value).expanduser()
-            if not gt_file.is_absolute():
-                gt_file = dataset.parent / gt_file
-            gt_file = gt_file.resolve()
-            if not gt_file.is_file():
-                gt_file = None
-        if "audit" in request.stages and not gt_text and gt_file is None:
-            raise DataQualityError(f"{case_id} 缺少可用 groundtruth")
+        project, structured_data_path = _project_and_structured_data(sources)
+        human_report = case.get("human_report") or {}
+        human_report_text = str(human_report.get("human_report_text") or "").strip()
+        human_report_file_value = str(human_report.get("human_report_file") or "").strip()
+        human_report_file = None
+        if human_report_file_value:
+            human_report_file = Path(human_report_file_value).expanduser()
+            if not human_report_file.is_absolute():
+                human_report_file = dataset.parent / human_report_file
+            human_report_file = human_report_file.resolve()
+            if not human_report_file.is_file():
+                human_report_file = None
+        if "audit" in request.stages and not human_report_text and human_report_file is None:
+            raise DataQualityError(f"{case_id} 缺少可用 human_report")
         bundles.append(
             _CaseBundle(
                 case_id=case_id,
                 project=project,
                 background=_background(case),
                 source_paths=sources,
-                groundtruth_text=gt_text,
-                groundtruth_file=gt_file,
-                existing_metadata=metadata_path,
+                human_report_text=human_report_text,
+                human_report_file=human_report_file,
+                existing_structured_data=structured_data_path,
             )
         )
     missing_ids = sorted(selected - available)
@@ -393,18 +393,18 @@ class CodexJsonRunner:
         raise DataQualityError(last_error)
 
 
-def _validate_metadata(payload: Any, case_id: str) -> dict[str, Any]:
+def _validate_structured_data(payload: Any, case_id: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
-        raise DataQualityError("Metadata 不是 JSON 对象")
-    if payload.get("schema") != "openharness-evidence/v1":
-        raise DataQualityError("Metadata schema 不正确")
+        raise DataQualityError("Structured Data 不是 JSON 对象")
+    if payload.get("schema") != "openharness-structured-data/v1":
+        raise DataQualityError("Structured Data schema 不正确")
     if payload.get("case_id") != case_id:
-        raise DataQualityError("Metadata case_id 不一致")
+        raise DataQualityError("Structured Data case_id 不一致")
     if set(payload) != {"schema", "case_id", "items", "unresolved"}:
-        raise DataQualityError("Metadata 包含未约定字段")
+        raise DataQualityError("Structured Data 包含未约定字段")
     items = payload.get("items")
     if not isinstance(items, list) or not items:
-        raise DataQualityError("Metadata items 为空")
+        raise DataQualityError("Structured Data items 为空")
     ids = []
     for index, item in enumerate(items, 1):
         if not isinstance(item, dict) or set(item) != {
@@ -413,9 +413,9 @@ def _validate_metadata(payload: Any, case_id: str) -> dict[str, Any]:
             "source_ref",
             "content",
         }:
-            raise DataQualityError(f"Metadata items[{index}] 字段不合法")
+            raise DataQualityError(f"Structured Data items[{index}] 字段不合法")
         if not all(isinstance(value, str) and value.strip() for value in item.values()):
-            raise DataQualityError(f"Metadata items[{index}] 存在空字段")
+            raise DataQualityError(f"Structured Data items[{index}] 存在空字段")
         if not re.fullmatch(r"EV-\d{3,}", item["id"]):
             raise DataQualityError(f"Evidence ID 不合法: {item['id']}")
         ids.append(item["id"])
@@ -425,25 +425,25 @@ def _validate_metadata(payload: Any, case_id: str) -> dict[str, Any]:
     if not isinstance(unresolved, list) or any(
         not isinstance(item, str) or not item.strip() for item in unresolved
     ):
-        raise DataQualityError("Metadata unresolved 不合法")
+        raise DataQualityError("Structured Data unresolved 不合法")
     return payload
 
 
-def _load_valid_metadata(path: Path | None, case_id: str) -> dict[str, Any] | None:
+def _load_valid_structured_data(path: Path | None, case_id: str) -> dict[str, Any] | None:
     if path is None or not path.is_file():
         return None
     try:
-        return _validate_metadata(_read_json(path), case_id)
+        return _validate_structured_data(_read_json(path), case_id)
     except DataQualityError:
         return None
 
 
-def _metadata_prompt(bundle: _CaseBundle, skill_path: Path) -> str:
+def _structured_data_prompt(bundle: _CaseBundle, skill_path: Path) -> str:
     sources = "\n".join(f"- {path}" for path in bundle.source_paths)
     return f"""先完整阅读并严格执行这个 Skill：
 {skill_path}
 
-为下面这个 case 生成 Evidence Metadata。
+为下面这个 case 生成 Structured Data。
 
 case_id:
 {bundle.case_id}
@@ -456,7 +456,7 @@ round 0-1 背景信息：
 
 要求：
 - 实际检查上述路径中的全部相关文件。
-- 只读取原始资料和背景信息，不读取 ground truth、参考报告或候选报告。
+- 只读取原始资料和背景信息，不读取 human report、参考报告或候选报告。
 - 不写入或修改任何原始资料，不使用 shell heredoc 或临时文件。
 - 最终只输出符合 Skill 和 output schema 的 JSON。
 """
@@ -464,22 +464,22 @@ round 0-1 背景信息：
 
 def _audit_prompt(
     bundle: _CaseBundle,
-    metadata_path: Path,
+    structured_data_path: Path,
     dimensions_path: Path,
     schema_doc_path: Path,
 ) -> str:
     sources = "\n".join(f"- {path}" for path in bundle.source_paths)
-    if bundle.groundtruth_text:
-        groundtruth = f"""groundtruth 文本如下：
-<groundtruth>
-{bundle.groundtruth_text}
-</groundtruth>"""
+    if bundle.human_report_text:
+        human_report = f"""human_report 文本如下：
+<human_report>
+{bundle.human_report_text}
+</human_report>"""
     else:
-        groundtruth = f"完整读取 groundtruth 文件：{bundle.groundtruth_file}"
+        human_report = f"完整读取 human_report 文件：{bundle.human_report_file}"
     return f"""你正在执行研究数据质检。只读分析，不修改任何文件。
 
 先完整读取：
-1. Evidence Metadata：{metadata_path}
+1. Structured Data：{structured_data_path}
 2. 判定规则：{dimensions_path}
 3. 输出字段：{schema_doc_path}
 
@@ -488,37 +488,37 @@ case_id：{bundle.case_id}
 背景：
 {bundle.background or "未提供额外背景"}
 
-{groundtruth}
+{human_report}
 
 原始 source：
 {sources}
 
 任务：
-- 从 groundtruth 抽取最多 40 条真正影响摘要、结论、建议或章节主论点的关键论据。
-- 对 metadata 中每一个 EV id 恰好分类一次：used / noise / conflict。
-- 对每条 GT 关键论据同时检查 metadata 和原始 source；metadata 与 source
+- 从 human_report 抽取最多 40 条真正影响摘要、结论、建议或章节主论点的关键论据。
+- 对 structured_data 中每一个 EV id 恰好分类一次：used / noise / conflict。
+- 对每条 Human Report 关键论据同时检查 structured_data 和原始 source；structured_data 与 source
   都无充分支撑才列 omission。
-- 如果事实已存在于 source，但 metadata 完全漏掉或遗漏关键数字、分群、
-  反例、限定条件，则列入 metadata_gaps，不得误判为数据遗漏。
-- metadata_gaps.source_fact 必须重新从 source 提取并可独立核验，不得复制
-  只存在于 groundtruth 的内容；ID 使用 MG-001 起连续编号。
+- 如果事实已存在于 source，但 structured_data 完全漏掉或遗漏关键数字、分群、
+  反例、限定条件，则列入 structured_data_gaps，不得误判为数据遗漏。
+- structured_data_gaps.source_fact 必须重新从 source 提取并可独立核验，不得复制
+  只存在于 human_report 的内容；ID 使用 MG-001 起连续编号。
 - 发现冲突时，核对对象、时间、样本、地域和口径；可解释差异只写 scope_risks。
 - 数值相对误差不超过1%，或比例绝对差不超过0.5个百分点时，不得判 conflict。
 - 若差异只是四舍五入且排序、方向或约数结论不变，归入 used，并把精确计数差异写入 scope_risks。
-- “来源不足以推出GT结论”属于 omission，不属于 conflict。
-- metadata 是 source 的结构化索引，不重复计数。
+- “来源不足以推出Human Report结论”属于 omission，不属于 conflict。
+- structured_data 是 source 的结构化索引，不重复计数。
 - 不使用 shell heredoc 或任何临时文件；优先使用只读命令。
 - quote 只保留足够核验的短摘录，中文输出。
 - 严格返回 output schema 要求的 JSON，不要返回 Markdown。
 """
 
 
-def _metadata_gaps_payload(
+def _structured_data_gaps_payload(
     bundle: _CaseBundle,
     project: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        "schema": "openharness-metadata-gaps/v1",
+        "schema": "openharness-structured-data-gaps/v1",
         "case_id": bundle.case_id,
         "items": [
             {
@@ -528,35 +528,35 @@ def _metadata_gaps_payload(
                 "source_fact": item["source_fact"],
                 "source_ref": item["source_ref"],
             }
-            for item in project["metadata_gaps"]
+            for item in project["structured_data_gaps"]
         ],
     }
 
 
 def _repair_prompt(
     bundle: _CaseBundle,
-    metadata_path: Path,
+    structured_data_path: Path,
     gaps_path: Path,
 ) -> str:
     sources = "\n".join(f"- {path}" for path in bundle.source_paths)
-    return f"""你正在修复 Evidence Metadata 的抽取遗漏。只读分析，不修改文件。
+    return f"""你正在修复 Structured Data 的抽取遗漏。只读分析，不修改文件。
 
 完整读取：
-1. 原始 Evidence Metadata：{metadata_path}
-2. 待核验的 Metadata 缺口：{gaps_path}
+1. 原始 Structured Data：{structured_data_path}
+2. 待核验的 Structured Data 缺口：{gaps_path}
 3. 原始 source：
 {sources}
 
 case_id：{bundle.case_id}
 
 要求：
-- 不读取 groundtruth、audit.json、audit.raw.json 或参考报告。
+- 不读取 human_report、audit.json、audit.raw.json 或参考报告。
 - 对每个 MG id 重新回查 source；只有 source 可独立核验时才生成 addition。
 - addition 必须是 source-grounded 的完整事实，并使用真实文件名及准确页码、
   Sheet、表格或数据区域作为 source_ref。
 - 不复制缺口描述的措辞；以 source 为准重新表述，不增加 source 中没有的数字、
   结论、因果或技术机制。
-- 不重复现有 Metadata 已充分覆盖的事实；若多个 MG 可由同一条独立证据覆盖，
+- 不重复现有 Structured Data 已充分覆盖的事实；若多个 MG 可由同一条独立证据覆盖，
   可合并到一个 addition 的 gap_ids。
 - 无法从 source 复核、与现有 Evidence 实质重复或定位不可靠时放入 skipped，
   并说明原因。
@@ -573,11 +573,11 @@ def _validate_repair(
     expected_gap_ids: set[str],
 ) -> dict[str, Any]:
     if raw.get("case_id") != case_id:
-        raise DataQualityError("Metadata repair case_id 不一致")
+        raise DataQualityError("Structured Data repair case_id 不一致")
     additions = raw.get("additions")
     skipped = raw.get("skipped")
     if not isinstance(additions, list) or not isinstance(skipped, list):
-        raise DataQualityError("Metadata repair additions/skipped 不合法")
+        raise DataQualityError("Structured Data repair additions/skipped 不合法")
     covered: list[str] = []
     for index, item in enumerate(additions, 1):
         if not isinstance(item, dict) or set(item) != {
@@ -586,37 +586,37 @@ def _validate_repair(
             "source_ref",
             "content",
         }:
-            raise DataQualityError(f"Metadata repair additions[{index}] 字段不合法")
+            raise DataQualityError(f"Structured Data repair additions[{index}] 字段不合法")
         gap_ids = item.get("gap_ids")
         if not isinstance(gap_ids, list) or not gap_ids:
-            raise DataQualityError(f"Metadata repair additions[{index}] gap_ids 为空")
+            raise DataQualityError(f"Structured Data repair additions[{index}] gap_ids 为空")
         if not all(
             isinstance(value, str) and value.strip()
             for key, value in item.items()
             if key != "gap_ids"
         ):
-            raise DataQualityError(f"Metadata repair additions[{index}] 存在空字段")
+            raise DataQualityError(f"Structured Data repair additions[{index}] 存在空字段")
         covered.extend(gap_ids)
     for index, item in enumerate(skipped, 1):
         if not isinstance(item, dict) or set(item) != {"gap_id", "reason"}:
-            raise DataQualityError(f"Metadata repair skipped[{index}] 字段不合法")
+            raise DataQualityError(f"Structured Data repair skipped[{index}] 字段不合法")
         if not all(isinstance(value, str) and value.strip() for value in item.values()):
-            raise DataQualityError(f"Metadata repair skipped[{index}] 存在空字段")
+            raise DataQualityError(f"Structured Data repair skipped[{index}] 存在空字段")
         covered.append(item["gap_id"])
     if len(covered) != len(set(covered)) or set(covered) != expected_gap_ids:
-        raise DataQualityError("Metadata repair 未唯一处理全部 Metadata gap")
+        raise DataQualityError("Structured Data repair 未唯一处理全部 Structured Data gap")
     return raw
 
 
-def _merge_metadata(
-    metadata: dict[str, Any],
+def _merge_structured_data(
+    structured_data: dict[str, Any],
     repair: dict[str, Any],
 ) -> dict[str, Any]:
     merged = {
-        "schema": metadata["schema"],
-        "case_id": metadata["case_id"],
-        "items": [dict(item) for item in metadata["items"]],
-        "unresolved": list(metadata["unresolved"]),
+        "schema": structured_data["schema"],
+        "case_id": structured_data["case_id"],
+        "items": [dict(item) for item in structured_data["items"]],
+        "unresolved": list(structured_data["unresolved"]),
     }
     next_number = max(
         int(item["id"].split("-", 1)[1])
@@ -632,67 +632,67 @@ def _merge_metadata(
             }
         )
         next_number += 1
-    return _validate_metadata(merged, metadata["case_id"])
+    return _validate_structured_data(merged, structured_data["case_id"])
 
 
 def _validate_and_score_audit(
     raw: dict[str, Any],
     bundle: _CaseBundle,
-    metadata: dict[str, Any],
+    structured_data: dict[str, Any],
 ) -> dict[str, Any]:
     if raw.get("project") != bundle.project or raw.get("case_id") != bundle.case_id:
         raise DataQualityError("Audit 项目标识不一致")
-    expected_ids = {item["id"] for item in metadata["items"]}
+    expected_ids = {item["id"] for item in structured_data["items"]}
     classifications = raw.get("evidence_classifications")
     if not isinstance(classifications, list):
         raise DataQualityError("Audit evidence_classifications 不合法")
     actual_ids = [item.get("evidence_id") for item in classifications]
     if len(actual_ids) != len(set(actual_ids)) or set(actual_ids) != expected_ids:
         raise DataQualityError("Audit 未对全部 Evidence 唯一分类")
-    gt_core = raw.get("gt_core")
-    if not isinstance(gt_core, list) or not gt_core:
-        raise DataQualityError("Audit gt_core 为空")
-    gt_ids = {item.get("id") for item in gt_core}
+    human_report_core = raw.get("human_report_core")
+    if not isinstance(human_report_core, list) or not human_report_core:
+        raise DataQualityError("Audit human_report_core 为空")
+    human_report_ids = {item.get("id") for item in human_report_core}
     omissions = raw.get("omissions")
     conflicts = raw.get("conflicts")
-    metadata_gaps = raw.get("metadata_gaps")
+    structured_data_gaps = raw.get("structured_data_gaps")
     if (
         not isinstance(omissions, list)
         or not isinstance(conflicts, list)
-        or not isinstance(metadata_gaps, list)
+        or not isinstance(structured_data_gaps, list)
     ):
-        raise DataQualityError("Audit omissions/conflicts/metadata_gaps 不合法")
-    if any(item.get("gt_id") not in gt_ids for item in omissions):
-        raise DataQualityError("Audit omission 引用了未知 GT")
-    gap_ids = [item.get("id") for item in metadata_gaps]
+        raise DataQualityError("Audit omissions/conflicts/structured_data_gaps 不合法")
+    if any(item.get("human_report_id") not in human_report_ids for item in omissions):
+        raise DataQualityError("Audit omission 引用了未知 Human Report")
+    gap_ids = [item.get("id") for item in structured_data_gaps]
     expected_gap_ids = [f"MG-{index:03d}" for index in range(1, len(gap_ids) + 1)]
     if gap_ids != expected_gap_ids:
-        raise DataQualityError("Audit Metadata gap ID 不合法或重复")
-    for index, item in enumerate(metadata_gaps, 1):
+        raise DataQualityError("Audit Structured Data gap ID 不合法或重复")
+    for index, item in enumerate(structured_data_gaps, 1):
         if not isinstance(item, dict) or set(item) != {
             "id",
-            "gt_ids",
+            "human_report_ids",
             "gap_type",
             "importance",
             "source_fact",
             "source_ref",
             "reason",
         }:
-            raise DataQualityError(f"Audit Metadata gap[{index}] 字段不合法")
+            raise DataQualityError(f"Audit Structured Data gap[{index}] 字段不合法")
         if (
-            not item["gt_ids"]
-            or any(gt_id not in gt_ids for gt_id in item["gt_ids"])
+            not item["human_report_ids"]
+            or any(human_report_id not in human_report_ids for human_report_id in item["human_report_ids"])
         ):
-            raise DataQualityError("Audit Metadata gap 引用了未知 GT")
+            raise DataQualityError("Audit Structured Data gap 引用了未知 Human Report")
         if item["gap_type"] not in {"missing", "underrepresented"}:
-            raise DataQualityError("Audit Metadata gap 类型不合法")
+            raise DataQualityError("Audit Structured Data gap 类型不合法")
         if item["importance"] not in {"critical", "material"}:
-            raise DataQualityError("Audit Metadata gap 重要性不合法")
+            raise DataQualityError("Audit Structured Data gap 重要性不合法")
         if not all(
             isinstance(item[key], str) and item[key].strip()
             for key in ("source_fact", "source_ref", "reason")
         ):
-            raise DataQualityError("Audit Metadata gap 存在空字段")
+            raise DataQualityError("Audit Structured Data gap 存在空字段")
     classified_conflicts = {
         item["evidence_id"]
         for item in classifications
@@ -719,7 +719,7 @@ def _validate_and_score_audit(
             )
 
     counts = Counter(item["classification"] for item in classifications)
-    gt_total = len(gt_core)
+    human_report_total = len(human_report_core)
     source_total = len(classifications)
     omission_count = len(omissions)
     critical_omissions = sum(item.get("severity") == "critical" for item in omissions)
@@ -733,8 +733,8 @@ def _validate_and_score_audit(
     ordinary_conflicts = len(conflict_severity) - critical_conflicts
     conflict_count = len(conflict_severity)
 
-    omission_ratio = omission_count / gt_total
-    conflict_ratio = conflict_count / gt_total
+    omission_ratio = omission_count / human_report_total
+    conflict_ratio = conflict_count / human_report_total
     noise_rate = counts["noise"] / source_total
     omission_score = 100 * (1 - omission_ratio)
     conflict_score = max(
@@ -757,7 +757,7 @@ def _validate_and_score_audit(
         "noise_count": counts["noise"],
         "conflict_count": conflict_count,
         "conflict_detail_count": len(conflicts),
-        "gt_core_total": gt_total,
+        "human_report_core_total": human_report_total,
         "omission_count": omission_count,
         "critical_omission_count": critical_omissions,
         "ordinary_omission_count": ordinary_omissions,
@@ -776,8 +776,8 @@ def _validate_and_score_audit(
             for path in ([source] if source.is_file() else source.rglob("*"))
             if path.is_file()
         ),
-        "unresolved_count": len(metadata["unresolved"]),
-        "metadata_gap_count": len(metadata_gaps),
+        "unresolved_count": len(structured_data["unresolved"]),
+        "structured_data_gap_count": len(structured_data_gaps),
     }
     return result
 
@@ -814,13 +814,13 @@ def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
         f"| 冲突一致性分 | {metrics['conflict_score']:.1f} / 100 |",
         f"| 信噪分 | {metrics['signal_score']:.1f} / 100 |",
         (
-            f"| 遗漏项 | {metrics['omission_count']}/{metrics['gt_core_total']}"
+            f"| 遗漏项 | {metrics['omission_count']}/{metrics['human_report_core_total']}"
             f"（{metrics['omission_ratio'] * 100:.1f}%）；关键遗漏 "
             f"{metrics['critical_omission_count']} 条，普通遗漏 "
             f"{metrics['ordinary_omission_count']} 条 |"
         ),
         (
-            f"| 冲突项 | {metrics['conflict_count']}/{metrics['gt_core_total']}"
+            f"| 冲突项 | {metrics['conflict_count']}/{metrics['human_report_core_total']}"
             f"（{metrics['conflict_ratio'] * 100:.1f}%）；关键冲突 "
             f"{metrics['critical_conflict_count']} 条，普通冲突 "
             f"{metrics['ordinary_conflict_count']} 条 |"
@@ -841,11 +841,11 @@ def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
             [
                 (
                     f"### O-{index:02d} "
-                    f"[{_OMISSION_SEVERITY[item['severity']]}] {item['gt_text']}"
+                    f"[{_OMISSION_SEVERITY[item['severity']]}] {item['human_report_text']}"
                 ),
                 "",
-                f"- GT 原文：{item['gt_quote']}",
-                f"- 位置：{item['gt_location']}",
+                f"- Human Report 原文：{item['human_report_quote']}",
+                f"- 位置：{item['human_report_location']}",
                 f"- 回查范围：{item['search_note']}",
                 f"- 判定：{item['reason']}",
                 "",
@@ -855,7 +855,7 @@ def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
         [
             (
                 f"## 冲突项（{metrics['conflict_count']} 项；"
-                f"{len(project['conflicts'])} 条 GT 对照明细）"
+                f"{len(project['conflicts'])} 条 Human Report 对照明细）"
             ),
             "",
         ]
@@ -869,7 +869,7 @@ def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
                     f"{item['conflict_type']}"
                 ),
                 "",
-                f"- Groundtruth：{item['gt_quote']}",
+                f"- Human Report：{item['human_report_quote']}",
                 f"- 来源论据：{item['source_text']}",
                 f"- 来源位置：{item['source_ref']}",
                 f"- 冲突说明：{item['reason']}",
@@ -878,11 +878,11 @@ def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
         )
     lines.extend(
         [
-            f"## Metadata 完整性缺口（{len(project['metadata_gaps'])}）",
+            f"## Structured Data 完整性缺口（{len(project['structured_data_gaps'])}）",
             "",
         ]
     )
-    for item in project["metadata_gaps"]:
+    for item in project["structured_data_gaps"]:
         gap_label = (
             "完全漏提"
             if item["gap_type"] == "missing"
@@ -892,7 +892,7 @@ def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
             [
                 f"### {item['id']} [{gap_label}] {item['source_fact']}",
                 "",
-                f"- 对应 GT：{'、'.join(item['gt_ids'])}",
+                f"- 对应 Human Report：{'、'.join(item['human_report_ids'])}",
                 f"- 来源位置：{item['source_ref']}",
                 f"- 判定：{item['reason']}",
                 "",
@@ -930,7 +930,7 @@ def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
             "",
             "## 来源论据分类",
             "",
-            "| ID | 分类 | 对应 GT | 判定依据 |",
+            "| ID | 分类 | 对应 Human Report | 判定依据 |",
             "|---|---|---|---|",
         ]
     )
@@ -938,7 +938,7 @@ def render_audit_markdown(project: dict[str, Any], audit_date: str) -> str:
         lines.append(
             f"| {_clean(item['evidence_id'])} | "
             f"{_CLASSIFICATION[item['classification']]} | "
-            f"{_clean('、'.join(item['gt_ids']) or '—')} | "
+            f"{_clean('、'.join(item['human_report_ids']) or '—')} | "
             f"{_clean(item['reason'])} |"
         )
     lines.append("")
@@ -955,11 +955,11 @@ def _audit_payload(project: dict[str, Any], dataset_root: str) -> dict[str, Any]
             "overall_score": project["metrics"]["overall_score"],
             "median_project_score": project["metrics"]["overall_score"],
             "total_source_evidence": project["metrics"]["source_evidence_total"],
-            "total_gt_core": project["metrics"]["gt_core_total"],
+            "total_human_report_core": project["metrics"]["human_report_core_total"],
             "total_omissions": project["metrics"]["omission_count"],
             "total_conflicts": project["metrics"]["conflict_count"],
             "total_noise": project["metrics"]["noise_count"],
-            "total_metadata_gaps": project["metrics"]["metadata_gap_count"],
+            "total_structured_data_gaps": project["metrics"]["structured_data_gap_count"],
         },
         "methodology": {
             "categories": ["omission", "conflict", "noise"],
@@ -981,57 +981,57 @@ def _process_case(
     started = time.monotonic()
     output_dir = request.output_root.expanduser().resolve() / _safe_name(bundle.case_id)
     output_dir.mkdir(parents=True, exist_ok=True)
-    metadata_path = output_dir / "evidence_metadata.json"
+    structured_data_path = output_dir / "structured_data.json"
     audit_raw_path = output_dir / "audit.raw.json"
     audit_path = output_dir / "audit.json"
     report_path = output_dir / "audit.md"
-    gaps_path = output_dir / "metadata_gaps.json"
-    repair_raw_path = output_dir / "metadata_repair.raw.json"
-    repaired_metadata_path = output_dir / "evidence_metadata.repaired.json"
+    gaps_path = output_dir / "structured_data_gaps.json"
+    repair_raw_path = output_dir / "structured_data_repair.raw.json"
+    repaired_structured_data_path = output_dir / "structured_data.repaired.json"
     timings: dict[str, float] = {}
-    metadata_status = None
+    structured_data_status = None
     audit_status = None
     repair_status = None
-    metadata_gap_count = 0
-    repaired_metadata_items = 0
+    structured_data_gap_count = 0
+    repaired_structured_data_items = 0
     try:
         _check_cancelled(should_cancel)
         _notify(progress_callback, "case_started", case_id=bundle.case_id)
-        metadata = None
-        if not request.force_metadata:
-            metadata = _load_valid_metadata(metadata_path, bundle.case_id)
-            if metadata is not None:
-                metadata_status = "skipped"
-            if metadata is None:
-                metadata = _load_valid_metadata(bundle.existing_metadata, bundle.case_id)
-                if metadata is not None:
-                    _write_json(metadata_path, metadata)
-                    metadata_status = "reused"
-        if metadata is None:
+        structured_data = None
+        if not request.force_structured_data:
+            structured_data = _load_valid_structured_data(structured_data_path, bundle.case_id)
+            if structured_data is not None:
+                structured_data_status = "skipped"
+            if structured_data is None:
+                structured_data = _load_valid_structured_data(bundle.existing_structured_data, bundle.case_id)
+                if structured_data is not None:
+                    _write_json(structured_data_path, structured_data)
+                    structured_data_status = "reused"
+        if structured_data is None:
             _notify(
                 progress_callback,
                 "stage_started",
                 case_id=bundle.case_id,
-                stage="metadata",
+                stage="structured_data",
             )
-            raw_metadata, elapsed = runner.run(
-                prompt=_metadata_prompt(
+            raw_structured_data, elapsed = runner.run(
+                prompt=_structured_data_prompt(
                     bundle,
-                    request.metadata_skill.expanduser().resolve(),
+                    request.structured_data_skill.expanduser().resolve(),
                 ),
-                schema_path=request.metadata_schema.expanduser().resolve(),
+                schema_path=request.structured_data_schema.expanduser().resolve(),
                 cwd=REPO_ROOT,
             )
-            timings["metadata"] = elapsed
-            metadata = _validate_metadata(raw_metadata, bundle.case_id)
-            _write_json(metadata_path, metadata)
-            metadata_status = "generated"
+            timings["structured_data"] = elapsed
+            structured_data = _validate_structured_data(raw_structured_data, bundle.case_id)
+            _write_json(structured_data_path, structured_data)
+            structured_data_status = "generated"
         _notify(
             progress_callback,
             "stage_completed",
             case_id=bundle.case_id,
-            stage="metadata",
-            status=metadata_status,
+            stage="structured_data",
+            status=structured_data_status,
         )
 
         overall_score = None
@@ -1053,7 +1053,7 @@ def _process_case(
                     and candidate.get("projects")
                     and candidate["projects"][0].get("case_id") == bundle.case_id
                     and isinstance(
-                        candidate["projects"][0].get("metadata_gaps"),
+                        candidate["projects"][0].get("structured_data_gaps"),
                         list,
                     )
                 ):
@@ -1062,7 +1062,7 @@ def _process_case(
             if audit_payload is None:
                 prompt = _audit_prompt(
                     bundle,
-                    metadata_path,
+                    structured_data_path,
                     request.audit_dimensions.expanduser().resolve(),
                     request.audit_schema_doc.expanduser().resolve(),
                 )
@@ -1078,7 +1078,7 @@ def _process_case(
                         project = _validate_and_score_audit(
                             raw_audit,
                             bundle,
-                            metadata,
+                            structured_data,
                         )
                         break
                     except DataQualityError as exc:
@@ -1104,10 +1104,10 @@ def _process_case(
                 audit_status = "generated"
             audit_project = audit_payload["projects"][0]
             overall_score = audit_project["metrics"]["overall_score"]
-            metadata_gap_count = len(audit_project["metadata_gaps"])
+            structured_data_gap_count = len(audit_project["structured_data_gaps"])
             _write_json(
                 gaps_path,
-                _metadata_gaps_payload(bundle, audit_project),
+                _structured_data_gaps_payload(bundle, audit_project),
             )
             _notify(
                 progress_callback,
@@ -1118,7 +1118,7 @@ def _process_case(
                 overall_score=overall_score,
             )
 
-        final_metadata = metadata
+        final_structured_data = structured_data
         if "repair" in request.stages:
             _check_cancelled(should_cancel)
             _notify(
@@ -1128,49 +1128,49 @@ def _process_case(
                 stage="repair",
             )
             cached_repair = None
-            if repaired_metadata_path.is_file() and not any(
+            if repaired_structured_data_path.is_file() and not any(
                 (
-                    request.force_metadata,
+                    request.force_structured_data,
                     request.force_audit,
                     request.force_repair,
                 )
             ):
-                cached_repair = _load_valid_metadata(
-                    repaired_metadata_path,
+                cached_repair = _load_valid_structured_data(
+                    repaired_structured_data_path,
                     bundle.case_id,
                 )
             if cached_repair is not None:
-                final_metadata = cached_repair
+                final_structured_data = cached_repair
                 repair_status = "skipped"
-            elif not audit_project["metadata_gaps"]:
-                _write_json(repaired_metadata_path, metadata)
-                final_metadata = metadata
+            elif not audit_project["structured_data_gaps"]:
+                _write_json(repaired_structured_data_path, structured_data)
+                final_structured_data = structured_data
                 repair_status = "not_needed"
             else:
                 raw_repair, elapsed = runner.run(
                     prompt=_repair_prompt(
                         bundle,
-                        metadata_path,
+                        structured_data_path,
                         gaps_path,
                     ),
-                    schema_path=request.metadata_repair_schema.expanduser().resolve(),
+                    schema_path=request.structured_data_repair_schema.expanduser().resolve(),
                     cwd=REPO_ROOT,
                 )
                 timings["repair"] = elapsed
                 expected_gap_ids = {
                     item["id"]
-                    for item in audit_project["metadata_gaps"]
+                    for item in audit_project["structured_data_gaps"]
                 }
                 repair = _validate_repair(
                     raw_repair,
                     bundle.case_id,
                     expected_gap_ids,
                 )
-                final_metadata = _merge_metadata(metadata, repair)
+                final_structured_data = _merge_structured_data(structured_data, repair)
                 _write_json(repair_raw_path, repair)
-                _write_json(repaired_metadata_path, final_metadata)
+                _write_json(repaired_structured_data_path, final_structured_data)
                 repair_status = "generated"
-            repaired_metadata_items = len(final_metadata["items"])
+            repaired_structured_data_items = len(final_structured_data["items"])
             _notify(
                 progress_callback,
                 "stage_completed",
@@ -1179,8 +1179,8 @@ def _process_case(
                 status=repair_status,
             )
 
-        if request.publish_metadata and bundle.existing_metadata is not None:
-            _write_json(bundle.existing_metadata, final_metadata)
+        if request.publish_structured_data and bundle.existing_structured_data is not None:
+            _write_json(bundle.existing_structured_data, final_structured_data)
 
         elapsed_total = round(time.monotonic() - started, 1)
         _write_json(
@@ -1192,21 +1192,21 @@ def _process_case(
                 "stages": list(request.stages),
                 "model": request.model,
                 "effort": request.effort,
-                "metadata_status": metadata_status,
+                "structured_data_status": structured_data_status,
                 "audit_status": audit_status,
                 "repair_status": repair_status,
                 "stage_elapsed_seconds": timings,
                 "elapsed_seconds": elapsed_total,
                 "finished_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "artifacts": {
-                    "metadata": str(metadata_path),
+                    "structured_data": str(structured_data_path),
                     "audit": str(audit_path) if "audit" in request.stages else None,
                     "report": str(report_path) if "audit" in request.stages else None,
-                    "metadata_gaps": (
+                    "structured_data_gaps": (
                         str(gaps_path) if "audit" in request.stages else None
                     ),
-                    "repaired_metadata": (
-                        str(repaired_metadata_path)
+                    "repaired_structured_data": (
+                        str(repaired_structured_data_path)
                         if "repair" in request.stages
                         else None
                     ),
@@ -1218,12 +1218,12 @@ def _process_case(
             project=bundle.project,
             status="success",
             output_dir=str(output_dir),
-            metadata_status=metadata_status,
+            structured_data_status=structured_data_status,
             audit_status=audit_status,
             repair_status=repair_status,
-            metadata_items=len(metadata["items"]),
-            metadata_gap_count=metadata_gap_count,
-            repaired_metadata_items=repaired_metadata_items,
+            structured_data_items=len(structured_data["items"]),
+            structured_data_gap_count=structured_data_gap_count,
+            repaired_structured_data_items=repaired_structured_data_items,
             overall_score=overall_score,
             elapsed_seconds=elapsed_total,
         )
@@ -1243,10 +1243,10 @@ def _process_case(
             project=bundle.project,
             status="failed",
             output_dir=str(output_dir),
-            metadata_status=metadata_status,
+            structured_data_status=structured_data_status,
             audit_status=audit_status,
             repair_status=repair_status,
-            metadata_gap_count=metadata_gap_count,
+            structured_data_gap_count=structured_data_gap_count,
             elapsed_seconds=round(time.monotonic() - started, 1),
             error=str(exc),
         )
@@ -1286,8 +1286,8 @@ def run_data_quality(
 
     _check_cancelled(should_cancel)
     required = [
-        request.metadata_skill,
-        request.metadata_schema,
+        request.structured_data_skill,
+        request.structured_data_schema,
     ]
     if "audit" in request.stages:
         required.extend(
@@ -1298,7 +1298,7 @@ def run_data_quality(
             ]
         )
     if "repair" in request.stages:
-        required.append(request.metadata_repair_schema)
+        required.append(request.structured_data_repair_schema)
     for raw_path in required:
         path = raw_path.expanduser().resolve()
         if not path.is_file():

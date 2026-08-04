@@ -167,13 +167,13 @@ class GenerationJobServiceTest(unittest.TestCase):
                 {
                     "case_id": "case-a",
                     "input": {"brief": "A"},
-                    "ground_truth": {},
+                    "human_report": {},
                     "split": "dev",
                 },
                 {
                     "case_id": "case-b",
                     "input": {"brief": "B"},
-                    "ground_truth": {},
+                    "human_report": {},
                     "split": "dev",
                 },
             ]

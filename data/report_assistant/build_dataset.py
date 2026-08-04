@@ -11,7 +11,7 @@ build_dataset.py — 业务汇报助手数据集生成器 (可复现, 种子固�
 
 每个 case 的关键字段:
   input.raw            —— skill 拿到的原始数据(可能含缺口/异常/矛盾)
-  ground_truth_findings—— 正确计算出的 findings(带 id/value/source_ref)
+  human_report_findings—— 正确计算出的 findings(带 id/value/source_ref)
                           judge 用它核对可回溯性、抓编造(input里没有的数字=编造)
   hard_case_tags       —— [missing_data|anomaly|unit_confusion|contradiction]
 
@@ -82,7 +82,7 @@ def make_case(idx, report_type, tags):
         "monthly_burn_wan": burn,
     }
 
-    # ground truth findings —— 正确算出的事实, 每条带 id
+    # human report findings —— 正确算出的事实, 每条带 id
     findings = [
         {"id": "F-001", "metric": "arr_now", "value": arr_now, "unit": "万",
          "source_ref": "raw.arr_now_wan"},
@@ -144,7 +144,7 @@ def make_case(idx, report_type, tags):
         "required_sections": meta["sections"],
         "hard_case_tags": tags,
         "input": {"raw": raw, "notes": notes},
-        "ground_truth_findings": findings,
+        "human_report_findings": findings,
         "key_finding_ids": key_finding_ids,
     }
 

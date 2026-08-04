@@ -118,7 +118,7 @@ def build_dataset():
                 "required_sections": list(_SECTIONS),
                 "hard_case_tags": list(t["tags"]),
                 "input": {"brief": "面向高管, 说明变化原因和下一步, 不超过1.5页"},
-                "ground_truth": {
+                "human_report": {
                     "supported_claims": t["claims"],
                     "key_claim_ids": [c["id"] for c in t["claims"]],
                     "expected_insights": [{"id": "I-%02d" % n, "insight": "提炼出的非平凡判断"}],
