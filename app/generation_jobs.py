@@ -37,6 +37,10 @@ from generation_models import (  # noqa: E402
     GenerationCaseState,
     GenerationJob,
 )
+from model_config import (  # noqa: E402
+    DEFAULT_GENERATION_WB_MODEL,
+    SUPPORTED_WB_MODELS,
+)
 import persistence as persist  # noqa: E402
 from skill_compiler import (  # noqa: E402
     compile_session_skill,
@@ -46,35 +50,6 @@ from skill_compiler import (  # noqa: E402
 
 class GenerationJobError(ValueError):
     """可直接返回给前端的任务配置或状态错误。"""
-
-
-SUPPORTED_WB_MODELS = (
-    "deepseek-v4-pro-ioa",
-    "hy3-ioa",
-    "deepseek-v4-flash-ioa",
-    "claude-opus-4.8-1m",
-    "claude-opus-4.8",
-    "claude-opus-4.7-1m",
-    "claude-opus-4.7",
-    "claude-opus-4.6-1m",
-    "claude-opus-4.6",
-    "claude-sonnet-5-1m",
-    "claude-sonnet-5",
-    "claude-sonnet-4.6-1m",
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.3-codex",
-    "gemini-3.5-flash",
-    "glm-5.2-ioa",
-    "glm-5v-turbo-ioa",
-    "kimi-k3-ioa",
-    "kimi-k2.7-ioa",
-    "kimi-k2.6-ioa",
-    "minimax-m3-ioa",
-)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -93,7 +68,7 @@ class GenerationSettings:
     output_root: Path
     skill_path: Optional[Path] = None
     skill_name: Optional[str] = None
-    model: Optional[str] = "deepseek-v4-pro-ioa"
+    model: Optional[str] = DEFAULT_GENERATION_WB_MODEL
     models: tuple[str, ...] = SUPPORTED_WB_MODELS
     parallel: int = 20
     max_report_retries: int = 3
@@ -145,7 +120,7 @@ class GenerationSettings:
             skill_name=skill_name,
             model=os.environ.get(
                 "OPENHARNESS_WB_MODEL",
-                "deepseek-v4-pro-ioa",
+                DEFAULT_GENERATION_WB_MODEL,
             )
             or None,
             parallel=_env_int("OPENHARNESS_WB_PARALLEL", 20),

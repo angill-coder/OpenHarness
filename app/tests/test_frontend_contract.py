@@ -7,6 +7,19 @@ APP = Path(__file__).resolve().parents[1]
 
 
 class FrontendContractTest(unittest.TestCase):
+    def test_judge_and_optimizer_send_llm_backend_selection(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn("readLlmSelection('judge')", source)
+        self.assertIn("readLlmSelection('optimizer')", source)
+        self.assertIn("id=\"judgeLlmBackend\"", html)
+        self.assertIn("id=\"optimizerLlmBackend\"", html)
+        self.assertIn("claude-opus-4.8", html)
+        self.assertIn(
+            '<option value="workbuddy" selected>WorkBuddy CLI</option>',
+            html,
+        )
+
     def test_judge_completion_rerenders_advance_button(self):
         source = (APP / "app.js").read_text(encoding="utf-8")
         self.assertIn(

@@ -21,7 +21,8 @@ from external_run_models import (
     ReportOutputContract,
 )
 from run_external import _parser
-from workbuddy_batch.models import BatchConfig
+from workbuddy_batch.adapter import build_environment, build_round_command
+from workbuddy_batch.models import BatchConfig, CaseSpec, InputFile
 from workbuddy_runner import (
     ExternalRunConfigurationError,
     _case_attempt_run_id,
@@ -62,6 +63,90 @@ class ExternalRunnerTest(unittest.TestCase):
             _parser().parse_args(["--dataset", "case.json"]).parallel,
             20,
         )
+
+    def test_runner_disables_workbuddy_user_and_project_memory(self) -> None:
+        config = BatchConfig(
+            command=("workbuddy",),
+            output_root=Path("generation_runs"),
+        )
+        case = CaseSpec(case_id="memory-isolation", prompt="write report")
+        command = build_round_command(
+            config,
+            case,
+            "session-id",
+            0,
+            case.prompt,
+            (),
+        )
+        self.assertEqual(
+            command[command.index("--setting-sources") + 1],
+            "",
+        )
+        environment = build_environment(config)
+        self.assertEqual(environment["CODEBUDDY_DISABLE_AUTO_MEMORY"], "1")
+        self.assertEqual(
+            environment["CODEBUDDY_MEMORY_RELEVANCE_DISABLED"],
+            "1",
+        )
+        self.assertEqual(
+            environment["CODEBUDDY_MEMORY_EXTRACTION_DISABLED"],
+            "1",
+        )
+        self.assertEqual(environment["CODEBUDDY_TEAM_MEMORY_ENABLED"], "0")
+
+    def test_evidence_metadata_first_case_gets_evidence_reading_contract(self) -> None:
+        config = BatchConfig(
+            command=("workbuddy",),
+            output_root=Path("generation_runs"),
+        )
+        case = CaseSpec(
+            case_id="evidence-metadata-first",
+            prompt="write report",
+            input_files=(
+                InputFile(
+                    Path("evidence_metadata.json"),
+                    "materials/00_evidence_metadata.json",
+                ),
+                InputFile(Path("source"), "materials/source"),
+            ),
+        )
+
+        command = build_round_command(
+            config,
+            case,
+            "session-id",
+            0,
+            case.prompt,
+            (),
+        )
+        system_prompt = command[command.index("--append-system-prompt") + 1]
+
+        self.assertIn("evidence-first reading contract", system_prompt)
+        self.assertIn("materials/00_evidence_metadata.json", system_prompt)
+        self.assertIn("materials/source/", system_prompt)
+        self.assertIn("不要向上探索运行目录、case.json", system_prompt)
+
+    def test_source_only_case_does_not_claim_evidence_metadata(self) -> None:
+        config = BatchConfig(
+            command=("workbuddy",),
+            output_root=Path("generation_runs"),
+        )
+        case = CaseSpec(
+            case_id="source-only",
+            prompt="write report",
+            input_files=(InputFile(Path("source"), "materials"),),
+        )
+
+        command = build_round_command(
+            config,
+            case,
+            "session-id",
+            0,
+            case.prompt,
+            (),
+        )
+
+        self.assertNotIn("evidence-first reading contract", "\n".join(command))
 
     def setUp(self) -> None:
         self._temporary = tempfile.TemporaryDirectory()

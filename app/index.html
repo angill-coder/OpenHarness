@@ -145,7 +145,7 @@
 
     <div class="card step" id="dataCard">
       <h2><span class="n">2</span>导入数据</h2>
-      <p class="small mut">调研报告使用统一 openharness-wb/v1 数据：同一份 JSON 同时驱动 WB 生成和模型 Judge；ground_truth 保留评测参考内容，且只发送给 Judge。</p>
+      <p class="small mut">调研报告使用统一 openharness-wb/v1 数据：同一份 JSON 同时驱动 WB 生成和模型 Judge；ground_truth 保存人工报告但不发送给生成模型或 Judge，Judge 使用 evidence_metadata 核验。</p>
       <div class="row">
         <button class="ghost" id="sampleBtn">用内置样例数据集</button>
         <button class="ghost" id="configuredDataBtn">加载当前 WB 数据集</button>
@@ -175,6 +175,21 @@
     <div class="card">
       <h2>版本演进</h2>
       <div id="versionPills" class="mut small">尚未开始</div>
+      <div id="optimizerLlmControls" class="row" style="align-items:flex-end;margin-top:8px;display:none">
+        <div style="flex:1">
+          <label for="optimizerLlmBackend">Optimizer 模型调用方式</label>
+          <select id="optimizerLlmBackend">
+            <option value="api">Claude API</option>
+            <option value="workbuddy" selected>WorkBuddy CLI</option>
+          </select>
+        </div>
+        <div id="optimizerWbModelWrap" style="flex:1">
+          <label for="optimizerWbModel">Optimizer WB 模型</label>
+          <select id="optimizerWbModel">
+            <option value="claude-opus-4.8">claude-opus-4.8</option>
+          </select>
+        </div>
+      </div>
       <div id="advanceBox" class="row" style="margin-top:10px">
         <button id="advanceBtn" disabled>▶ 生成下一版 skill（optimizer + gate）</button>
       </div>
@@ -228,8 +243,25 @@
         <span id="reportPreview" class="small mut"></span>
       </div>
 
-      <label for="judgeParallel" style="margin-top:12px">Judge 最大并发</label>
-      <input id="judgeParallel" type="number" min="1" step="1" style="width:110px">
+      <div class="row" style="align-items:flex-end;margin-top:12px">
+        <div style="flex:1">
+          <label for="judgeLlmBackend">Judge 模型调用方式</label>
+          <select id="judgeLlmBackend">
+            <option value="api">Claude API</option>
+            <option value="workbuddy" selected>WorkBuddy CLI</option>
+          </select>
+        </div>
+        <div id="judgeWbModelWrap" style="flex:1">
+          <label for="judgeWbModel">Judge WB 模型</label>
+          <select id="judgeWbModel">
+            <option value="claude-opus-4.8">claude-opus-4.8</option>
+          </select>
+        </div>
+        <div>
+          <label for="judgeParallel">Judge 最大并发</label>
+          <input id="judgeParallel" type="number" min="1" step="1" style="width:110px">
+        </div>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="ok" id="runJudgeBtn">▶ 批量 Judge 全部 case</button>
       </div>

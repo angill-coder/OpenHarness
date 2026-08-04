@@ -26,7 +26,7 @@ _DIMENSION_CONTEXT_KEYS = {
     "structure": (),
     "narrative": (),
     "insight": ("background", "evidence_metadata"),
-    "coverage": ("background", "evidence_metadata", "ground_truth"),
+    "coverage": ("background", "evidence_metadata"),
     "expression": (),
 }
 
@@ -110,13 +110,9 @@ def _background_context(case: Dict) -> Dict:
 
 
 def _full_case_context(case: Dict) -> Dict:
-    ground_truth = case.get("ground_truth")
-    if ground_truth is None:
-        ground_truth = case.get("ground_truth_findings", {})
     context = {
         "case_id": str(case.get("case_id") or ""),
         "background": _background_context(case),
-        "ground_truth": ground_truth or {},
     }
     if case.get("evidence_metadata"):
         context["evidence_metadata"] = case["evidence_metadata"]

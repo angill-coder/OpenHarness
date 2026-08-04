@@ -129,6 +129,8 @@ class SessionLabel:
                 "rubric_sha256": (judgment or {}).get(
                     "rubric_sha256"
                 ),
+                "llm_backend": (judgment or {}).get("llm_backend"),
+                "model": (judgment or {}).get("model"),
             }
         if not clean_batch:
             return {"error": "批量 Judge 未产出有效评分"}
@@ -141,6 +143,22 @@ class SessionLabel:
                 "version": version,
                 "case_ids": list(clean_batch),
                 "n_cases": len(clean_batch),
+                "llm_backend": next(
+                    (
+                        item.get("llm_backend")
+                        for item in clean_batch.values()
+                        if item.get("llm_backend")
+                    ),
+                    None,
+                ),
+                "model": next(
+                    (
+                        item.get("model")
+                        for item in clean_batch.values()
+                        if item.get("model")
+                    ),
+                    None,
+                ),
             },
         )
         if evaluate_now:

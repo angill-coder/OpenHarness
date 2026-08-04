@@ -25,6 +25,7 @@ from server import (  # noqa: E402
     _judge_parallelism,
     _judge_summary,
     _load_evidence_metadata,
+    _llm_selection,
 )
 from session import Session  # noqa: E402
 
@@ -54,6 +55,12 @@ def extract_json(text):
 
 
 class JudgeBatchTest(unittest.TestCase):
+    def test_judge_and_optimizer_default_to_workbuddy_opus(self):
+        for purpose in ("judge", "optimizer"):
+            backend, model = _llm_selection({}, purpose)
+            self.assertEqual(backend, "workbuddy")
+            self.assertEqual(model, "claude-opus-4.8")
+
     def test_judge_parallel_override_has_no_artificial_cap(self):
         self.assertEqual(_judge_parallelism(200), 200)
         with self.assertRaisesRegex(ValueError, "至少为 1"):
@@ -61,7 +68,7 @@ class JudgeBatchTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "整数"):
             _judge_parallelism(1.5)
 
-    def test_server_prompt_treats_ground_truth_as_reference_only(self):
+    def test_server_prompt_discards_ground_truth(self):
         prompt = _build_judge_prompt(
             RUBRIC,
             "report",
@@ -71,9 +78,8 @@ class JudgeBatchTest(unittest.TestCase):
                 "ground_truth": {"reference_report_text": "事实 A"},
             },
         )
-        self.assertIn("Ground Truth（仅作参考案例）", prompt)
-        self.assertIn("事实 A", prompt)
-        self.assertIn("不绝对正确", prompt)
+        self.assertNotIn("Ground Truth", prompt)
+        self.assertNotIn("事实 A", prompt)
         self.assertIn('"Q1": "met"', prompt)
 
     def test_judges_all_cases_and_preserves_dataset_order(self):
@@ -108,7 +114,7 @@ class JudgeBatchTest(unittest.TestCase):
         self.assertEqual([item["status"] for item in results], ["judged", "judged"])
         self.assertEqual(results[1]["checks"]["Q1"], "miss")
 
-    def test_prompt_context_includes_ground_truth(self):
+    def test_prompt_context_excludes_ground_truth(self):
         prompts = []
 
         def call_model(prompt):
@@ -135,10 +141,7 @@ class JudgeBatchTest(unittest.TestCase):
             extract_json,
         )
 
-        self.assertEqual(
-            prompts[0]["case_context"]["ground_truth"],
-            {"secret": "answer"},
-        )
+        self.assertNotIn("ground_truth", prompts[0]["case_context"])
         self.assertEqual(
             prompts[0]["case_context"]["background"]["input"],
             {"brief": "A"},
@@ -188,7 +191,6 @@ class JudgeBatchTest(unittest.TestCase):
             {
                 "case_id",
                 "background",
-                "ground_truth",
                 "evidence_metadata",
             },
         )
@@ -341,7 +343,6 @@ class JudgeBatchTest(unittest.TestCase):
                 "case_id",
                 "background",
                 "evidence_metadata",
-                "ground_truth",
             },
         )
         for dimension in ("structure", "narrative", "expression"):

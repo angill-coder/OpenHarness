@@ -10,6 +10,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from types import SimpleNamespace
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -117,11 +118,73 @@ class TestLLMClientErrors(unittest.TestCase):
                     llm_client.call_llm("prompt")
         self.assertIn("响应格式无效", str(ctx.exception))
 
+    def test_workbuddy_backend_uses_selected_model_and_extracts_text(self):
+        event = json.dumps({
+            "type": "assistant",
+            "message": {
+                "model": "claude-opus-4.8",
+                "content": [{"type": "text", "text": '{"ok": true}'}],
+            },
+        })
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=event + "\n",
+            stderr="",
+        )
+        with mock.patch.object(
+            llm_client,
+            "discover_command",
+            return_value=("/tmp/workbuddy",),
+        ):
+            with mock.patch.object(
+                llm_client.subprocess,
+                "run",
+                return_value=completed,
+            ) as run:
+                result = llm_client.call_llm(
+                    "judge prompt",
+                    backend="workbuddy",
+                    model="claude-opus-4.8",
+                    retries=0,
+                )
+        self.assertEqual(result, '{"ok": true}')
+        command = run.call_args.args[0]
+        self.assertIn("--model", command)
+        self.assertEqual(
+            command[command.index("--model") + 1],
+            "claude-opus-4.8",
+        )
+        self.assertEqual(command[-1], "judge prompt")
+        self.assertIn("--no-session-persistence", command)
+        self.assertEqual(command[command.index("--tools") + 1], "")
+        self.assertEqual(
+            command[command.index("--setting-sources") + 1],
+            "",
+        )
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(
+            environment["CODEBUDDY_DISABLE_AUTO_MEMORY"],
+            "1",
+        )
+        self.assertEqual(
+            environment["CODEBUDDY_MEMORY_RELEVANCE_DISABLED"],
+            "1",
+        )
+
+    def test_workbuddy_backend_rejects_unknown_model(self):
+        with self.assertRaises(llm_client.LLMClientError) as ctx:
+            llm_client.call_llm(
+                "prompt",
+                backend="workbuddy",
+                model="unknown-model",
+            )
+        self.assertIn("不支持的 WorkBuddy 模型", str(ctx.exception))
+
 
 class _FailingAdvanceSession:
     id = "advance-llm-error"
 
-    def advance(self, account=None):
+    def advance(self, account=None, llm_backend="api", llm_model=None):
         raise llm_client.LLMClientError("上游请求超时")
 
 

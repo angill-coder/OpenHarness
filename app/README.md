@@ -67,7 +67,7 @@ Web UI 可为每次报告生成任务从 WorkBuddy 支持列表中选择模型�
 ## 页面输入（左列自上而下）
 
 1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。调研洞察产品固定读取 `skills/research-report` 唯一基线，并按基线实际内容初始化已启用 directive；其它产品仍由 generator 生成 v0。
-2. **导入数据**：调研报告可直接点「加载当前 WB 数据集」，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `ground_truth` 作为评测参考：不会发送给 WB 生成模型，但会与报告、Rubric 一起发送给模型 Judge。
+2. **导入数据**：调研报告可直接点「加载当前 WB 数据集」，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `ground_truth` 保存人工报告，但不会发送给 WB 生成模型或模型 Judge；Judge 使用 `evidence_metadata` 核验报告。
 3. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；case 启动后立即显示为生成中，无有效报告自动额外重试 3 次，每份成功报告产出后立即导入冻结版本。
 4. **批量模型 Judge**：点击「批量 Judge 全部 case」。系统以有限并发为每个 case 单独调用模型，并把逐-check结果汇总为六维分。
 
@@ -101,7 +101,7 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 ```text
 一次点击
   → 当前 Skill 版本的全部 case
-  → 每个 case 独立 Prompt（任务信息 + 报告 + ground truth + rubric checks）
+  → 每个 case 独立 Prompt（按维度路由的任务信息 / evidence metadata + 报告 + rubric checks）
   → 最多 OPENHARNESS_JUDGE_PARALLEL 路并发
   → 单 case 失败隔离
   → 成功结果一次性写入 Session 并重评
