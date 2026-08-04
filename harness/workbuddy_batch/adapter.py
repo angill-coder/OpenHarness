@@ -7,17 +7,17 @@ from pathlib import Path
 from .models import BatchConfig, CaseSpec
 
 
-EVIDENCE_METADATA_TARGET = "materials/00_evidence_metadata.json"
+STRUCTURED_DATA_TARGET = "materials/00_structured_data.json"
 EVIDENCE_SOURCE_TARGET = "materials/source"
 
 
-def evidence_metadata_first_system_prompt(case: CaseSpec) -> str:
-    """Return the evidence-reading contract for evidence-metadata-first datasets."""
+def structured_data_first_system_prompt(case: CaseSpec) -> str:
+    """Return the evidence-reading contract for structured-data-first datasets."""
     targets = {
         str(item.target or "").replace("\\", "/").rstrip("/")
         for item in case.input_files
     }
-    if EVIDENCE_METADATA_TARGET not in targets:
+    if STRUCTURED_DATA_TARGET not in targets:
         return ""
     source_note = (
         f"原始资料位于 `{EVIDENCE_SOURCE_TARGET}/`。"
@@ -27,13 +27,13 @@ def evidence_metadata_first_system_prompt(case: CaseSpec) -> str:
     return "\n".join(
         [
             "OpenHarness evidence-first reading contract:",
-            f"1. 开始分析时必须先完整读取 `{EVIDENCE_METADATA_TARGET}`；"
+            f"1. 开始分析时必须先完整读取 `{STRUCTURED_DATA_TARGET}`；"
             "其中 `items` 是本 case 的主证据索引，报告事实、数据和核心论断优先以其为依据。",
-            f"2. {source_note}仅在核验 `source_ref`、补充语境，或 evidence metadata 明确标记"
-            " unresolved/证据不足时再读取；不得跳过 evidence metadata 直接通读 source 后自行另建事实集。",
-            "3. 原始资料与 evidence metadata 冲突时必须显式指出，不得静默覆盖；"
-            "evidence metadata 未收录的新事实不得直接升级为核心确定性结论。",
-            "4. 只读取当前 workspace 内的 Skill、evidence metadata 和 materials；"
+            f"2. {source_note}仅在核验 `source_ref`、补充语境，或 structured data 明确标记"
+            " unresolved/证据不足时再读取；不得跳过 structured data 直接通读 source 后自行另建事实集。",
+            "3. 原始资料与 structured data 冲突时必须显式指出，不得静默覆盖；"
+            "structured data 未收录的新事实不得直接升级为核心确定性结论。",
+            "4. 只读取当前 workspace 内的 Skill、structured data 和 materials；"
             "不要向上探索运行目录、case.json、trace 或其他 OpenHarness 文件。",
         ]
     )
@@ -149,10 +149,10 @@ def build_round_command(
     if config.setting_sources is not None:
         command.extend(["--setting-sources", config.setting_sources])
     system_prompt = skill_system_prompt(skills, config.append_system_prompt)
-    evidence_metadata_prompt = evidence_metadata_first_system_prompt(case)
-    if evidence_metadata_prompt:
+    structured_data_prompt = structured_data_first_system_prompt(case)
+    if structured_data_prompt:
         system_prompt = "\n\n".join(
-            item for item in (system_prompt, evidence_metadata_prompt) if item
+            item for item in (system_prompt, structured_data_prompt) if item
         )
     if system_prompt:
         command.extend(["--append-system-prompt", system_prompt])

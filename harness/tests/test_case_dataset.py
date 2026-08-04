@@ -182,8 +182,8 @@ class CaseDatasetTest(unittest.TestCase):
         payload = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(payload["cases"][0]["metadata"]["source_kind"], "directory")
 
-    def test_extract_pptx_groundtruth_preserves_slide_numbers(self) -> None:
-        pptx = self.root / "groundtruth.pptx"
+    def test_extract_pptx_human_report_preserves_slide_numbers(self) -> None:
+        pptx = self.root / "human_report.pptx"
         with zipfile.ZipFile(pptx, "w") as archive:
             archive.writestr(
                 "ppt/slides/slide2.xml",
@@ -231,11 +231,11 @@ class CaseDatasetTest(unittest.TestCase):
         )
         self.assertTrue(destination_file.stat().st_mode & 0o200)
 
-    def test_generate_can_infer_intake_from_groundtruth_with_codex(self) -> None:
+    def test_generate_can_infer_intake_from_human_report_with_codex(self) -> None:
         materials = self.root / "materials"
-        groundtruth = self.root / "groundtruth"
+        human_report = self.root / "human_report"
         self._write_material(materials / "2024", "1_测试主题.md")
-        pdf = groundtruth / "2024" / "1_测试主题.pdf"
+        pdf = human_report / "2024" / "1_测试主题.pdf"
         pdf.parent.mkdir(parents=True)
         pdf.write_bytes(b"%PDF-fake")
         fake_pdftotext = self._write_executable(
@@ -276,8 +276,8 @@ output.write_text(json.dumps({{
             "--materials-dir",
             str(materials),
             "--recursive",
-            "--groundtruth-dir",
-            str(groundtruth),
+            "--human-report-dir",
+            str(human_report),
             "--intake-cache",
             str(cache),
             "--codex-cli",

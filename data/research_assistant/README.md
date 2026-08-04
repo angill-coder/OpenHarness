@@ -13,7 +13,7 @@
 | `human_labels.sample.jsonl` | 校准集格式样例（六维度人工打分）。 | 参考 |
 | `dataset.jsonl` | **正式数据集，已建 3 条真实 case**：`rr-ds-timelen`(DeepSeek时长) / `rr-surge-eff`(Surge高人效) / `rr-retention`(元宝/DS/豆包留存)。 | 你(复核/续加) |
 | `bad_variants.<case>.jsonl` | 各 case 的**坏报告变体骨架**（`make_bad_variants.py` 生成，含【填写】占位）。 | 你(补正文) |
-| `make_bad_variants.py` | 从某 case 的 ground_truth 半自动派生坏报告骨架+建议六维分，`--into-session` 可并入会话。 | 工具 |
+| `make_bad_variants.py` | 从某 case 的 human_report 半自动派生坏报告骨架+建议六维分，`--into-session` 可并入会话。 | 工具 |
 | `human_labels.jsonl` | ← **你产出的校准集**（还没建；也可直接在 app 第3步逐条填专家分）。 | 你 |
 
 三条真实 case 的原始素材 + 抽出的正文分别在 `data/DeepSeek用户时长分析/`、`data/Surge AI 高人效原因分析/`、`data/AI产品用户留存洞察/`（各含 `vF报告_正文.md` 与 `原始素材_正文.txt`）。
@@ -23,7 +23,7 @@
 1. **打开** `dataset.template.jsonl` 看字段含义，对照 `dataset.sample.jsonl` 看填好的样子。
 2. **手工做 3–5 条真实 case**：DeepSeek 用 2 条、AI Native Agent 落地用 2–3 条，**各埋 ≥1 个 trap**。
    - `input.sources[].excerpt` 填你手头素材里**最关键的原话/数据**（eval 跑的是这段文本，不是原始 pdf/excel）。
-   - `ground_truth`（supported_claims / key_claim_ids / expected_insights / traps）**是你不能外包的核心活**——先读完素材，把"素材真支持的结论"和"好报告应达到的洞察"标出来。
+   - `human_report`（supported_claims / key_claim_ids / expected_insights / traps）**是你不能外包的核心活**——先读完素材，把"素材真支持的结论"和"好报告应达到的洞察"标出来。
 3. 把填好的 case 汇成 `dataset.jsonl`（一行一条），标好 `split`（train/dev/test，test 保留不参与优化）。
 4. 每条 case 跑出一版输出后，按 rubric 给它分维度打分，汇成 `human_labels.jsonl`（抽 30–50 条；v0 可先小样）。
 
@@ -46,7 +46,7 @@
 
 human_labels 打分维度也用这六个字段名：`{"traceability":_,"structure":_,"narrative":_,"insight":_,"coverage":_,"expression":_}`。
 
-## ground_truth 两个新增字段（v0 确认）
+## human_report 两个新增字段（v0 确认）
 
 | 字段 | 作用 | 关联维度 |
 |------|------|----------|
@@ -68,4 +68,4 @@ human_labels 打分维度也用这六个字段名：`{"traceability":_,"structur
 4. 差 >1 的维度 = 锚点该对齐处，回改 `调研洞察汇报助手_Rubric落地文档.md` / `rubric_research.json` 或 case 的 traps 定义。
 5. 一致率 overall ≥ 0.85 → 才谈得上开 optimizer。
 
-⚠️ 仍待你产出：坏变体正文（骨架→具体）、每条的专家分（校准的另一半）、以及 xlsx/docx 里的精确数字核对。**ground_truth 与专家分是不能外包的核心**。
+⚠️ 仍待你产出：坏变体正文（骨架→具体）、每条的专家分（校准的另一半）、以及 xlsx/docx 里的精确数字核对。**human_report 与专家分是不能外包的核心**。

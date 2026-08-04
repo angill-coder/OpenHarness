@@ -38,7 +38,7 @@ DEFAULT_BACKGROUND_TEMPLATE = (
 DEFAULT_HYPO = "暂无预设假设，请基于素材形成并验证核心判断。"
 DEFAULT_MATERIAL_FOCUS = "都是重点素材。"
 DEFAULT_FILENAME_REGEX = re.compile(r"^(?P<index>\d+)_(?P<topic>.+)$")
-INTAKE_PROMPT_VERSION = "groundtruth-intake-v2"
+INTAKE_PROMPT_VERSION = "human_report-intake-v2"
 INTAKE_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -84,7 +84,7 @@ INTAKE_OUTPUT_SCHEMA: dict[str, Any] = {
 INTAKE_PROMPT = """\
 你是研究数据标注员，不是报告作者。
 
-请阅读当前工作目录中的 groundtruth.txt。该文件由一份已经完成的战略研究报告
+请阅读当前工作目录中的 human_report.txt。该文件由一份已经完成的战略研究报告
 提取而来，使用 `===== PAGE N =====` 标记原 PDF 页码。你的任务是反向还原
 报告在研究启动阶段可能对应的 intake answers，而不是总结最终报告。
 
@@ -111,7 +111,7 @@ INTAKE_PROMPT = """\
 3. 审核信息
 - evidence 只列出支持研究背景或前置研究问题的关键页码，不摘录最终答案。
 - confidence 反映还原可靠程度。
-- leakage_risk 评估输出是否可能泄漏 groundtruth 最终结论。
+- leakage_risk 评估输出是否可能泄漏 human_report 最终结论。
 - notes 简要说明判断边界；没有补充则输出空字符串。
 
 严格按给定 JSON Schema 输出。不要修改任何文件。
@@ -899,7 +899,7 @@ def _extract_pptx_text(
     return numbered, len(slides)
 
 
-def _extract_groundtruth_text(
+def _extract_human_report_text(
     path: Path,
     *,
     pdftotext_cli: str,
@@ -918,33 +918,33 @@ def _extract_groundtruth_text(
             path,
             minimum_characters=minimum_characters,
         )
-    raise CaseDatasetError(f"不支持的 groundtruth 格式: {path}")
+    raise CaseDatasetError(f"不支持的 human_report 格式: {path}")
 
 
-def _groundtruth_map(
+def _human_report_map(
     root: Path,
     extensions: Sequence[str],
 ) -> dict[str, Path]:
-    groundtruth_root = root.resolve()
-    if not groundtruth_root.is_dir():
-        raise CaseDatasetError(f"groundtruth 目录不存在: {groundtruth_root}")
+    human_report_root = root.resolve()
+    if not human_report_root.is_dir():
+        raise CaseDatasetError(f"human_report 目录不存在: {human_report_root}")
     normalized = {
         item.lower() if item.startswith(".") else f".{item.lower()}"
         for item in extensions
     }
     result: dict[str, Path] = {}
-    for path in groundtruth_root.rglob("*"):
+    for path in human_report_root.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in normalized:
             continue
-        key = path.relative_to(groundtruth_root).with_suffix("").as_posix()
+        key = path.relative_to(human_report_root).with_suffix("").as_posix()
         if key in result:
             raise CaseDatasetError(
-                f"groundtruth stem 重复: {key}，文件为 {result[key]} 和 {path}"
+                f"human_report stem 重复: {key}，文件为 {result[key]} 和 {path}"
             )
         result[key] = path.resolve()
     if not result:
         raise CaseDatasetError(
-            f"groundtruth 目录中没有匹配扩展名 {sorted(normalized)} 的文件"
+            f"human_report 目录中没有匹配扩展名 {sorted(normalized)} 的文件"
         )
     return result
 
@@ -953,10 +953,10 @@ def _inference_jobs(
     outputs: Sequence[tuple[Path, dict[str, Any]]],
     *,
     materials_root: Path,
-    groundtruth_root: Path,
+    human_report_root: Path,
     extensions: Sequence[str],
 ) -> list[dict[str, Any]]:
-    groundtruth = _groundtruth_map(groundtruth_root, extensions)
+    human_report = _human_report_map(human_report_root, extensions)
     jobs: list[dict[str, Any]] = []
     missing: list[str] = []
     for output_path, payload in outputs:
@@ -965,11 +965,11 @@ def _inference_jobs(
         source = (output_path.parent / source_value).resolve()
         if not source.is_file():
             raise CaseDatasetError(
-                "groundtruth intake 推断当前只支持“一文件一 case”"
+                "human_report intake 推断当前只支持“一文件一 case”"
             )
         relative = source.relative_to(materials_root.resolve())
         key = relative.with_suffix("").as_posix()
-        matched = groundtruth.get(key)
+        matched = human_report.get(key)
         if matched is None:
             missing.append(relative.as_posix())
             continue
@@ -979,9 +979,9 @@ def _inference_jobs(
                 "topic": str(case["metadata"]["topic"]),
                 "source": source,
                 "source_relative": relative.as_posix(),
-                "groundtruth": matched,
-                "groundtruth_relative": matched.relative_to(
-                    groundtruth_root.resolve()
+                "human_report": matched,
+                "human_report_relative": matched.relative_to(
+                    human_report_root.resolve()
                 ).as_posix(),
             }
         )
@@ -989,7 +989,7 @@ def _inference_jobs(
         preview = "\n".join(f"  - {item}" for item in missing[:20])
         suffix = f"\n  ... 另有 {len(missing) - 20} 个" if len(missing) > 20 else ""
         raise CaseDatasetError(
-            f"{len(missing)} 个素材缺少同相对路径、同 stem 的 groundtruth:\n"
+            f"{len(missing)} 个素材缺少同相对路径、同 stem 的 human_report:\n"
             f"{preview}{suffix}"
         )
     return jobs
@@ -1027,9 +1027,9 @@ def _run_codex_intake(
     codex_version: str,
 ) -> dict[str, Any]:
     started = time.monotonic()
-    pdf = Path(job["groundtruth"])
+    pdf = Path(job["human_report"])
     pdf_hash = _sha256_file(pdf)
-    text, page_count = _extract_groundtruth_text(
+    text, page_count = _extract_human_report_text(
         pdf,
         pdftotext_cli=pdftotext_cli,
         timeout_seconds=pdf_timeout_seconds,
@@ -1044,7 +1044,7 @@ def _run_codex_intake(
             prefix=f"intake-{_safe_ascii(job['case_id'])}-"
         ) as temporary_dir:
             workspace = Path(temporary_dir)
-            (workspace / "groundtruth.txt").write_text(text, encoding="utf-8")
+            (workspace / "human_report.txt").write_text(text, encoding="utf-8")
             schema_path = workspace / "output_schema.json"
             schema_path.write_text(
                 json.dumps(INTAKE_OUTPUT_SCHEMA, ensure_ascii=False, indent=2),
@@ -1099,8 +1099,8 @@ def _run_codex_intake(
                     "material_focus": DEFAULT_MATERIAL_FOCUS,
                     "intake_status": "codex_inferred",
                     "metadata": {
-                        "intake_source": "groundtruth_codex",
-                        "groundtruth_file": job["groundtruth_relative"],
+                        "intake_source": "human_report_codex",
+                        "human_report_file": job["human_report_relative"],
                         "hypo_type": parsed["hypo_type"],
                         "intake_confidence": parsed["confidence"],
                         "intake_leakage_risk": parsed["leakage_risk"],
@@ -1111,9 +1111,9 @@ def _run_codex_intake(
                         "prompt_sha256": hashlib.sha256(
                             prompt.encode("utf-8")
                         ).hexdigest(),
-                        "groundtruth_file": job["groundtruth_relative"],
-                        "groundtruth_sha256": pdf_hash,
-                        "groundtruth_pages": page_count,
+                        "human_report_file": job["human_report_relative"],
+                        "human_report_sha256": pdf_hash,
+                        "human_report_pages": page_count,
                         "codex_cli_version": codex_version,
                         "codex_model": codex_model or "<configured-default>",
                         "attempts": attempt,
@@ -1140,8 +1140,8 @@ def _run_codex_intake(
         "_inference": {
             "status": "failed",
             "prompt_version": INTAKE_PROMPT_VERSION,
-            "groundtruth_file": job["groundtruth_relative"],
-            "groundtruth_sha256": pdf_hash,
+            "human_report_file": job["human_report_relative"],
+            "human_report_sha256": pdf_hash,
             "codex_cli_version": codex_version,
             "codex_model": codex_model or "<configured-default>",
             "attempts": retries + 1,
@@ -1182,8 +1182,8 @@ def _cache_entry_valid(
         return False
     return bool(
         inference.get("prompt_version") == INTAKE_PROMPT_VERSION
-        and inference.get("groundtruth_sha256")
-        == _sha256_file(Path(job["groundtruth"]))
+        and inference.get("human_report_sha256")
+        == _sha256_file(Path(job["human_report"]))
         and inference.get("codex_model")
         == (codex_model or "<configured-default>")
         and inference.get("codex_cli_version") == codex_version
@@ -1266,7 +1266,7 @@ def infer_intake_overrides(
                         "_inference": {
                             "status": "failed",
                             "prompt_version": INTAKE_PROMPT_VERSION,
-                            "groundtruth_file": job["groundtruth_relative"],
+                            "human_report_file": job["human_report_relative"],
                             "error": f"{type(exc).__name__}: {exc}",
                         },
                     }
@@ -1307,7 +1307,7 @@ def _discover_projects(
     filename_regex: str,
     id_prefix: str,
     openharness_id_prefix: str,
-    groundtruth_extensions: Sequence[str],
+    human_report_extensions: Sequence[str],
 ) -> list[dict[str, Any]]:
     root = projects_dir.resolve()
     if not root.is_dir():
@@ -1322,7 +1322,7 @@ def _discover_projects(
         )
     extensions = {
         item.lower() if item.startswith(".") else f".{item.lower()}"
-        for item in groundtruth_extensions
+        for item in human_report_extensions
     }
     projects: list[dict[str, Any]] = []
     seen_case_ids: set[str] = set()
@@ -1347,18 +1347,18 @@ def _discover_projects(
                 f"项目 {project.name} 应有且仅有一个素材目录，实际为 "
                 f"{[item.name for item in source_dirs]}"
             )
-        groundtruth_files = [
+        human_report_files = [
             path
             for path in project.iterdir()
             if path.is_file()
             and not path.name.startswith(".")
             and path.suffix.lower() in extensions
         ]
-        if len(groundtruth_files) != 1:
+        if len(human_report_files) != 1:
             raise CaseDatasetError(
-                f"项目 {project.name} 应有且仅有一个 groundtruth "
+                f"项目 {project.name} 应有且仅有一个 human_report "
                 f"{sorted(extensions)}，实际为 "
-                f"{[item.name for item in groundtruth_files]}"
+                f"{[item.name for item in human_report_files]}"
             )
         source_index, topic, case_id, openharness_id = _source_identity(
             project,
@@ -1375,7 +1375,7 @@ def _discover_projects(
                 "project": project.resolve(),
                 "project_name": project.name,
                 "source": source_dirs[0].resolve(),
-                "groundtruth": groundtruth_files[0].resolve(),
+                "human_report": human_report_files[0].resolve(),
                 "source_index": source_index,
                 "topic": topic,
                 "case_id": case_id,
@@ -1538,7 +1538,7 @@ def _generate_projects_command(args: argparse.Namespace) -> int:
         filename_regex=args.filename_regex,
         id_prefix=args.id_prefix,
         openharness_id_prefix=args.openharness_id_prefix,
-        groundtruth_extensions=args.groundtruth_extension,
+        human_report_extensions=args.human_report_extension,
     )
     output_root = args.output_dir.resolve()
     manual_overrides = _load_overrides(args.intake_overrides)
@@ -1557,8 +1557,8 @@ def _generate_projects_command(args: argparse.Namespace) -> int:
         )
     print(
         f"[项目发现] projects={len(projects)} "
-        f"pdf={sum(Path(item['groundtruth']).suffix.lower() == '.pdf' for item in projects)} "
-        f"pptx={sum(Path(item['groundtruth']).suffix.lower() == '.pptx' for item in projects)}",
+        f"pdf={sum(Path(item['human_report']).suffix.lower() == '.pdf' for item in projects)} "
+        f"pptx={sum(Path(item['human_report']).suffix.lower() == '.pptx' for item in projects)}",
         flush=True,
     )
     if args.dry_run:
@@ -1566,7 +1566,7 @@ def _generate_projects_command(args: argparse.Namespace) -> int:
             print(
                 f"{project['case_id']} | {project['project_name']} | "
                 f"source={Path(project['source']).name} | "
-                f"groundtruth={Path(project['groundtruth']).name}"
+                f"human_report={Path(project['human_report']).name}"
             )
         return 0
     for project in projects:
@@ -1590,10 +1590,10 @@ def _generate_projects_command(args: argparse.Namespace) -> int:
             "topic": project["topic"],
             "source": project["source"],
             "source_relative": project["project_name"],
-            "groundtruth": project["groundtruth"],
-            "groundtruth_relative": (
+            "human_report": project["human_report"],
+            "human_report_relative": (
                 f"{project['project_name']}/"
-                f"{Path(project['groundtruth']).name}"
+                f"{Path(project['human_report']).name}"
             ),
         }
         for project in projects
@@ -1649,7 +1649,7 @@ def _generate_command(args: argparse.Namespace) -> int:
         source_kind=args.source_kind,
         overrides_path=args.intake_overrides,
         generated_overrides=None,
-        intake_mode=("neutral" if args.groundtruth_dir else args.intake_mode),
+        intake_mode=("neutral" if args.human_report_dir else args.intake_mode),
         filename_regex=args.filename_regex,
         id_prefix=args.id_prefix,
         openharness_id_prefix=args.openharness_id_prefix,
@@ -1670,15 +1670,15 @@ def _generate_command(args: argparse.Namespace) -> int:
             f"{preview}{suffix}"
         )
     generated_overrides: dict[str, dict[str, Any]] | None = None
-    if args.groundtruth_dir:
+    if args.human_report_dir:
         jobs = _inference_jobs(
             base_outputs,
             materials_root=args.materials_dir,
-            groundtruth_root=args.groundtruth_dir,
-            extensions=args.groundtruth_extension,
+            human_report_root=args.human_report_dir,
+            extensions=args.human_report_extension,
         )
         print(
-            f"[groundtruth 配对] materials={len(base_outputs)} matched={len(jobs)}",
+            f"[human_report 配对] materials={len(base_outputs)} matched={len(jobs)}",
             flush=True,
         )
         if not args.dry_run:
@@ -1694,7 +1694,7 @@ def _generate_command(args: argparse.Namespace) -> int:
                 )
             cache_path = (
                 args.intake_cache
-                or args.groundtruth_dir.resolve().parent
+                or args.human_report_dir.resolve().parent
                 / "intake_answers.codex.json"
             )
             generated_overrides = infer_intake_overrides(
@@ -1841,24 +1841,24 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_MATERIAL_FOCUS,
     )
     generate.add_argument(
-        "--groundtruth-dir",
+        "--human-report-dir",
         type=Path,
         help=(
-            "groundtruth 根目录；设置后按相对路径和同 stem 配对，"
+            "human_report 根目录；设置后按相对路径和同 stem 配对，"
             "调用 Codex 自动补齐 round 1"
         ),
     )
     generate.add_argument(
-        "--groundtruth-extension",
+        "--human-report-extension",
         action="append",
         default=None,
-        help="groundtruth 扩展名，可重复；默认 .pdf",
+        help="human_report 扩展名，可重复；默认 .pdf",
     )
     generate.add_argument(
         "--intake-cache",
         type=Path,
         help=(
-            "Codex 推断缓存；默认 groundtruth-dir 的父目录/"
+            "Codex 推断缓存；默认 human_report-dir 的父目录/"
             "intake_answers.codex.json"
         ),
     )
@@ -1894,7 +1894,7 @@ def _parser() -> argparse.ArgumentParser:
     projects = subparsers.add_parser(
         "generate-projects",
         help=(
-            "处理“一个项目目录 + 一个素材子目录 + 一个 groundtruth”结构，"
+            "处理“一个项目目录 + 一个素材子目录 + 一个 human_report”结构，"
             "生成完整原子 case"
         ),
     )
@@ -1924,7 +1924,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     projects.add_argument("--intake-overrides", type=Path)
     projects.add_argument(
-        "--groundtruth-extension",
+        "--human-report-extension",
         action="append",
         default=None,
         help="默认同时支持 .pdf 和 .pptx",
@@ -1989,19 +1989,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "generate" and args.material_glob is None:
         args.material_glob = ["*.md" if args.source_kind == "file" else "*"]
     if args.command in {"generate", "generate-projects"}:
-        if args.groundtruth_extension is None:
-            args.groundtruth_extension = (
+        if args.human_report_extension is None:
+            args.human_report_extension = (
                 [".pdf"]
                 if args.command == "generate"
                 else [".pdf", ".pptx"]
             )
         if (
             args.command == "generate"
-            and args.groundtruth_dir
+            and args.human_report_dir
             and args.source_kind != "file"
         ):
             raise CaseDatasetError(
-                "--groundtruth-dir 当前仅支持 --source-kind file"
+                "--human-report-dir 当前仅支持 --source-kind file"
             )
         if args.codex_parallel < 1:
             raise CaseDatasetError("--codex-parallel 必须至少为 1")

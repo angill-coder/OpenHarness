@@ -115,8 +115,8 @@ def _load_sample(product="report-assistant"):
     return _pick("dataset")
 
 
-def _load_evidence_metadata(cases, dataset_path):
-    """为 Judge 的临时 case 副本加载同目录 Evidence Metadata。"""
+def _load_structured_data(cases, dataset_path):
+    """为 Judge 的临时 case 副本加载同目录 Structured Data。"""
     dataset_root = Path(dataset_path).expanduser().resolve().parent
     prepared = []
     errors = []
@@ -131,10 +131,10 @@ def _load_evidence_metadata(cases, dataset_path):
             if not source.is_absolute():
                 source = (dataset_root / source).resolve()
             if source.name == "source":
-                candidates.add(source.parent / "evidence_metadata.json")
+                candidates.add(source.parent / "structured_data.json")
         if len(candidates) != 1:
             errors.append(
-                "%s: 无法从 input_files.source 唯一定位 evidence metadata"
+                "%s: 无法从 input_files.source 唯一定位 structured data"
                 % case_id
             )
             continue
@@ -146,17 +146,17 @@ def _load_evidence_metadata(cases, dataset_path):
             continue
         if (
             not isinstance(payload, dict)
-            or payload.get("schema") != "openharness-evidence/v1"
+            or payload.get("schema") != "openharness-structured-data/v1"
             or payload.get("case_id") != case_id
             or not isinstance(payload.get("items"), list)
             or not payload["items"]
         ):
-            errors.append("%s: Evidence Metadata 结构或 case_id 不合法" % case_id)
+            errors.append("%s: Structured Data 结构或 case_id 不合法" % case_id)
             continue
-        case["evidence_metadata"] = payload
+        case["structured_data"] = payload
         prepared.append(case)
     if errors:
-        raise ValueError("Evidence Metadata 预检失败: " + "; ".join(errors))
+        raise ValueError("Structured Data 预检失败: " + "; ".join(errors))
     return prepared
 
 
@@ -184,7 +184,7 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
     dimensions = rubric.get("dimensions") or []
     L = [
         "你是严格的调研报告评审。",
-        "只评价【报告正文】实际呈现的内容；背景和 Evidence Metadata "
+        "只评价【报告正文】实际呈现的内容；背景和 Structured Data "
         "只用于核验，不得算作报告已经写到。",
         "对本次列出的每一条 check 判 "
         "met(满足)/partial(部分)/miss(不满足)。",
@@ -201,19 +201,19 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
             "不要推测、补评或平衡其他维度。",
         ]
     context = dict(case_context or {})
-    # Judge 不接收 ground truth；即使调用方误传，也在 Prompt 边界丢弃。
-    context.pop("ground_truth", None)
+    # Judge 不接收 human report；即使调用方误传，也在 Prompt 边界丢弃。
+    context.pop("human_report", None)
     if context.get("background"):
         L.append(
             "背景信息只用于确定任务范围、研究问题和受众，不是事实证据。"
         )
-    if context.get("evidence_metadata"):
+    if context.get("structured_data"):
         L += [
-            "Evidence Metadata 是从原始资料提炼的证据索引，不是参考答案。",
+            "Structured Data 是从原始资料提炼的证据索引，不是参考答案。",
             "用它核验事实、冲突、口径、样本边界和异常；"
             "报告论断未被索引覆盖时可以判为无法回溯，"
             "但不得仅据此直接认定为事实编造。",
-            "只有与 Evidence Metadata 明确冲突或报告给出无依据的确定性事实时，"
+            "只有与 Structured Data 明确冲突或报告给出无依据的确定性事实时，"
             "才对“不编造·不曲解”降档。",
         ]
     if set(context) <= {"case_id"}:
@@ -234,7 +234,7 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
             ))
     for key, title in (
         ("background", "背景信息（round 0–1）"),
-        ("evidence_metadata", "Evidence Metadata"),
+        ("structured_data", "Structured Data"),
     ):
         if context.get(key):
             L += [
@@ -976,7 +976,7 @@ class Handler(BaseHTTPRequestHandler):
                         {"error": "GenerationJobService 尚未初始化"},
                     )
                 try:
-                    cases = _load_evidence_metadata(
+                    cases = _load_structured_data(
                         cases,
                         GENERATION_SERVICE.settings.dataset_path,
                     )

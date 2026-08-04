@@ -1,13 +1,13 @@
-# Evidence Metadata 生成规则
+# Structured Data 生成规则
 
 你是只读的证据整理 Worker。完整检查一个 case 的原始资料，生成全面、
-可回查的 Evidence Metadata，供后续质检和 Judge 使用。完整覆盖优先于
+可回查的 Structured Data，供后续质检和 Judge 使用。完整覆盖优先于
 篇幅精简。
 
 ## 边界
 
 - 不写报告，不提出新结论或建议。
-- 不读取 groundtruth、参考报告或候选报告。
+- 不读取 human_report、参考报告或候选报告。
 - 不修改任何原始文件。
 - round 0–1 只用于理解研究主题、受众、hypothesis 和素材重点。
 
@@ -45,7 +45,7 @@
 
 ```json
 {
-  "schema": "openharness-evidence/v1",
+  "schema": "openharness-structured-data/v1",
   "case_id": "输入 case_id",
   "items": [
     {

@@ -20,7 +20,7 @@ python3 run_demo.py
 
 本环境没有 `ANTHROPIC_API_KEY`、没有 anthropic SDK、没有 claude CLI。要**证明闭环成立**，需要一个可复现、可断言的演示，而不是一次性的、不确定的真实调用。
 
-所以 `MockBackend` 不是"随机给分"：它模拟一个执行 skill 结构（取数→洞察→写作→验证）的 agent，**输出质量由 skill 的哪些 directive 被打开精确决定**，每个 directive 对应 rubric 的一个失分点。judge 再拿输出对照数据集的 `ground_truth_findings` 打分。于是"打开正确的 directive → 修好对应缺陷 → judge 分数真的上升"是 rubric 定义的**必然结果**，而非硬编码的脚本。这正是"**结构定上限、指令让输出逼近上限**"的可运行体现。
+所以 `MockBackend` 不是"随机给分"：它模拟一个执行 skill 结构（取数→洞察→写作→验证）的 agent，**输出质量由 skill 的哪些 directive 被打开精确决定**，每个 directive 对应 rubric 的一个失分点。judge 再拿输出对照数据集的 `human_report_findings` 打分。于是"打开正确的 directive → 修好对应缺陷 → judge 分数真的上升"是 rubric 定义的**必然结果**，而非硬编码的脚本。这正是"**结构定上限、指令让输出逼近上限**"的可运行体现。
 
 真实 Claude 后端（`ClaudeBackend`）已写好签名与选择逻辑，**有 key + sdk 时 `python3 run_demo.py --real` 自动启用**，闭环其余部分一字不改——证明后端抽象是真的、可迁移。
 
@@ -63,7 +63,7 @@ python3 run_demo.py
 ## 换一个产品怎么用
 
 1. 按结构设计文档 + rubric 文档，写该产品的 `skill_v0.json`（结构 + directives 动作空间）和 `rubric.json`。
-2. 按 `data/report_assistant/` 的格式准备 `dataset.jsonl`（含 `ground_truth_findings` + 硬 case）。
+2. 按 `data/report_assistant/` 的格式准备 `dataset.jsonl`（含 `human_report_findings` + 硬 case）。
 3. 若接真实平台，实现 `ClaudeBackend.run`（或新增 adapter），把 skill 拼成提示、回收结构化输出与 trace。
 
 ## WorkBuddy 真实报告生成（Phase 0）
@@ -119,23 +119,23 @@ python -m unittest discover -s harness/tests -p 'test_*.py' -v
 
 ## 数据质检工具
 
-统一入口会先把原始 source 生成 Evidence Metadata，再基于 source、
-metadata 和 groundtruth 完成遗漏/冲突/噪声质检。增加
-`--repair-metadata` 后，会把“source 已有但 metadata 漏提”的事实重新回查
-source 并追加到修复版 Metadata：
+统一入口会先把原始 source 生成 Structured Data，再基于 source、
+structured_data 和 human_report 完成遗漏/冲突/噪声质检。增加
+`--repair-structured-data` 后，会把“source 已有但 structured_data 漏提”的事实重新回查
+source 并追加到修复版 Structured Data：
 
 ```bash
 # OpenHarness data.json
 python harness/data_workflow.py run \
   --dataset data/20260727_test_data/data.json \
   --case-id <case-id> \
-  --repair-metadata \
+  --repair-structured-data \
   --output quality_runs
 
 # Standalone
 python harness/data_workflow.py run \
   --source ./source \
-  --groundtruth ./groundtruth.pdf \
+  --human-report ./human_report.pdf \
   --case-id example \
   --background "研究背景" \
   --output quality_runs
@@ -145,6 +145,6 @@ Python 内嵌入口为
 `harness.data_workflow.run_data_workflow(DataWorkflowRequest(...))`，并可传入
 `progress_callback` 与 `should_cancel`，供 Web UI 展示进度或取消任务。
 默认只写独立产物目录；
-增加 `--publish-metadata` 才会把合法 Metadata 同步到 OpenHarness case 目录。
-启用修复时，原始版本保存在 `evidence_metadata.json`，修复版写入
-`evidence_metadata.repaired.json`；`--publish-metadata` 会发布最终修复版。
+增加 `--publish-structured-data` 才会把合法 Structured Data 同步到 OpenHarness case 目录。
+启用修复时，原始版本保存在 `structured_data.json`，修复版写入
+`structured_data.repaired.json`；`--publish-structured-data` 会发布最终修复版。

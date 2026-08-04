@@ -66,7 +66,7 @@ skill 产出的报告为**面向高管的 3 段结构**（`skills/research-repor
 2. 未曲解素材原意；
 3. 没有素材里不存在的"新事实"；
 4. 对素材间冲突正确处理（指出而非混用）；
-5. **素材不足以支撑的观点，诚实留白，不硬编**（对应 `ground_truth.unsupportable_questions`）；
+5. **素材不足以支撑的观点，诚实留白，不硬编**（对应 `human_report.unsupportable_questions`）；
 6. **单一信源的结论必须降级为"待验证/需补充信源"，不得当作确定结论输出**（"足够支撑"下线 = ≥2 个独立信源）。
 7. **口径注明**（T6 / `note_metric_caveat`）：口径依赖的数/结论（用哪种分母、哪种口径）要注明口径、必要时给敏感性；不挑最有利口径却不声明。选口径不注明 = 轻度曲解，落 3。
 8. **披露样本偏差**（T7 / `disclose_sample_bias`）：已知样本有系统性偏差（渠道/平台倾向/构成）要披露、把结论限定适用范围；无视偏差把有偏当客观 = 轻度曲解，落 3。
@@ -141,7 +141,7 @@ skill 产出的报告为**面向高管的 3 段结构**（`skills/research-repor
 
 **判据**：`key_questions` 中**素材支持的部分**全部得到回答；`key_claim_ids` 无遗漏；`required_sections` 全覆盖且非空。
 
-> **关键约定**：`ground_truth.unsupportable_questions` 里的问题（素材根本答不了的），**不答不扣覆盖度**；若 skill 硬答，扣分归维度 ①（无支撑硬结论），不在这里加分。这样覆盖度与"不强行输出"不打架。
+> **关键约定**：`human_report.unsupportable_questions` 里的问题（素材根本答不了的），**不答不扣覆盖度**；若 skill 硬答，扣分归维度 ①（无支撑硬结论），不在这里加分。这样覆盖度与"不强行输出"不打架。
 
 | 分 | 锚点 |
 |----|------|
@@ -203,7 +203,7 @@ overall >= 4.0         judge_human_agreement >= 0.85
 
 ## 4. 对数据 Schema 的两个新增字段（本次确认）
 
-为让"不硬编"和"剔噪"可评，`ground_truth` 新增两字段（已同步进数据脚手架）：
+为让"不硬编"和"剔噪"可评，`human_report` 新增两字段（已同步进数据脚手架）：
 
 | 字段 | 作用 | 关联维度 |
 |------|------|----------|
@@ -218,7 +218,7 @@ overall >= 4.0         judge_human_agreement >= 0.85
 
 | 模块 | 需改成 |
 |------|--------|
-| `harness/schemas.py` | case 用 `sources` + `ground_truth{supported_claims, key_claim_ids, expected_insights, unsupportable_questions, noise_source_ids, traps}` |
+| `harness/schemas.py` | case 用 `sources` + `human_report{supported_claims, key_claim_ids, expected_insights, unsupportable_questions, noise_source_ids, traps}` |
 | `harness/judge.py` | 六维打分：可回溯+2信源规则+硬编检测 / 结构（摘要bullet≤3+金字塔+MECE）/ 故事线+概念一致 / 洞察+提炼+剔噪 / 覆盖（排除 unsupportable）/ 表达+"不是,而是"句式检测+图表检测 |
 | `harness/backend.py`（Mock） | 按 directives 输出"引用/编造/指出冲突/硬编/罗列vs提炼/违禁句式"等可区分行为 |
 | `harness/optimizer.py` | 新增 directive：`require_source_ref` / `require_two_sources` / `flag_source_conflict` / `mark_extrapolation_confidence` / `require_insight_triplet` / `abstract_cases` / `drop_noise` / `pyramid_summary` / `mece_sections` / `ban_bushi_ershi` / `require_charts` / `match_exec_length` |
@@ -231,7 +231,7 @@ overall >= 4.0         judge_human_agreement >= 0.85
 
 - [ ] 六维权重/锚点/gate/目标阈值确认（本文档 = 已确认）
 - [ ] dataset ≥ 3 条真实 case（DeepSeek 2 + AI Native 2–3），覆盖 ≥3 种 trap，含 `unsupportable_questions` 与 `noise_source_ids`
-- [ ] 每条 case 的 `ground_truth` 由你人工标注完成
+- [ ] 每条 case 的 `human_report` 由你人工标注完成
 - [ ] human_labels 抽 30–50 条（v0 先小样）按本文六维打分
 - [ ] judge 校准一致率 ≥ 0.85（否则先改 rubric 锚点，不动 skill）
 - [ ] 明确 §5 代码改动范围，再进入实现

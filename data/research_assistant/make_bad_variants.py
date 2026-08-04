@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-make_bad_variants.py — 从一个"好 case"(素材+ground_truth)半自动产出「坏报告」变体骨架,
+make_bad_variants.py — 从一个"好 case"(素材+human_report)半自动产出「坏报告」变体骨架,
                         用于快速搭建调研洞察 judge 的校准集(高质锚点 + 各类失分锚点)。
 
 思路: 校准需要既有"好报告打高"、也有"坏报告在不同维度打低"的样本。本脚本读 case 的
-ground_truth, **按里面已定义的 traps / unsupportable_questions / noise / 单一信源 claim**,
+human_report, **按里面已定义的 traps / unsupportable_questions / noise / 单一信源 claim**,
 自动派生对应的坏报告变体骨架——每个变体只犯一种错(隔离到某个维度),附:
   · report_text 骨架(含【填写:…】提示, 具体内容你补, 好的部分可参考好报告)
   · 建议六维分 + 每维 reasoning(judge 该怎么扣)
@@ -38,19 +38,19 @@ def _first(seq, default=None):
     return seq[0] if seq else default
 
 
-def _single_source_claim(gt):
-    for c in gt.get("supported_claims", []):
+def _single_source_claim(human_report):
+    for c in human_report.get("supported_claims", []):
         if len(c.get("source_ids", [])) < 2:
             return c
     return None
 
 
-def _has_trap(gt, t):
-    return any(tr.get("type") == t for tr in gt.get("traps", []))
+def _has_trap(human_report, t):
+    return any(tr.get("type") == t for tr in human_report.get("traps", []))
 
 
-def _trap_detail(gt, t):
-    for tr in gt.get("traps", []):
+def _trap_detail(human_report, t):
+    for tr in human_report.get("traps", []):
         if tr.get("type") == t:
             return tr.get("detail", "")
     return ""
@@ -58,7 +58,7 @@ def _trap_detail(gt, t):
 
 # ---------------------------------------------------------------------------
 # 缺陷目录: 每项 = (类型, 触发条件, 目标维度→分, 骨架生成, reasoning 生成)
-# 只有 case 的 ground_truth 里"存在对应把柄"时才派生该变体(否则不硬造)。
+# 只有 case 的 human_report 里"存在对应把柄"时才派生该变体(否则不硬造)。
 # 基线其余维度给 4(否则很好、只坏在一处), 以便把失分隔离到目标维度。
 # ---------------------------------------------------------------------------
 def _mk(case, defect_type, note, overrides, reasoning, body):
@@ -75,11 +75,11 @@ def _mk(case, defect_type, note, overrides, reasoning, body):
 
 
 def build_variants(case):
-    gt = case.get("ground_truth", {})
+    human_report = case.get("human_report", {})
     out = []
 
     # 1) 硬答"素材答不了的问题" → 可回溯性红线(2)
-    q = _first(gt.get("unsupportable_questions", []))
+    q = _first(human_report.get("unsupportable_questions", []))
     if q:
         out.append(_mk(case, "hardanswer",
             "硬答素材答不了的问题(踩可回溯性红线)",
@@ -89,7 +89,7 @@ def build_variants(case):
             "## 建议\n针对『%s』,我们判断【填写:硬给一个素材根本支撑不了的具体结论/动作,如具体投放渠道与预算】。" % q))
 
     # 2) 越界外推(趋势将持续) → 可回溯性红线(2) + 洞察(3)
-    if _has_trap(gt, "unsupported_extrapolation"):
+    if _has_trap(human_report, "unsupported_extrapolation"):
         out.append(_mk(case, "overclaim",
             "把历史趋势外推成未来定论(越界)",
             {"traceability": 2, "insight": 3},
@@ -98,8 +98,8 @@ def build_variants(case):
             "## 趋势判断\n【填写:基于历史线性趋势,断言未来将持续增长/再翻倍且'增长确定可持续'——不要留任何不确定性】"))
 
     # 3) 孤证当全局定论(单一信源未降级) → 可回溯性
-    ssc = _single_source_claim(gt)
-    if ssc or _has_trap(gt, "single_modality"):
+    ssc = _single_source_claim(human_report)
+    if ssc or _has_trap(human_report, "single_modality"):
         cid = (ssc or {}).get("id", "某单一信源结论")
         out.append(_mk(case, "single_source",
             "单一信源/定性结论当作全局硬定论,未标待验证",
@@ -108,7 +108,7 @@ def build_variants(case):
             "## 结论\n【填写:拿一条仅靠单一信源/几例访谈支撑的结论,写成'已确证的全局事实',不加任何'待验证/定性'限定】"))
 
     # 4) 混用冲突素材(不指出口径差异) → 可回溯性红线(2)
-    if _has_trap(gt, "source_conflict"):
+    if _has_trap(human_report, "source_conflict"):
         out.append(_mk(case, "conflict",
             "把口径冲突的素材直接混用",
             {"traceability": 2},
@@ -116,32 +116,32 @@ def build_variants(case):
             "## 对比\n【填写:把两个口径不同的数(如不同来源/不同定义)直接放一起比较得结论,不说明口径不可比】"))
 
     # 4b) 选有利口径、不注明(口径依赖却当稳健结论) → 可回溯性(3)
-    if _has_trap(gt, "metric_caveat"):
+    if _has_trap(human_report, "metric_caveat"):
         out.append(_mk(case, "metric_caveat",
             "选有利口径且不注明(轻度曲解)",
             {"traceability": 3},
-            {"traceability": "挑选对结论有利的口径/分母得出强结论、不注明口径依赖(如换口径结论就不成立) → 3分。detail: %s" % _trap_detail(gt, "metric_caveat")},
+            {"traceability": "挑选对结论有利的口径/分母得出强结论、不注明口径依赖(如换口径结论就不成立) → 3分。detail: %s" % _trap_detail(human_report, "metric_caveat")},
             "## 关键指标\n【填写:挑一个口径依赖的数(如用最有利的分母/样本),把结论说得斩钉截铁,不加任何口径说明或敏感性提示】"))
 
     # 4c) 无视样本/选择偏差 → 可回溯性(3)
-    if _has_trap(gt, "selection_bias"):
+    if _has_trap(human_report, "selection_bias"):
         out.append(_mk(case, "selection_bias",
             "无视样本/选择偏差,把有偏结果当客观",
             {"traceability": 3},
-            {"traceability": "已知样本存在系统性偏差却不提示、把有偏比较当客观结论 → 3分。detail: %s" % _trap_detail(gt, "selection_bias")},
+            {"traceability": "已知样本存在系统性偏差却不提示、把有偏比较当客观结论 → 3分。detail: %s" % _trap_detail(human_report, "selection_bias")},
             "## 对比结论\n【填写:拿一个已知有偏差的样本/来源,直接得出对我方有利的横向比较结论,不提任何偏差或'需谨慎解读'】"))
 
     # 4d) 把异常/离群当趋势(错误归因) → 可回溯性红线(2) + 洞察(3)
-    if _has_trap(gt, "outlier_confound"):
+    if _has_trap(human_report, "outlier_confound"):
         out.append(_mk(case, "outlier",
             "把一次性异常/离群当成趋势或错误归因",
             {"traceability": 2, "insight": 3},
-            {"traceability": "把明显的一次性异常/离群点当作长期趋势或错误归因、未作交叉解释 → 2分封顶。detail: %s" % _trap_detail(gt, "outlier_confound"),
+            {"traceability": "把明显的一次性异常/离群点当作长期趋势或错误归因、未作交叉解释 → 2分封顶。detail: %s" % _trap_detail(human_report, "outlier_confound"),
              "insight": "基于离群点过度解读 → 3"},
             "## 趋势\n【填写:抓住一个明显的一次性峰值/异常(如某节假日突增),硬说成'持续趋势'或错误归因,不作交叉/情境解释】"))
 
     # 5) 引用噪音片段充数 → 提炼与洞察(3)
-    noise = gt.get("noise_source_ids", [])
+    noise = human_report.get("noise_source_ids", [])
     if noise:
         out.append(_mk(case, "noise",
             "引用噪音片段充数(剔噪失败)",
@@ -150,7 +150,7 @@ def build_variants(case):
             "## 附加发现\n【填写:引用噪音源 %s 的内容,硬扯进结论,好像它支撑了什么】" % ", ".join(noise)))
 
     # 6) 案例罗列而非提炼 → 提炼与洞察(3)
-    if gt.get("expected_insights"):
+    if human_report.get("expected_insights"):
         out.append(_mk(case, "listing",
             "案例逐条罗列、不提炼成规律",
             {"insight": 3},

@@ -94,18 +94,18 @@ class ExternalRunnerTest(unittest.TestCase):
         )
         self.assertEqual(environment["CODEBUDDY_TEAM_MEMORY_ENABLED"], "0")
 
-    def test_evidence_metadata_first_case_gets_evidence_reading_contract(self) -> None:
+    def test_structured_data_first_case_gets_evidence_reading_contract(self) -> None:
         config = BatchConfig(
             command=("workbuddy",),
             output_root=Path("generation_runs"),
         )
         case = CaseSpec(
-            case_id="evidence-metadata-first",
+            case_id="structured-data-first",
             prompt="write report",
             input_files=(
                 InputFile(
-                    Path("evidence_metadata.json"),
-                    "materials/00_evidence_metadata.json",
+                    Path("structured_data.json"),
+                    "materials/00_structured_data.json",
                 ),
                 InputFile(Path("source"), "materials/source"),
             ),
@@ -122,11 +122,11 @@ class ExternalRunnerTest(unittest.TestCase):
         system_prompt = command[command.index("--append-system-prompt") + 1]
 
         self.assertIn("evidence-first reading contract", system_prompt)
-        self.assertIn("materials/00_evidence_metadata.json", system_prompt)
+        self.assertIn("materials/00_structured_data.json", system_prompt)
         self.assertIn("materials/source/", system_prompt)
         self.assertIn("不要向上探索运行目录、case.json", system_prompt)
 
-    def test_source_only_case_does_not_claim_evidence_metadata(self) -> None:
+    def test_source_only_case_does_not_claim_structured_data(self) -> None:
         config = BatchConfig(
             command=("workbuddy",),
             output_root=Path("generation_runs"),
@@ -447,12 +447,12 @@ class ExternalRunnerTest(unittest.TestCase):
             all(item.status == "artifact_missing" for item in case.attempts)
         )
 
-    def test_unified_ground_truth_is_not_sent_to_workbuddy(self) -> None:
+    def test_unified_human_report_is_not_sent_to_workbuddy(self) -> None:
         payload = json.loads(self.dataset.read_text(encoding="utf-8"))
         payload["schema_version"] = "openharness-wb/v1"
         payload["cases"][0]["case_id"] = "oh-case"
         payload["cases"][0]["input"] = {"brief": "generate"}
-        payload["cases"][0]["ground_truth"] = {
+        payload["cases"][0]["human_report"] = {
             "supported_claims": ["answer"]
         }
         self.dataset.write_text(
@@ -474,14 +474,14 @@ class ExternalRunnerTest(unittest.TestCase):
             ).read_text(encoding="utf-8")
         )
         self.assertNotIn(
-            "ground_truth",
+            "human_report",
             effective_case["case"]["data"],
         )
 
-    def test_rejects_ground_truth_nested_in_generation_data(self) -> None:
+    def test_rejects_human_report_nested_in_generation_data(self) -> None:
         payload = json.loads(self.dataset.read_text(encoding="utf-8"))
         payload["cases"][0]["data"] = {
-            "ground_truth": {"supported_claims": ["answer"]}
+            "human_report": {"supported_claims": ["answer"]}
         }
         self.dataset.write_text(
             json.dumps(payload, ensure_ascii=False),
@@ -490,7 +490,7 @@ class ExternalRunnerTest(unittest.TestCase):
 
         with self.assertRaisesRegex(
             ExternalRunConfigurationError,
-            "ground_truth",
+            "human_report",
         ):
             run_external_cases(
                 self._request(succeed_on_attempt=1, max_retries=3)

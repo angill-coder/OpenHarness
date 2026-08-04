@@ -21,9 +21,9 @@ from data_workflow import (
 )
 
 
-def _metadata(case_id: str) -> dict:
+def _structured_data(case_id: str) -> dict:
     return {
-        "schema": "openharness-evidence/v1",
+        "schema": "openharness-structured-data/v1",
         "case_id": case_id,
         "items": [
             {
@@ -47,16 +47,16 @@ def _audit(project: str, case_id: str) -> dict:
     return {
         "project": project,
         "case_id": case_id,
-        "gt_core": [
+        "human_report_core": [
             {
-                "id": "GT-001",
+                "id": "HR-001",
                 "text": "第一个关键结论",
                 "quote": "第一个关键结论",
                 "location": "第一节",
                 "importance": "critical",
             },
             {
-                "id": "GT-002",
+                "id": "HR-002",
                 "text": "第二个关键结论",
                 "quote": "第二个关键结论",
                 "location": "第二节",
@@ -67,29 +67,29 @@ def _audit(project: str, case_id: str) -> dict:
             {
                 "evidence_id": "EV-001",
                 "classification": "used",
-                "gt_ids": ["GT-001"],
+                "human_report_ids": ["HR-001"],
                 "reason": "直接支撑",
             },
             {
                 "evidence_id": "EV-002",
                 "classification": "noise",
-                "gt_ids": [],
+                "human_report_ids": [],
                 "reason": "未被采用",
             },
         ],
         "omissions": [
             {
-                "gt_id": "GT-002",
-                "gt_text": "第二个关键结论",
-                "gt_quote": "第二个关键结论",
-                "gt_location": "第二节",
+                "human_report_id": "HR-002",
+                "human_report_text": "第二个关键结论",
+                "human_report_quote": "第二个关键结论",
+                "human_report_location": "第二节",
                 "severity": "critical",
                 "search_note": "已回查全部 source",
                 "reason": "没有充分支撑",
             }
         ],
         "conflicts": [],
-        "metadata_gaps": [],
+        "structured_data_gaps": [],
         "noise_clusters": [
             {
                 "theme": "未采用信息",
@@ -112,39 +112,39 @@ class DataQualityTest(unittest.TestCase):
     def tearDown(self) -> None:
         self._temporary.cleanup()
 
-    def test_standalone_pipeline_builds_metadata_and_audit(self) -> None:
+    def test_standalone_pipeline_builds_structured_data_and_audit(self) -> None:
         case_dir = self.root / "case-a"
         source = case_dir / "source"
         source.mkdir(parents=True)
         (source / "source.md").write_text("原始资料", encoding="utf-8")
-        groundtruth = case_dir / "groundtruth.md"
-        groundtruth.write_text("两个关键结论", encoding="utf-8")
+        human_report = case_dir / "human_report.md"
+        human_report.write_text("两个关键结论", encoding="utf-8")
         calls = []
         events = []
 
         def fake_run(_runner, *, prompt, schema_path, cwd):
             calls.append(schema_path.name)
-            if schema_path.name == "metadata.schema.json":
-                return _metadata("case-a"), 1.2
+            if schema_path.name == "structured_data.schema.json":
+                return _structured_data("case-a"), 1.2
             return _audit("case-a", "case-a"), 2.3
 
         request = DataWorkflowRequest(
             output_root=self.root / "output",
             source_paths=(source,),
-            groundtruth=groundtruth,
+            human_report=human_report,
             case_id="case-a",
         )
         with patch.object(CodexJsonRunner, "run", autospec=True, side_effect=fake_run):
             result = run_data_workflow(request, progress_callback=events.append)
 
         self.assertTrue(result.succeeded)
-        self.assertEqual(calls, ["metadata.schema.json", "audit.schema.json"])
+        self.assertEqual(calls, ["structured_data.schema.json", "audit.schema.json"])
         case_result = result.cases[0]
-        self.assertEqual(case_result.metadata_status, "generated")
+        self.assertEqual(case_result.structured_data_status, "generated")
         self.assertEqual(case_result.audit_status, "generated")
         self.assertEqual(case_result.overall_score, 70.0)
         output = Path(case_result.output_dir)
-        self.assertTrue((output / "evidence_metadata.json").is_file())
+        self.assertTrue((output / "structured_data.json").is_file())
         self.assertTrue((output / "audit.json").is_file())
         self.assertIn("综合质量分 | 70.0", (output / "audit.md").read_text())
         self.assertEqual(events[0]["event"], "workflow_started")
@@ -161,19 +161,19 @@ class DataQualityTest(unittest.TestCase):
             output_root=self.root / "output",
             source_paths=(source,),
             case_id="case-cancelled",
-            stages=("metadata",),
+            stages=("structured_data",),
         )
 
         with self.assertRaises(DataQualityCancelled):
             run_data_workflow(request, should_cancel=lambda: True)
 
-    def test_openharness_dataset_reuses_valid_metadata(self) -> None:
+    def test_openharness_dataset_reuses_valid_structured_data(self) -> None:
         case_dir = self.root / "collection" / "中文项目"
         source = case_dir / "source"
         source.mkdir(parents=True)
         (source / "source.md").write_text("原始资料", encoding="utf-8")
-        (case_dir / "evidence_metadata.json").write_text(
-            json.dumps(_metadata("case-b"), ensure_ascii=False),
+        (case_dir / "structured_data.json").write_text(
+            json.dumps(_structured_data("case-b"), ensure_ascii=False),
             encoding="utf-8",
         )
         dataset = self.root / "data.json"
@@ -190,8 +190,8 @@ class DataQualityTest(unittest.TestCase):
                                     "target": "materials",
                                 }
                             ],
-                            "ground_truth": {
-                                "reference_report_text": "两个关键结论"
+                            "human_report": {
+                                "human_report_text": "两个关键结论"
                             },
                         }
                     ]
@@ -213,7 +213,7 @@ class DataQualityTest(unittest.TestCase):
             result = run_data_workflow(request)
 
         self.assertTrue(result.succeeded)
-        self.assertEqual(result.cases[0].metadata_status, "reused")
+        self.assertEqual(result.cases[0].structured_data_status, "reused")
         self.assertEqual(result.cases[0].audit_status, "generated")
         self.assertEqual(result.cases[0].project, "中文项目")
 
@@ -225,17 +225,17 @@ class DataQualityTest(unittest.TestCase):
                 "source",
                 "--case-id",
                 "case-a",
-                "--groundtruth",
-                "gt.pdf",
+                "--human-report",
+                "human_report.pdf",
                 "--output",
                 "out",
             ]
         )
-        self.assertFalse(args.metadata_only)
-        self.assertFalse(args.repair_metadata)
+        self.assertFalse(args.structured_data_only)
+        self.assertFalse(args.repair_structured_data)
         self.assertEqual(args.parallel, 1)
 
-    def test_repair_stage_adds_source_grounded_metadata_without_overwriting(self) -> None:
+    def test_repair_stage_adds_source_grounded_structured_data_without_overwriting(self) -> None:
         case_dir = self.root / "case-repair"
         source = case_dir / "source"
         source.mkdir(parents=True)
@@ -243,28 +243,28 @@ class DataQualityTest(unittest.TestCase):
             "第一项结论。第二项结论有原始资料支撑。",
             encoding="utf-8",
         )
-        groundtruth = case_dir / "groundtruth.md"
-        groundtruth.write_text("两个关键结论", encoding="utf-8")
+        human_report = case_dir / "human_report.md"
+        human_report.write_text("两个关键结论", encoding="utf-8")
         calls = []
         repair_prompt = ""
 
         def fake_run(_runner, *, prompt, schema_path, cwd):
             nonlocal repair_prompt
             calls.append(schema_path.name)
-            if schema_path.name == "metadata.schema.json":
-                return _metadata("case-repair"), 1.0
+            if schema_path.name == "structured_data.schema.json":
+                return _structured_data("case-repair"), 1.0
             if schema_path.name == "audit.schema.json":
                 payload = _audit("case-repair", "case-repair")
                 payload["omissions"] = []
-                payload["metadata_gaps"] = [
+                payload["structured_data_gaps"] = [
                     {
                         "id": "MG-001",
-                        "gt_ids": ["GT-002"],
+                        "human_report_ids": ["HR-002"],
                         "gap_type": "missing",
                         "importance": "critical",
                         "source_fact": "第二项结论有原始资料支撑。",
                         "source_ref": "source.md / 第二句",
-                        "reason": "现有 Metadata 未提取该事实。",
+                        "reason": "现有 Structured Data 未提取该事实。",
                     }
                 ]
                 return payload, 2.0
@@ -285,9 +285,9 @@ class DataQualityTest(unittest.TestCase):
         request = DataWorkflowRequest(
             output_root=self.root / "output",
             source_paths=(source,),
-            groundtruth=groundtruth,
+            human_report=human_report,
             case_id="case-repair",
-            stages=("metadata", "audit", "repair"),
+            stages=("structured_data", "audit", "repair"),
         )
         with patch.object(CodexJsonRunner, "run", autospec=True, side_effect=fake_run):
             result = run_data_workflow(request)
@@ -296,24 +296,24 @@ class DataQualityTest(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                "metadata.schema.json",
+                "structured_data.schema.json",
                 "audit.schema.json",
-                "metadata_repair.schema.json",
+                "structured_data_repair.schema.json",
             ],
         )
         case_result = result.cases[0]
         self.assertEqual(case_result.repair_status, "generated")
-        self.assertEqual(case_result.metadata_gap_count, 1)
-        self.assertEqual(case_result.repaired_metadata_items, 3)
+        self.assertEqual(case_result.structured_data_gap_count, 1)
+        self.assertEqual(case_result.repaired_structured_data_items, 3)
         output = Path(case_result.output_dir)
-        original = json.loads((output / "evidence_metadata.json").read_text())
+        original = json.loads((output / "structured_data.json").read_text())
         repaired = json.loads(
-            (output / "evidence_metadata.repaired.json").read_text()
+            (output / "structured_data.repaired.json").read_text()
         )
         self.assertEqual(len(original["items"]), 2)
         self.assertEqual(len(repaired["items"]), 3)
         self.assertEqual(repaired["items"][-1]["id"], "EV-003")
-        self.assertNotIn(str(groundtruth), repair_prompt)
+        self.assertNotIn(str(human_report), repair_prompt)
         self.assertNotIn("两个关键结论", repair_prompt)
 
     def test_codex_runner_uses_one_read_only_structured_command(self) -> None:
@@ -337,7 +337,7 @@ class DataQualityTest(unittest.TestCase):
             output_root=self.root / "output",
             source_paths=(source,),
             case_id="case-c",
-            stages=("metadata",),
+            stages=("structured_data",),
             codex_command=(sys.executable, str(fake)),
         )
 
@@ -360,32 +360,32 @@ class DataQualityTest(unittest.TestCase):
         source = case_dir / "source"
         source.mkdir(parents=True)
         (source / "source.md").write_text("原始资料", encoding="utf-8")
-        groundtruth = case_dir / "groundtruth.md"
-        groundtruth.write_text("两个关键结论", encoding="utf-8")
+        human_report = case_dir / "human_report.md"
+        human_report.write_text("两个关键结论", encoding="utf-8")
         audit_calls = 0
 
         def fake_run(_runner, *, prompt, schema_path, cwd):
             nonlocal audit_calls
-            if schema_path.name == "metadata.schema.json":
-                return _metadata("case-d"), 1.0
+            if schema_path.name == "structured_data.schema.json":
+                return _structured_data("case-d"), 1.0
             audit_calls += 1
             payload = _audit("case-d", "case-d")
             if audit_calls == 1:
                 payload["evidence_classifications"][0] = {
                     "evidence_id": "EV-001",
                     "classification": "conflict",
-                    "gt_ids": ["GT-001"],
+                    "human_report_ids": ["HR-001"],
                     "reason": "整数相差1，但四舍五入后排序和方向不受影响。",
                 }
                 payload["conflicts"] = [
                     {
                         "evidence_id": "EV-001",
-                        "gt_id": "GT-001",
+                        "human_report_id": "HR-001",
                         "source_text": "来源为100",
                         "source_ref": "source.md",
-                        "gt_text": "报告为101",
-                        "gt_quote": "101",
-                        "gt_location": "第一节",
+                        "human_report_text": "报告为101",
+                        "human_report_quote": "101",
+                        "human_report_location": "第一节",
                         "conflict_type": "numeric",
                         "severity": "material",
                         "reason": "整数相差1，但四舍五入后排序和方向不受影响。",
@@ -396,7 +396,7 @@ class DataQualityTest(unittest.TestCase):
         request = DataWorkflowRequest(
             output_root=self.root / "output",
             source_paths=(source,),
-            groundtruth=groundtruth,
+            human_report=human_report,
             case_id="case-d",
             retries=1,
         )

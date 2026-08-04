@@ -17,8 +17,8 @@ UNIFIED_SCHEMA_VERSION = "openharness-wb/v1"
 # CaseSpec.data or exposed through a generic prompt template context.
 EVALUATION_ONLY_FIELDS = {
     "input",
-    "ground_truth",
-    "ground_truth_findings",
+    "human_report",
+    "human_report_findings",
     "split",
     "hard_case_tags",
     "required_sections",
@@ -367,7 +367,7 @@ def openharness_rows(payload: Any) -> list[dict[str, Any]]:
         row["split"] = str(
             row.get("split") or metadata.get("split") or "dev"
         )
-        row.setdefault("ground_truth", {})
+        row.setdefault("human_report", {})
         normalized.append(row)
     if not normalized:
         raise ValueError("数据集中没有可导入案例")

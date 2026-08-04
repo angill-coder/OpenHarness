@@ -18,7 +18,7 @@ def _mk_rows(ids, split="dev"):
                 "case_id": cid,
                 "split": split,
                 "input": {"prompt": "x"},
-                "ground_truth": {},
+                "human_report": {},
                 "input_files": [],
                 "interactions": [{"input": "hi"}],
             }

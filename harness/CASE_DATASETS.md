@@ -122,15 +122,15 @@ python3 harness/data_workflow.py prepare generate \
 
 默认不会覆盖已有输出；确认需要重建时使用 `--force`。
 
-### 使用 groundtruth 和 Codex 一步生成完整 Round 1
+### 使用 human_report 和 Codex 一步生成完整 Round 1
 
-如果素材目录和 groundtruth 目录具有相同的相对子目录及文件 stem，可以在一次
+如果素材目录和 human_report 目录具有相同的相对子目录及文件 stem，可以在一次
 `generate` 中自动完成 PDF 配对、Codex intake 推断和原子 case 生成：
 
 ```bash
 python3 harness/data_workflow.py prepare generate \
   --materials-dir '../all_data/120条真实数据汇总/Markdown_data' \
-  --groundtruth-dir '../all_data/120条真实数据汇总/raw_ppt' \
+  --human-report-dir '../all_data/120条真实数据汇总/raw_ppt' \
   --recursive \
   --source-collection real-120 \
   --id-prefix case-real120 \
@@ -147,8 +147,8 @@ Markdown_data/2022/20220426_金融云分析_v60.md
 raw_ppt/2022/20220426_金融云分析_v60.pdf
 ```
 
-会按相对路径 `2022/20220426_金融云分析_v60` 精确配对。groundtruth 中没有
-对应 Markdown 的额外 PDF 不会被处理；任何 Markdown 缺少配对 groundtruth
+会按相对路径 `2022/20220426_金融云分析_v60` 精确配对。human_report 中没有
+对应 Markdown 的额外 PDF 不会被处理；任何 Markdown 缺少配对 human_report
 都会在调用 Codex 前报错。
 
 流程默认：
@@ -156,11 +156,11 @@ raw_ppt/2022/20220426_金融云分析_v60.pdf
 1. 用 `pdftotext -layout` 提取 PDF，并添加 `PAGE N` 页码标记；
 2. 在独立临时目录中以 read-only sandbox 运行 `codex exec`；
 3. 使用 JSON Schema 约束研究背景、hypo、证据页、置信度和泄漏风险；
-4. 将成功结果写入 `groundtruth-dir` 父目录的
+4. 将成功结果写入 `human_report-dir` 父目录的
    `intake_answers.codex.json`；
 5. 所有 case 成功后，以 strict intake 生成最终 `.case.json`。
 
-缓存记录 groundtruth SHA-256、prompt 版本、Codex CLI 版本和模型。再次执行时
+缓存记录 human_report SHA-256、prompt 版本、Codex CLI 版本和模型。再次执行时
 会跳过未变化的成功结果；使用 `--refresh-intake` 强制重新推断。Codex 失败时
 已成功结果仍会保存，重新执行即可断点续跑。默认不会以 neutral 内容覆盖失败
 case。
@@ -182,7 +182,7 @@ Codex 生成的 round 1 在 metadata 中标记为 `codex_inferred`，并记录
 
 ### 项目目录模式
 
-对于“每个 case 一个项目目录，目录内包含一个素材子目录和一个 groundtruth”
+对于“每个 case 一个项目目录，目录内包含一个素材子目录和一个 human_report”
 的真实项目数据，使用 `generate-projects`：
 
 ```text
@@ -203,8 +203,8 @@ python3 harness/data_workflow.py prepare generate-projects \
   --force
 ```
 
-每个项目必须有且仅有一个非隐藏素材目录，以及一个 PDF 或 PPTX groundtruth。
-素材目录会统一复制成 `<项目>/source/`；groundtruth 只用于生成 intake，不会
+每个项目必须有且仅有一个非隐藏素材目录，以及一个 PDF 或 PPTX human_report。
+素材目录会统一复制成 `<项目>/source/`；human_report 只用于生成 intake，不会
 进入报告模型的 `input_files`。复制时会过滤 `.DS_Store`、隐藏工具目录和
 Office `~$` 临时文件。PDF 通过 Poppler 提取，PPTX 通过 slide XML 提取，并
 统一保留页/幻灯片编号。
