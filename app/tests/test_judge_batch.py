@@ -113,6 +113,13 @@ class JudgeBatchTest(unittest.TestCase):
         )
         self.assertEqual([item["status"] for item in results], ["judged", "judged"])
         self.assertEqual(results[1]["checks"]["Q1"], "miss")
+        trace = results[1]["judge_trace"]
+        self.assertEqual(trace["status"], "completed")
+        self.assertEqual(trace["strategy"], "single_call")
+        self.assertEqual(len(trace["calls"]), 1)
+        self.assertEqual(trace["calls"][0]["status"], "completed")
+        self.assertEqual(len(trace["calls"][0]["promptSha256"]), 64)
+        self.assertIn('"checks"', trace["calls"][0]["response"])
 
     def test_prompt_context_excludes_human_report(self):
         prompts = []

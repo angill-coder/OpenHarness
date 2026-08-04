@@ -28,6 +28,7 @@ from contextlib import nullcontext
 import hashlib
 import io
 import json
+import mimetypes
 import os
 from pathlib import Path
 import re
@@ -36,13 +37,14 @@ import threading
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote, unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import session as session_mod  # noqa: E402
 import persistence as persist  # noqa: E402
 import llm_client  # noqa: E402
+import dashboard_api  # noqa: E402
 from generation_jobs import (  # noqa: E402
     GenerationJobError,
     GenerationJobService,
@@ -397,6 +399,61 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, path, content_type=None, disposition=None):
+        path = Path(path)
+        body = path.read_bytes()
+        ctype = content_type or mimetypes.guess_type(path.name)[0]
+        ctype = ctype or "application/octet-stream"
+        if ctype.startswith("text/") or ctype in {
+            "application/javascript",
+            "application/json",
+        }:
+            ctype += "; charset=utf-8"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if disposition:
+            self.send_header("Content-Disposition", disposition)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _dashboard_dataset_path(self, session_id=None):
+        configured = None
+        if GENERATION_SERVICE is not None:
+            configured = (
+                GENERATION_SERVICE.dataset_path_for_session(session_id)
+                if session_id
+                else GENERATION_SERVICE.settings.dataset_path
+            )
+        return dashboard_api.resolve_dataset_path(
+            Path(ROOT), configured, self._dashboard_data_version(session_id)
+        )
+
+    def _dashboard_data_version(self, session_id=None):
+        if not session_id:
+            return "v1"
+        metadata = persist.load_meta(session_id) or {}
+        marker = metadata.get("experiment_data") or metadata.get("data_version") or "v1"
+        if isinstance(marker, dict):
+            marker = marker.get("id") or marker.get("label") or "v1"
+        value = str(marker).lower()
+        return next((version for version in ("v1", "v2", "v3") if version in value), "v1")
+    def _dashboard_sessions_root(self):
+        return Path(persist.base_dir()).resolve()
+
+    def _dashboard_generation_root(self):
+        configured = (
+            GENERATION_SERVICE.settings.output_root
+            if GENERATION_SERVICE is not None
+            else os.environ.get("OPENHARNESS_WB_OUTPUT")
+        )
+        return Path(
+            configured or (Path(ROOT) / "generation_runs")
+        ).expanduser().resolve()
+
+
     def _body(self):
         n = int(self.headers.get("Content-Length", 0))
         if not n:
@@ -438,6 +495,20 @@ class Handler(BaseHTTPRequestHandler):
             path = os.path.join(HERE, "app.js")
             with open(path, encoding="utf-8") as f:
                 return self._send(200, f.read(), "text/javascript; charset=utf-8")
+        if u.path in ("/dashboard", "/dashboard/"):
+            return self._send_file(
+                Path(HERE) / "dashboard" / "experiment-evaluation-tree.html"
+            )
+        if u.path.startswith("/dashboard/"):
+            dashboard_root = (Path(HERE) / "dashboard").resolve()
+            target = (dashboard_root / u.path[len("/dashboard/"):]).resolve()
+            try:
+                target.relative_to(dashboard_root)
+            except ValueError:
+                return self._send(403, {"error": "禁止访问 Dashboard 目录之外的文件"})
+            if not target.is_file():
+                return self._send(404, {"error": "页面文件不存在"})
+            return self._send_file(target)
         # 其余 /api/* 一律需要 iOA 身份
         acct = self._account()
         if not acct:
@@ -447,6 +518,238 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"login_name": acct,
                                     "display_name": ident.get("DisplayName", acct),
                                     "email": ident.get("Email", "")})
+        if u.path == "/api/local/tree":
+            revision, tree = dashboard_api.session_tree(
+                Path(ROOT), self._dashboard_sessions_root()
+            )
+            return self._send(200, {"sha": revision, "tree": tree})
+        if u.path == "/api/local/session-summary":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            try:
+                document = dashboard_api.session_summary_document(
+                    self._dashboard_sessions_root(), session_id
+                )
+                return self._send(200, document)
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/config":
+            dataset_path = self._dashboard_dataset_path()
+            return self._send(200, {
+                "sessions_ref": "runtime:sessions",
+                "virtual_sessions_root": dashboard_api.VIRTUAL_SESSIONS_ROOT,
+                "dataset_ref": (
+                    "runtime:data/" + self._dashboard_data_version()
+                    if dataset_path else None
+                ),
+                "generation_ref": "runtime:generation_runs",
+                "refresh_ms": 2000,
+                "session_files": sorted(dashboard_api.SESSION_FILES),
+            })
+        if u.path == "/api/local/file":
+            q = parse_qs(u.query)
+            relative = unquote((q.get("path") or [""])[0]).replace("\\", "/")
+            sessions_root = self._dashboard_sessions_root()
+            prefix = dashboard_api.VIRTUAL_SESSIONS_ROOT + "/"
+            if not relative.startswith(prefix):
+                return self._send(403, {"error": "只允许读取实验数据虚拟目录"})
+            target = (sessions_root / relative[len(prefix):]).resolve()
+            try:
+                target.relative_to(sessions_root)
+            except ValueError:
+                return self._send(403, {"error": "只允许读取 app/sessions 内的实验文件"})
+            if not target.is_file() or target.name not in dashboard_api.SESSION_FILES:
+                return self._send(404, {"error": "实验文件不存在"})
+            return self._send_file(target)
+        if u.path == "/api/local/skill-source":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            version = (q.get("version") or [""])[0]
+            try:
+                document = dashboard_api.generation_skill_document(
+                    Path(ROOT),
+                    self._dashboard_sessions_root(),
+                    session_id,
+                    version,
+                )
+                return self._send(200, document)
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/generation-trace":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            version = (q.get("version") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            generation_id = (q.get("generation_id") or [""])[0]
+            try:
+                document = dashboard_api.generation_trace_document(
+                    Path(ROOT),
+                    self._dashboard_sessions_root(),
+                    session_id,
+                    version,
+                    case_id,
+                    generation_id,
+                )
+                return self._send(200, document)
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/case-judge-trace":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            version = (q.get("version") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            try:
+                document = dashboard_api.case_judge_trace_document(
+                    self._dashboard_sessions_root(),
+                    session_id,
+                    version,
+                    case_id,
+                )
+                return self._send(200, document)
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/case-judgment":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            version = (q.get("version") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            try:
+                document = dashboard_api.case_judgment_document(
+                    self._dashboard_sessions_root(),
+                    session_id,
+                    version,
+                    case_id,
+                )
+                return self._send(200, document)
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/case-output":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            version = (q.get("version") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            sessions_root = self._dashboard_sessions_root()
+            try:
+                session_root = (sessions_root / session_id).resolve()
+                session_root.relative_to(sessions_root)
+                if not session_id or not version or not case_id:
+                    raise ValueError("session, version and case_id are required")
+                matched = dashboard_api.case_output_document(
+                    session_root / "outputs.jsonl", version, case_id
+                )
+                return self._send(200, matched)
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/structured-case":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            try:
+                document = dashboard_api.case_structured_document(
+                    Path(ROOT),
+                    self._dashboard_sessions_root(),
+                    self._dashboard_dataset_path(session_id),
+                    session_id,
+                    case_id,
+                )
+                return self._send(200, document)
+            except (
+                FileNotFoundError,
+                ValueError,
+                json.JSONDecodeError,
+                OSError,
+            ) as exc:
+                return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/raw-package":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            try:
+                dataset_root, roots = dashboard_api.case_source_roots(
+                    Path(ROOT), self._dashboard_sessions_root(),
+                    self._dashboard_dataset_path(session_id), session_id, case_id
+                )
+                files = []
+                for source_root in roots:
+                    paths = (
+                        [source_root]
+                        if source_root.is_file()
+                        else sorted(source_root.rglob("*"))
+                    )
+                    for path in paths:
+                        if not path.is_file():
+                            continue
+                        relative_dataset = path.relative_to(dataset_root).as_posix()
+                        relative_package = (
+                            path.name
+                            if source_root.is_file()
+                            else path.relative_to(source_root).as_posix()
+                        )
+                        raw_url = (
+                            "/api/local/raw-file?session=" + quote(session_id, safe="")
+                            + "&case_id=" + quote(case_id, safe="")
+                            + "&path=" + quote(relative_dataset, safe="")
+                        )
+                        files.append({
+                            "name": path.name,
+                            "path": relative_package,
+                            "extension": path.suffix.lower().lstrip("."),
+                            "type": dashboard_api.raw_file_type(path),
+                            "size": path.stat().st_size,
+                            "url": raw_url,
+                        })
+                return self._send(200, {"file_count": len(files), "files": files})
+            except (FileNotFoundError, ValueError, json.JSONDecodeError, OSError) as exc:
+                return self._send(404, {"error": str(exc), "file_count": 0, "files": []})
+        if u.path == "/api/local/case-metadata":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            try:
+                payload = dashboard_api.case_metadata_document(
+                    Path(ROOT), self._dashboard_sessions_root(),
+                    self._dashboard_dataset_path(session_id), session_id, case_id
+                )
+                return self._send(200, payload)
+            except (FileNotFoundError, ValueError, json.JSONDecodeError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/raw-file":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            relative = unquote((q.get("path") or [""])[0]).replace("\\", "/")
+            try:
+                dataset_root, roots = dashboard_api.case_source_roots(
+                    Path(ROOT), self._dashboard_sessions_root(),
+                    self._dashboard_dataset_path(session_id), session_id, case_id
+                )
+                target = (dataset_root / relative).resolve()
+                target.relative_to(dataset_root)
+                allowed = False
+                for source_root in roots:
+                    try:
+                        target.relative_to(
+                            source_root if source_root.is_dir() else source_root.parent
+                        )
+                        allowed = source_root.is_dir() or target == source_root
+                    except ValueError:
+                        continue
+                    if allowed:
+                        break
+                if not allowed or not target.is_file():
+                    raise FileNotFoundError(
+                        "Raw material file is not available for this case"
+                    )
+            except (FileNotFoundError, ValueError, json.JSONDecodeError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
+            content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            inline = content_type.startswith(("text/", "image/")) or content_type == "application/pdf"
+            disposition = "inline" if inline else "attachment"
+            return self._send_file(
+                target,
+                content_type,
+                disposition + "; filename*=UTF-8''" + quote(target.name),
+            )
         if u.path == "/api/session":
             q = parse_qs(u.query)
             sid = (q.get("id") or [None])[0]
@@ -1034,6 +1337,7 @@ class Handler(BaseHTTPRequestHandler):
                                             "claude-opus-4-8",
                                         )
                                     ),
+                                    "judge_trace": item.get("judge_trace"),
                                 }
                             },
                             ver,

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Dict
+from typing import Any, Dict
 
 import persistence as persist
 
@@ -18,6 +18,7 @@ class SessionGeneration:
         version: str,
         generation_id: str,
         account=None,
+        traces: Dict[str, Dict[str, Any]] = None,
     ):
         if not generation_id:
             return {"error": "缺少 generation_id"}
@@ -73,6 +74,7 @@ class SessionGeneration:
                 version,
                 clean,
                 generation_id=generation_id,
+                traces=traces,
             )
             persist.append_event(
                 self.id,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -42,6 +43,87 @@ from model_config import (  # noqa: E402
     SUPPORTED_WB_MODELS,
 )
 import persistence as persist  # noqa: E402
+def _read_trace_json(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return default
+
+
+def _trace_text(value, limit: int = 12000) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError):
+            text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n... [truncated]"
+
+
+def _generation_trace(case_result) -> Dict:
+    attempts = list(getattr(case_result, "attempts", ()) or ())
+    if not attempts:
+        return {
+            "status": "unavailable",
+            "operations": [],
+            "rounds": [],
+            "conversation": [],
+            "conversationAvailable": False,
+        }
+    attempt = attempts[-1]
+    trace_dir = Path(attempt.trace_path)
+    raw_operations = _read_trace_json(
+        trace_dir / "1_operations.json",
+        [],
+    )
+    operations = []
+    for operation in raw_operations if isinstance(raw_operations, list) else []:
+        if not isinstance(operation, dict):
+            continue
+        operations.append({
+            "name": str(operation.get("name") or "tool"),
+            "status": str(operation.get("status") or "unknown"),
+            "round": operation.get("round_index"),
+            "durationMs": operation.get("duration_ms"),
+            "input": _trace_text(operation.get("input")),
+            "result": _trace_text(operation.get("result")),
+        })
+    rounds = []
+    rounds_root = trace_dir / "rounds"
+    if rounds_root.is_dir():
+        for result_path in sorted(rounds_root.glob("*/result.json")):
+            item = _read_trace_json(result_path, {})
+            if not isinstance(item, dict):
+                continue
+            rounds.append({
+                "name": result_path.parent.name,
+                "status": str(item.get("status") or "unknown"),
+                "durationMs": item.get("duration_ms"),
+                "output": _trace_text(item.get("final_output")),
+            })
+    model = (
+        attempt.observed_models[0]
+        if attempt.observed_models
+        else attempt.configured_model
+    )
+    return {
+        "status": attempt.wb_status or attempt.status,
+        "model": model,
+        "durationMs": attempt.duration_ms,
+        "attempt": attempt.attempt,
+        "sessionId": attempt.wb_session_id,
+        "operations": operations,
+        "rounds": rounds,
+        "conversation": [],
+        "conversationAvailable": (trace_dir.parent / "conversation.md").is_file(),
+    }
+
+
 from skill_compiler import (  # noqa: E402
     compile_session_skill,
     directory_hash as compiled_skill_hash,
@@ -66,6 +148,7 @@ def _env_float(name: str, default: float) -> float:
 class GenerationSettings:
     dataset_path: Path
     output_root: Path
+    dataset_paths: tuple[tuple[str, Path], ...] = ()
     skill_path: Optional[Path] = None
     skill_name: Optional[str] = None
     model: Optional[str] = DEFAULT_GENERATION_WB_MODEL
@@ -82,17 +165,21 @@ class GenerationSettings:
 
     @classmethod
     def from_env(cls) -> "GenerationSettings":
-        dataset = Path(
-            os.environ.get(
-                "OPENHARNESS_WB_DATASET",
-                str(
-                    ROOT
-                    / "data"
-                    / "20260727_test_data"
-                    / "data.json"
+        legacy_dataset = os.environ.get("OPENHARNESS_WB_DATASET")
+        dataset_root = ROOT / "data" / "research-report"
+        dataset_paths = tuple(
+            (
+                version,
+                Path(
+                    os.environ.get(
+                        "OPENHARNESS_WB_DATASET_" + version.upper(),
+                        legacy_dataset or str(dataset_root / version / "data.json"),
+                    )
                 ),
             )
+            for version in ("v1", "v2", "v3")
         )
+        dataset = dict(dataset_paths)["v1"]
         output = Path(
             os.environ.get(
                 "OPENHARNESS_WB_OUTPUT",
@@ -116,6 +203,7 @@ class GenerationSettings:
         return cls(
             dataset_path=dataset,
             output_root=output,
+            dataset_paths=dataset_paths,
             skill_path=skill_path,
             skill_name=skill_name,
             model=os.environ.get(
@@ -157,11 +245,19 @@ class GenerationSettings:
             ),
         )
 
+    def dataset_for_version(self, data_version: str) -> Path:
+        normalized = str(data_version or "v1").strip().lower()
+        match = re.search(r"v([123])", normalized)
+        key = "v" + match.group(1) if match else "v1"
+        return dict(self.dataset_paths).get(key, self.dataset_path)
+
     def validate(self) -> None:
-        if not self.dataset_path.expanduser().is_file():
-            raise GenerationJobError(
-                "WB dataset 不存在: %s" % self.dataset_path
-            )
+        configured = self.dataset_paths or (("v1", self.dataset_path),)
+        for data_version, dataset_path in configured:
+            if not dataset_path.expanduser().is_file():
+                raise GenerationJobError(
+                    "WB %s dataset missing: %s" % (data_version, dataset_path)
+                )
         if self.skill_name or not self.skill_path:
             raise GenerationJobError(
                 "Session Skill 版本演进必须配置唯一基础 skill_path"
@@ -199,6 +295,10 @@ class GenerationSettings:
     def public_dict(self) -> Dict:
         return {
             "dataset_path": str(self.dataset_path.expanduser().resolve()),
+            "dataset_paths": {
+                key: str(path.expanduser().resolve())
+                for key, path in (self.dataset_paths or (("v1", self.dataset_path),))
+            },
             "output_root": str(self.output_root.expanduser().resolve()),
             "skill_mode": "session_artifact",
             "skill_ref": "复制唯一基础 Skill，并写入当前版本 directive",
@@ -347,14 +447,27 @@ class GenerationJobService:
                 "WorkBuddy CLI 不存在: %s" % executable
             )
 
-    def _dataset_index(self) -> Dict[str, Dict[str, str]]:
+    def dataset_path_for_session(self, session_id: str) -> Path:
+        metadata = persist.load_meta(session_id) or {}
+        marker = metadata.get("experiment_data") or metadata.get("data_version") or "v1"
+        if isinstance(marker, dict):
+            marker = marker.get("id") or marker.get("label") or "v1"
+        match = re.search(r"v([123])", str(marker).lower())
+        data_version = "v" + match.group(1) if match else "v1"
+        return self.settings.dataset_for_version(data_version).expanduser().resolve()
+
+    def _dataset_index(
+        self,
+        dataset_path: Optional[Path] = None,
+    ) -> Dict[str, Dict[str, str]]:
+        selected_dataset = (
+            dataset_path or self.settings.dataset_path
+        ).expanduser().resolve()
         try:
-            cases = load_cases(
-                self.settings.dataset_path.expanduser().resolve()
-            )
+            cases = load_cases(selected_dataset)
         except Exception as exc:
             raise GenerationJobError(
-                "WB dataset 解析失败: %s" % exc
+                "WB dataset parse failed (%s): %s" % (selected_dataset, exc)
             ) from exc
         index = {}
         for case in cases:
@@ -502,7 +615,8 @@ class GenerationJobService:
                     return active, True
                 self._active_by_session.pop(session_id, None)
 
-        dataset = self._dataset_index()
+        dataset_path = self.dataset_path_for_session(session_id)
+        dataset = self._dataset_index(dataset_path)
         with self.session_lock(session_id):
             if not session.cases:
                 raise GenerationJobError(
@@ -565,9 +679,7 @@ class GenerationJobService:
             skill_version=version,
             skill_artifact_hash=skill_artifact_hash,
             execution_skill_hash=frozen_skill.directory_hash,
-            dataset_path=str(
-                self.settings.dataset_path.expanduser().resolve()
-            ),
+            dataset_path=str(dataset_path),
             skill_mode="session_artifact",
             skill_ref=str(frozen_skill.path),
             model=selected_model,
@@ -577,9 +689,7 @@ class GenerationJobService:
             stall_timeout_seconds=self.settings.stall_timeout_seconds,
             created_at=now,
             updated_at=now,
-            dataset_sha256=_file_hash(
-                self.settings.dataset_path
-            ),
+            dataset_sha256=_file_hash(dataset_path),
             compiler_version=frozen_skill.compiler_version,
             base_skill_hash=frozen_skill.base_skill_hash,
             cases=[
@@ -698,6 +808,7 @@ class GenerationJobService:
         self,
         job: GenerationJob,
         reports: Dict[str, str],
+        case_results=None,
     ) -> None:
         """校验冻结输入，并把本次新产出的报告立即导入 Session。"""
         if not reports:
@@ -734,11 +845,17 @@ class GenerationJobService:
                 raise GenerationJobError(
                     "Skill 版本内容在任务期间发生变化，拒绝自动导入"
                 )
+            traces = {
+                item.openharness_case_id: _generation_trace(item)
+                for item in (case_results or [])
+                if item.openharness_case_id in reports
+            }
             imported = session.import_generated_outputs(
                 reports,
                 job.skill_version,
                 job.generation_id,
                 account=job.account,
+                traces=traces,
             )
             if "error" in imported:
                 raise GenerationJobError(imported["error"])
@@ -772,7 +889,7 @@ class GenerationJobService:
                 )
             self._persist(job)
 
-        self._import_reports(job, new_reports)
+        self._import_reports(job, new_reports, result.cases)
 
         if new_reports:
             with self._lock:
@@ -828,7 +945,7 @@ class GenerationJobService:
                     with self._lock:
                         job.status = "importing"
                         self._persist(job)
-                    self._import_reports(job, reports)
+                    self._import_reports(job, reports, result.cases)
 
                 with self._lock:
                     generated_ids = {
