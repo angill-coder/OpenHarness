@@ -294,6 +294,48 @@ class GenerationJobServiceTest(unittest.TestCase):
         )
         self.assertNotIn("generation_trace", persisted[1])
 
+    def test_inline_session_cases_are_snapshotted_for_runner(self):
+        self.dataset.write_text(
+            json.dumps(
+                {
+                    "cases": [
+                        {"id": "other", "prompt": "unrelated case"}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        fake = FakeRunner()
+        service = GenerationJobService(
+            {"test-session": self.session},
+            self.settings,
+            fake,
+        )
+
+        job, reused = service.start(
+            "test-session",
+            "tester",
+            idempotency_key="inline-session-data",
+        )
+        done = service.wait(job.job_id)
+
+        self.assertFalse(reused)
+        self.assertEqual(done.status, "completed")
+        dataset_path = Path(done.dataset_path)
+        self.assertEqual(
+            dataset_path.parent.parent.name,
+            "_session_datasets",
+        )
+        payload = json.loads(dataset_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            [item["case_id"] for item in payload["cases"]],
+            ["case-a", "case-b"],
+        )
+        prompt = payload["cases"][0]["turns"][0]["prompt"]
+        self.assertIn("用户输入 JSON", prompt)
+        self.assertIn('"brief": "A"', prompt)
+        self.assertNotIn("ground_truth", prompt)
+
     def test_job_completes_and_imports_all_reports(self):
         fake = FakeRunner()
         service = GenerationJobService(
