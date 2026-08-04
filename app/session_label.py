@@ -125,6 +125,7 @@ class SessionLabel:
                 "rubric_sha256": (judgment or {}).get(
                     "rubric_sha256"
                 ),
+                "judge_trace": (judgment or {}).get("judge_trace"),
             }
         if not clean_batch:
             return {"error": "批量 Judge 未产出有效评分"}

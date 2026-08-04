@@ -12,12 +12,32 @@ python3 server.py                 # 默认 http://127.0.0.1:8080
 
 打开浏览器访问 `http://127.0.0.1:8080`。Mock 评测无需 API key；真实报告既可以手工粘贴，也可以通过页面一键调用 WB CLI 自动生成并导入。
 
+### 实时评测看板与数据契约
+
+平台顶部的“实时评测看板”打开同源页面 `/dashboard/`。平台与看板共享
+`persistence.base_dir()` 指向的实验目录：默认是 `app/sessions/`，部署或测试环境可通过
+`OPENHARNESS_SESSIONS_DIR` 覆盖。前端始终使用稳定的虚拟路径 `app/sessions`，不会依赖宿主机绝对路径。
+
+All experiments use the same `app/sessions/<sid>/` storage contract. Session metadata declares
+`experiment_owner`, `experiment_data`, and `experiment_optimizer` in `meta.json` or `state.json`;
+the Dashboard does not maintain per-user paths or Session ID allowlists.
+
+每次实验变更都会即时写入 `state.json`，报告追加到 `outputs.jsonl`，Judge 结果追加到
+`check_judgments.jsonl`（兼容旧 `judgments.jsonl`）。看板每 2 秒检查文件树摘要；摘要变化后重新读取对应会话并刷新版本、Case、报告和评分。`GET /api/local/config` 可用于检查当前生效的物理目录、数据集路径和允许读取的文件契约。
+Data v1, v2, and v3 all use this same Session pipeline. A Runner import writes the
+report plus its compact `generation_trace` into the corresponding `outputs.jsonl`
+row. A Judge import writes checks, reasoning, hashes, and `judge_trace` into the
+corresponding `check_judgments.jsonl` row. The Dashboard therefore has no
+owner-specific or data-version-specific ingestion branch.
+
 ### 一键 WB CLI 配置
 
 默认配置已经对应当前仓库；需要覆盖时设置：
 
 ```bash
-export OPENHARNESS_WB_DATASET=../data/20260727_test_data/data.json
+export OPENHARNESS_WB_DATASET_V1=../data/research-report/v1/data.json
+export OPENHARNESS_WB_DATASET_V2=../data/research-report/v2/data.json
+export OPENHARNESS_WB_DATASET_V3=../data/research-report/v3/data.json
 export OPENHARNESS_WB_SKILL_PATH=../skills/research-report
 export OPENHARNESS_WB_MODEL=deepseek-v4-pro-ioa
 export OPENHARNESS_WB_PARALLEL=20
@@ -47,7 +67,9 @@ export LLM_API_STYLE=anthropic          # 第三方 OpenAI 兼容网关填 opena
 export OPENHARNESS_JUDGE_PARALLEL=20    # 默认 20；可在 Web UI 调整
 ```
 
-默认读取仓库内的 `data/20260727_test_data/data.json`；该文件已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查生效配置。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
+调研汇报数据统一安装在 `data/research-report/v1|v2|v3/`，每个目录的 `data.json` 是 Runner、Judge 和 Dashboard 共用的唯一入口。Session `meta.json` 中的 `experiment_data.id` 决定使用 v1、v2 还是 v3；原始 source 始终以 `data.json` 所在目录为相对路径根。这些目录已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查三个实际路径。
+
+`OPENHARNESS_WB_DATASET_V1/V2/V3` 可分别覆盖三个入口。旧的 `OPENHARNESS_WB_DATASET` 仍保留兼容；若设置，会作为未单独配置版本的统一 fallback。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
 
 报告生成和 Judge 的默认并发均为 20。当前版本不设置人为安全上限；实际并发不会超过待处理 case 数量，并受本机资源、WB CLI 和模型服务容量约束。
 
