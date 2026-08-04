@@ -104,7 +104,7 @@ def append_outputs_batch(
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
-def append_judgment(sid: str, version: str, case_id: str, scores: Dict[str, int],
+def append_judgment(sid: str, version: str, case_id: str, scores: Dict[str, float],
                     reasoning: Dict[str, str] = None, flagged: List[str] = None):
     """追加一条平台 LLM-as-judge 对真实报告的六维评分(按 版本×case)。落在 judgments.jsonl。"""
     d = _ensure(sid)

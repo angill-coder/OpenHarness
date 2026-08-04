@@ -518,6 +518,47 @@ class ModelOnlySessionTest(unittest.TestCase):
         persist._BASE = self.old_base
         self.tmp.cleanup()
 
+    def test_direct_judgment_preserves_decimals_across_restore(self):
+        session = Session(
+            "judge-decimal-restore",
+            "生成调研洞察报告",
+            "research_insight",
+        )
+        session.import_data(
+            [
+                {
+                    "case_id": "case-a",
+                    "input": {"brief": "A"},
+                    "ground_truth": {},
+                    "split": "dev",
+                }
+            ]
+        )
+
+        state = session.import_judgment(
+            "case-a",
+            {
+                "traceability": 4.2561,
+                "structure": 3.3334,
+            },
+        )
+
+        self.assertEqual(
+            state["current_eval"][0]["scores"]["traceability"],
+            4.256,
+        )
+        self.assertEqual(
+            state["current_eval"][0]["scores"]["structure"],
+            3.333,
+        )
+
+        restored = Session.restore(
+            persist.load_snapshot("judge-decimal-restore")
+        )
+        restored_scores = restored.view()["current_eval"][0]["scores"]
+        self.assertEqual(restored_scores["traceability"], 4.256)
+        self.assertEqual(restored_scores["structure"], 3.333)
+
     def test_research_session_requires_all_cases_to_be_model_judged(self):
         session = Session(
             "judge-gate",
