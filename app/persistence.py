@@ -85,6 +85,7 @@ def append_outputs_batch(
     version: str,
     outputs: Dict[str, str],
     generation_id: str = None,
+    traces: Dict[str, Dict[str, Any]] = None,
 ):
     """一次打开文件写入一批报告，避免逐 case 重复打开和中途重评。"""
     if not outputs:
@@ -101,6 +102,8 @@ def append_outputs_batch(
             }
             if generation_id:
                 rec["generation_id"] = generation_id
+            if traces and traces.get(case_id):
+                rec["generation_trace"] = traces[case_id]
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
@@ -115,11 +118,13 @@ def append_judgment(sid: str, version: str, case_id: str, scores: Dict[str, floa
 
 
 def append_check_judgment(sid: str, version: str, case_id: str,
-                          checks: Dict[str, float], reasoning: Dict[str, str] = None):
+                          checks: Dict[str, float], reasoning: Dict[str, str] = None,
+                          judge_trace: Dict[str, Any] = None):
     """逐 check 的 LLM-judge 判分(Opus)。落在 check_judgments.jsonl。"""
     d = _ensure(sid)
     rec = {"ts": _now(), "version": version, "case_id": case_id,
-           "checks": checks, "reasoning": reasoning or {}}
+           "checks": checks, "reasoning": reasoning or {},
+           "judge_trace": judge_trace}
     with open(os.path.join(d, "check_judgments.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
@@ -142,6 +147,7 @@ def append_check_judgments(sid: str, version: str, judgments: Dict[str, Dict]):
                 "rubric_sha256": judgment.get("rubric_sha256"),
                 "llm_backend": judgment.get("llm_backend"),
                 "model": judgment.get("model"),
+                "judge_trace": judgment.get("judge_trace"),
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
@@ -260,6 +266,7 @@ def _load_check_jsonl(sid: str, fname: str) -> Dict[str, Dict[str, Dict[str, Any
                 "rubric_sha256": rec.get("rubric_sha256"),
                 "llm_backend": rec.get("llm_backend"),
                 "model": rec.get("model"),
+                "judge_trace": rec.get("judge_trace"),
             }
     return out
 

@@ -1,0 +1,622 @@
+(function () {
+  'use strict';
+
+  const DEFAULTS = {
+    user: 'unattributed', userLabel: '\u672a\u8bb0\u5f55', sessionsRoot: 'app/sessions',
+    refreshMs: 2 * 1000, requestTimeoutMs: 10 * 1000, requestRetries: 1,
+  };
+  const config = Object.assign({}, DEFAULTS, window.OPENHARNESS_LOCAL_CONFIG || {});
+  const apiBase = '/api/local';
+  let loadedRevision = null;
+  let activeBundles = [];
+  let activeTree = [];
+  let activeSkippedSessionCount = 0;
+  let refreshPromise = null;
+  const rawPackagePromises = new Map();
+  const metadataDocumentPromises = new Map();
+  const structuredDocumentPromises = new Map();
+  const skillSourcePromises = new Map();
+  const outputPromises = new Map();
+  const tracePromises = new Map();
+  const judgmentDetailPromises = new Map();
+
+  function unique(values) {
+    return [...new Set(values)];
+  }
+  function parseJsonLines(text) {
+    const lines = String(text || '').split(/\r?\n/).filter(line => line.trim());
+    return lines.flatMap((line, index) => {
+      try {
+        return [JSON.parse(line)];
+      } catch (error) {
+        if (index === lines.length - 1) return [];
+        throw error;
+      }
+    });
+  }
+
+  async function fetchResponse(url, options) {
+    let lastError = null;
+    for (let attempt = 0; attempt <= config.requestRetries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), config.requestTimeoutMs);
+      try {
+        return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+      } catch (error) {
+        lastError = error;
+        if (attempt < config.requestRetries) {
+          await new Promise(resolve => window.setTimeout(resolve, 300 * (attempt + 1)));
+        }
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+    throw lastError || new Error(`请求失败: ${url}`);
+  }
+
+  async function fetchJson(url) {
+    const response = await fetchResponse(url, { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${url}`);
+    return response.json();
+  }
+
+  async function fetchText(url) {
+    const response = await fetchResponse(url, {});
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${url}`);
+    return response.text();
+  }
+
+  function sessionFiles(tree) {
+    const sessions = new Map();
+    const prefix = config.sessionsRoot + '/';
+    tree.forEach(item => {
+      if (item.type !== 'blob' || !item.path.startsWith(prefix)) return;
+      const rest = item.path.slice(prefix.length);
+      const slash = rest.indexOf('/');
+      if (slash < 1) return;
+      const sessionId = rest.slice(0, slash);
+      const file = rest.slice(slash + 1);
+      if (!sessions.has(sessionId)) {
+        sessions.set(sessionId, { files: new Set(), revisions: [] });
+      }
+      const entry = sessions.get(sessionId);
+      entry.files.add(file);
+      entry.revisions.push(file + ':' + (item.revision || item.size || 0));
+    });
+    sessions.forEach(entry => {
+      entry.revision = entry.revisions.sort().join('|');
+      delete entry.revisions;
+    });
+    return sessions;
+  }
+  function isReadable(entry) { return entry.files.has('state.json'); }
+
+  function rawUrl(path, revision) {
+    return apiBase + '/file?path=' + encodeURIComponent(path) + '&rev=' + encodeURIComponent(revision || '');
+  }
+
+  function rawPackageUrl(sessionId, caseId) {
+    return apiBase + '/raw-package?session=' + encodeURIComponent(sessionId) + '&case_id=' + encodeURIComponent(caseId);
+  }
+
+  function skillSourceUrl(sessionId, version) {
+    const query = new URLSearchParams({ session: sessionId, version });
+    return apiBase + '/skill-source?' + query.toString();
+  }
+
+  function generationTraceUrl(sessionId, version, caseId, generationId) {
+    const query = new URLSearchParams({
+      session: sessionId,
+      version,
+      case_id: caseId,
+      generation_id: generationId,
+    });
+    return apiBase + '/generation-trace?' + query.toString();
+  }
+  function judgmentDetailUrl(sessionId, version, caseId) {
+    const query = new URLSearchParams({
+      session: sessionId,
+      version,
+      case_id: caseId,
+    });
+    return apiBase + '/case-judgment?' + query.toString();
+  }  function structuredDocumentUrl(sessionId, caseId) {
+    return apiBase + '/structured-case?session=' + encodeURIComponent(sessionId) + '&case_id=' + encodeURIComponent(caseId);
+  }  function metadataDocumentUrl(sessionId, caseId) {
+    return apiBase + '/case-metadata?session=' + encodeURIComponent(sessionId) + '&case_id=' + encodeURIComponent(caseId);
+  }
+
+  function loadRawPackage(sessionId, caseId, revision) {
+    const key = sessionId + '|' + caseId + '|' + (revision || '');
+    if (!rawPackagePromises.has(key)) {
+      rawPackagePromises.set(key, fetchJson(rawPackageUrl(sessionId, caseId))
+        .then(payload => payload.files || [])
+        .catch(() => []));
+    }
+    return rawPackagePromises.get(key);
+  }
+
+  function loadMetadataDocument(sessionId, caseId, revision) {
+    const key = sessionId + '|' + caseId + '|' + (revision || '');
+    if (!metadataDocumentPromises.has(key)) {
+      metadataDocumentPromises.set(key, fetchJson(metadataDocumentUrl(sessionId, caseId))
+        .catch(() => null));
+    }
+    return metadataDocumentPromises.get(key);
+  }
+
+  function loadStructuredDocument(sessionId, caseId, revision) {
+    const key = sessionId + '|' + caseId + '|' + (revision || '');
+    if (!structuredDocumentPromises.has(key)) {
+      structuredDocumentPromises.set(
+        key,
+        fetchJson(structuredDocumentUrl(sessionId, caseId)).catch(() => null)
+      );
+    }
+    return structuredDocumentPromises.get(key);
+  }
+  async function loadBundle(sessionId, files, revision) {
+    const summary = await fetchJson(
+      apiBase + '/session-summary?session=' + encodeURIComponent(sessionId)
+        + '&rev=' + encodeURIComponent(revision || '')
+    );
+    return {
+      sessionId,
+      meta: summary.meta || {},
+      state: summary.state || {},
+      runtimeSources: summary.runtime_sources || {},
+      generationSkillSources: {},
+      rawPackages: {},
+      metadataDocuments: {},
+      outputs: [],
+      hasOutputsFile: files.has('outputs.jsonl'),
+      judgments: summary.judgments || [],
+      judgmentFile: summary.judgment_file || null,
+      revision,
+    };
+  }
+  function dimensionsFor(state) {
+    return (state.rubric?.dimensions || []).map(dimension => ({
+      id: dimension.name || dimension.id,
+      label: dimension.name_zh || dimension.label || dimension.name || dimension.id,
+      weight: Number(dimension.weight || 0),
+      checks: (dimension.checks || []).map(check => ({
+        id: check.id,
+        label: check.label || check.id,
+        desc: check.desc || check.description || '',
+        redline: Boolean(check.redline),
+      })),
+    }));
+  }
+
+  function bundleTimestamp(bundle) {
+    const saved = bundle.state._saved_at;
+    if (typeof saved === 'number') return saved;
+    const parsed = Date.parse(saved || '') / 1000;
+    return Number.isFinite(parsed) ? parsed : Number(bundle.meta.created_at || 0);
+  }
+
+  function scoreRecord(checks, dimensions) {
+    let weighted = 0;
+    let weightTotal = 0;
+    let red = 0;
+    const dims = dimensions.map(dimension => {
+      const values = dimension.checks.map(check => Number(checks[check.id] ?? 0));
+      const score = 1 + 4 * (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0);
+      weighted += score * dimension.weight;
+      weightTotal += dimension.weight;
+      red += dimension.checks.filter(check => check.redline && Number(checks[check.id] ?? 0) < 1).length;
+      return Number(score.toFixed(4));
+    });
+    return { dims, total: Number((weightTotal ? weighted / weightTotal : 0).toFixed(4)), red };
+  }
+
+  function normalizeJudgment(row, dimensions) {
+    if (row.checks) return { checks: row.checks, reasoning: row.reasoning || {} };
+    const checks = {};
+    const reasoning = {};
+    dimensions.forEach(dimension => {
+      const rawScore = Number(row.scores?.[dimension.id] ?? 1);
+      const normalized = Math.max(0, Math.min(1, (rawScore - 1) / 4));
+      dimension.checks.forEach(check => {
+        checks[check.id] = normalized;
+        reasoning[check.id] = row.reasoning?.[dimension.id] || '该历史记录仅保存维度级 Judge 理由。';
+      });
+    });
+    return { checks, reasoning };
+  }
+
+  function versionItems(state) {
+    return (state.versions || []).map(entry => entry.skill || entry).filter(skill => skill?.version);
+  }
+
+  function instructionMarkdown(skill) {
+    const instructions = skill.instructions || {};
+    const directives = instructions.directives || {};
+    const lines = [`# instruction.md · ${skill.version}`, '', '## Prose', '', instructions.prose || '未记录独立 prose。'];
+    const names = Object.keys(directives);
+    if (names.length) {
+      lines.push('', '## Directives', '');
+      names.forEach(name => lines.push(`- [${directives[name] ? 'x' : ' '}] \`${name}\``));
+    }
+    return lines.join('\n');
+  }
+
+  function findRepoFile(treePaths, name) {
+    const normalized = String(name || '').replace(/\\/g, '/');
+    const parts = normalized.split('/').filter(Boolean);
+    const tail = parts[parts.length - 1];
+    if (!tail) return null;
+    return treePaths.find(path => path === normalized) || treePaths.find(path => path.endsWith(`/${normalized}`)) ||
+      treePaths.find(path => path.endsWith(`/${tail}`)) || null;
+  }
+
+  function caseDataFor(item, treePaths, revision, rawFiles, metadataDocument, structuredDocument) {
+    const input = item.input || {};
+    const shallowMetadata = Object.prototype.hasOwnProperty.call(item, 'metadata') ? item.metadata : {};
+    const rawMetadata = metadataDocument && Object.prototype.hasOwnProperty.call(metadataDocument, 'metadata')
+      ? metadataDocument.metadata : shallowMetadata;
+    const metadata = shallowMetadata && typeof shallowMetadata === 'object' ? shallowMetadata : {};
+    const sourceRows = Array.isArray(input.sources) ? input.sources : [];
+    const files = (rawFiles || []).map(file => [
+      file.path || file.name,
+      file.type || String(file.extension || 'FILE').toUpperCase(),
+      file.url,
+      Number(file.size || 0),
+    ]);
+    sourceRows.forEach(source => {
+      const fileName = source.meta?.file || source.file || source.title;
+      String(fileName || '').split(/\s*\/\s*/).forEach(candidate => {
+        const path = findRepoFile(treePaths, candidate);
+        if (!path) return;
+        const suffix = path.split('.').pop().toUpperCase();
+        files.push([path.split('/').pop(), suffix, rawUrl(path, revision)]);
+      });
+    });
+    return {
+      sample: metadata.source_file || metadata.display_name || item.topic || item.case_id,
+      range: metadata.range || '以实验记录为准',
+      scope: item.audience || input.brief || '未记录目标受众',
+      questions: item.key_questions || (item.turns || []).filter(turn => turn.role === 'user').map(turn => turn.content),
+      files: unique(files.map(file => JSON.stringify(file))).map(file => JSON.parse(file)),
+      metadata,
+      rawMetadata,
+      metadataSource: metadataDocument?.source || 'state.json · case.metadata',
+      metadataDocumentType: metadataDocument?.document_type || 'state_case_metadata',
+      metadataEvidenceCount: metadataDocument?.evidence_count ?? null,
+      structuredData: structuredDocument?.case || null,
+      structuredSource: structuredDocument?.source || null,
+      rawCase: item,
+      requiredSections: item.required_sections || [],
+    };
+  }
+
+  function snapshotFrom(bundles, tree, revision, skippedCount) {
+    const canonical = bundles.slice().sort((a, b) => bundleTimestamp(b) - bundleTimestamp(a))[0];
+    if (!canonical) throw new Error('没有找到具有完整 state、outputs 和 judgments 的实验会话。');
+    const dimensionDefinitions = bundles.flatMap(bundle => dimensionsFor(bundle.state));
+    const dimensions = [...new Map(dimensionDefinitions.map(item => [item.id, item])).values()];
+    if (!dimensions.length) throw new Error('实验未提供 rubric.dimensions。');
+    const treePaths = tree.filter(item => item.type === 'blob').map(item => item.path);
+    const caseItems = [...new Map(bundles.flatMap(bundle => bundle.state.cases || [])
+      .map(item => [item.case_id, item])).values()];
+    const cases = caseItems.map(item => [item.case_id, item.topic || item.metadata?.display_name || item.case_id]);
+    const caseData = caseItems.map(item => {
+      const owner = bundles.find(bundle => bundle.rawPackages?.[item.case_id]?.length || bundle.metadataDocuments?.[item.case_id] || bundle.structuredDocuments?.[item.case_id]);
+      return caseDataFor(item, treePaths, revision, owner?.rawPackages?.[item.case_id] || [], owner?.metadataDocuments?.[item.case_id], owner?.structuredDocuments?.[item.case_id]);
+    });
+    const rubrics = [...new Map(dimensionDefinitions.flatMap(dimension => dimension.checks.map(check => [
+      check.id, dimension.label, check.label, check.desc, check.redline ? '红线' : '评分',
+    ])).map(item => [item[0], item])).values()];
+    const records = {};
+    const versionMetrics = {};
+    const skills = {};
+    const experiments = [];
+    const experimentCaseIds = {};
+    const experimentRubricIds = {};
+    const caseDataByExperiment = {};
+    let judgmentCount = 0;
+
+    bundles.sort((a, b) => bundleTimestamp(b) - bundleTimestamp(a)).forEach(bundle => {
+      const localDimensions = dimensionsFor(bundle.state);
+      if (!localDimensions.length) return;
+      const localCases = bundle.state.cases || [];
+      const localCaseIds = localCases.map(item => item.case_id);
+      experimentCaseIds[bundle.sessionId] = localCaseIds;
+      experimentRubricIds[bundle.sessionId] = localDimensions.flatMap(item => item.checks.map(check => check.id));
+      localCases.forEach(item => {
+        caseDataByExperiment[`${bundle.sessionId}|${item.case_id}`] = caseDataFor(item, treePaths, revision, bundle.rawPackages?.[item.case_id] || [], bundle.metadataDocuments?.[item.case_id], bundle.structuredDocuments?.[item.case_id]);
+      });
+      const localDimensionIndex = new Map(localDimensions.map((item, index) => [item.id, index]));
+      const outputMap = new Map(bundle.outputs.map(row => [`${row.version}|${row.case_id}`, row]));
+      const judgmentMap = new Map();
+      bundle.judgments.forEach(row => {
+        const key = `${row.version}|${row.case_id}`;
+        if (row.invalidated) judgmentMap.delete(key);
+        else judgmentMap.set(key, row);
+      });
+      const versions = versionItems(bundle.state);
+      if (!versions.length) return;
+      const inputModes = unique((bundle.state.cases || []).map(item => item.metadata?.experiment_input_mode).filter(Boolean));
+      const explicitData = bundle.state.experiment_data || bundle.meta.experiment_data || {};
+      const explicitOptimizer = bundle.state.experiment_optimizer || bundle.meta.experiment_optimizer || {};
+      const explicitOwner = bundle.state.experiment_owner || bundle.meta.experiment_owner || {};
+      const explicitJudge = bundle.state.experiment_judge || bundle.meta.experiment_judge || {};
+      const dataId = explicitData.id || (inputModes.length === 1 ? inputModes[0] : (bundle.state.product_id || bundle.meta.product_id || 'experiment-data'));
+      const optimizer = explicitOptimizer.id || bundle.state.optimizer_mode || 'openharness';
+      const judge = String(explicitJudge.id || bundle.state.judge_version || bundle.meta.judge_version || 'v1').toLowerCase();
+      const judgeBasis = explicitJudge.basis || (judge === 'v3' ? 'source' : 'groundtruth');
+      const owner = explicitOwner.id
+        ? [explicitOwner.id, explicitOwner.label || explicitOwner.id]
+        : [config.user, config.userLabel];
+      const experiment = {
+        id: bundle.sessionId,
+        session: bundle.sessionId,
+        sessionLabel: bundle.state.session_label || bundle.meta.session_label || bundle.sessionId,
+        data: dataId,
+        dataLabel: explicitData.label || (inputModes.length === 1 ? inputModes[0] : (bundle.meta.product_id || bundle.state.product_id || 'OpenHarness Data')),
+        optimizer,
+        optimizerLabel: explicitOptimizer.label || (optimizer === 'openharness' ? 'OpenHarness' : optimizer),
+        user: owner[0],
+        judge,
+        judgeLabel: explicitJudge.label || ('Judge ' + judge.toUpperCase()),
+        judgeBasis,
+        userLabel: owner[1],
+        versions: versions.map(skill => skill.version),
+        parents: Object.fromEntries(versions.map(skill => [skill.version, skill.parent_version || null])),
+        latestVersion: versions[versions.length - 1].version,
+        savedAt: bundle.state._saved_at || bundle.meta.created_at || null,
+      };
+      experiments.push(experiment);
+      versions.forEach(skill => {
+        const artifact = bundle.generationSkillSources?.[skill.version] || null;
+        skills[`${bundle.sessionId}|${skill.version}`] = {
+          parent: skill.parent_version || null,
+          skillMd: artifact?.skill_md || '',
+          instructionMd: artifact?.instruction_md || '',
+          source: artifact?.source || '',
+          missing: !artifact,
+          changelog: skill.changelog || '',
+        };
+      });
+      judgmentMap.forEach((judgment, key) => {
+        const output = outputMap.get(key) || {};
+        const normalized = normalizeJudgment(judgment, localDimensions);
+        const localScored = scoreRecord(normalized.checks, localDimensions);
+        const scored = Object.assign({}, localScored, {
+          dims: dimensions.map(dimension => localScored.dims[localDimensionIndex.get(dimension.id)] ?? 0),
+        });
+        records[`${bundle.sessionId}|${key}`] = Object.assign({}, scored, {
+          checks: normalized.checks,
+          reasoning: normalized.reasoning,
+          report: output.report_text || '',
+          generationId: output.generation_id || '',
+          reportSha256: judgment.report_sha256 || null,
+          rubricSha256: judgment.rubric_sha256 || null,
+          trace: output.generationRunTrace || { status: 'missing', operations: [], rounds: [], conversation: [], conversationText: '', conversationAvailable: false, source: '' },
+        });
+        judgmentCount += 1;
+      });
+      experiment.versions.forEach(version => {
+        const rows = localCaseIds.map(caseId => records[`${bundle.sessionId}|${version}|${caseId}`]).filter(Boolean);
+        if (!rows.length) return;
+        versionMetrics[`${bundle.sessionId}|${version}`] = {
+          dims: dimensions.map((dimension, index) => localDimensionIndex.has(dimension.id) ? Number((rows.reduce((sum, row) => sum + row.dims[index], 0) / rows.length).toFixed(4)) : 0),
+          total: Number((rows.reduce((sum, row) => sum + row.total, 0) / rows.length).toFixed(4)),
+          red: rows.reduce((sum, row) => sum + row.red, 0),
+          caseCount: rows.length,
+        };
+      });
+    });
+
+    const naturalExperimentOrder = new Intl.Collator('zh-CN', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+    experiments.sort((left, right) => {
+      const leftMetric = versionMetrics[`${left.session}|${left.latestVersion}`];
+      const rightMetric = versionMetrics[`${right.session}|${right.latestVersion}`];
+      const leftHasResult = Boolean(leftMetric?.caseCount && leftMetric.total > 0);
+      const rightHasResult = Boolean(rightMetric?.caseCount && rightMetric.total > 0);
+      const resultDifference = Number(rightHasResult) - Number(leftHasResult);
+      if (resultDifference) return resultDifference;
+      return naturalExperimentOrder.compare(
+        left.sessionLabel || left.session,
+        right.sessionLabel || right.session
+      );
+    });
+
+    return {
+      meta: {
+        name: 'OpenHarness \u00b7 Local Realtime',
+        source: 'local',
+        branch: 'local',
+        commit: revision,
+        syncedAt: new Date().toISOString(),
+        experimentCount: experiments.length,
+        caseCount: cases.length,
+        judgmentCount,
+        checkCount: rubrics.length,
+        skippedSessionCount: skippedCount,
+      },
+      sessions: experiments.map(item => [item.session, item.sessionLabel]),
+      dataTypes: unique(experiments.map(item => JSON.stringify([item.data, item.dataLabel]))).map(item => JSON.parse(item)),
+      optimizers: unique(experiments.map(item => JSON.stringify([item.optimizer, item.optimizerLabel]))).map(item => JSON.parse(item)),
+      users: unique(experiments.map(item => JSON.stringify([item.user, item.userLabel]))).map(item => JSON.parse(item)),
+      judges: unique(experiments.map(item => JSON.stringify([item.judge, item.judgeLabel]))).map(item => JSON.parse(item)),
+      dimensions: dimensions.map(({ id, label, weight }) => ({ id, label, weight })),
+      cases,
+      caseData,
+      rubrics,
+      experimentCaseIds,
+      experimentRubricIds,
+      caseDataByExperiment,
+      experiments,
+      records,
+      versionMetrics,
+      skills,
+      runtimeSources: Object.fromEntries(bundles.map(bundle => [bundle.sessionId, bundle.runtimeSources || {}])),
+    };
+  }
+
+  async function refresh(force) {
+    const treeResponse = await fetchJson(apiBase + '/tree?t=' + Date.now());
+    if (!force && loadedRevision === treeResponse.sha) return false;
+    const sessions = sessionFiles(treeResponse.tree || []);
+    const candidates = [...sessions.entries()].filter(([, entry]) => isReadable(entry));
+    const loaded = [];
+    const batchSize = 4;
+    for (let offset = 0; offset < candidates.length; offset += batchSize) {
+      const batch = await Promise.all(candidates.slice(offset, offset + batchSize).map(async ([sessionId, entry]) => {
+        try {
+          const previous = activeBundles.find(
+            item => item.sessionId === sessionId && item.revision === entry.revision
+          );
+          return previous || await loadBundle(sessionId, entry.files, entry.revision);
+        } catch (error) {
+          console.warn(`[OpenHarness local] session skipped: ${sessionId}`, error);
+          return null;
+        }
+      }));
+      loaded.push(...batch.filter(Boolean));
+    }
+    if (loaded.length < 1) {
+      throw new Error('Local service did not find any experiment. Run an OpenHarness experiment first.');
+    }
+    const liveSnapshot = snapshotFrom(
+      loaded,
+      treeResponse.tree || [],
+      treeResponse.sha,
+      sessions.size - loaded.length,
+    );
+    window.OPENHARNESS_SANDBOX = liveSnapshot;
+    loadedRevision = treeResponse.sha;
+    activeBundles = loaded;
+    activeTree = treeResponse.tree || [];
+    activeSkippedSessionCount = sessions.size - loaded.length;
+    return true;
+  }
+
+  function setStatus(kind, message) {
+    const target = document.querySelector('.top small');
+    if (!target) return;
+    target.textContent = message;
+    target.dataset.status = kind;
+  }
+
+  window.OPENHARNESS_REALTIME_REFRESH = function (force) {
+    if (refreshPromise) return refreshPromise;
+    const request = (async () => {
+      try {
+        const changed = await refresh(Boolean(force));
+        if (window.OPENHARNESS_SANDBOX?.meta?.commit) {
+          const meta = window.OPENHARNESS_SANDBOX.meta;
+          setStatus('live', 'Local Live · ' + meta.experimentCount + ' experiments · refresh every ' + Math.round(config.refreshMs / 1000) + 's');
+        }
+        return changed;
+      } catch (error) {
+        setStatus('error', '本地实验数据加载失败 · ' + error.message);
+        throw error;
+      }
+    })();
+    refreshPromise = request;
+    request.finally(() => {
+      if (refreshPromise === request) refreshPromise = null;
+    }).catch(() => {});
+    return request;
+  };
+  function rebuildSnapshot() {
+    window.OPENHARNESS_SANDBOX = snapshotFrom(
+      activeBundles,
+      activeTree,
+      loadedRevision,
+      activeSkippedSessionCount,
+    );
+  }
+
+  window.OPENHARNESS_REALTIME_LOAD_SKILL = async function (sessionId, version) {
+    const bundle = activeBundles.find(item => item.sessionId === sessionId);
+    if (!bundle) return false;
+    if (Object.prototype.hasOwnProperty.call(bundle.generationSkillSources, version)) return false;
+    const key = sessionId + '|' + version + '|' + bundle.revision;
+    if (!skillSourcePromises.has(key)) {
+      skillSourcePromises.set(key, fetchJson(skillSourceUrl(sessionId, version)).catch(() => null));
+    }
+    bundle.generationSkillSources[version] = await skillSourcePromises.get(key);
+    rebuildSnapshot();
+    return true;
+  };
+
+  window.OPENHARNESS_REALTIME_LOAD_CASE_ASSETS = async function (sessionId, caseId) {
+    const bundle = activeBundles.find(item => item.sessionId === sessionId);
+    if (!bundle) return false;
+    const hasRaw = Object.prototype.hasOwnProperty.call(bundle.rawPackages, caseId);
+    const hasMetadata = Object.prototype.hasOwnProperty.call(bundle.metadataDocuments, caseId);
+    const hasStructured = Object.prototype.hasOwnProperty.call(bundle.structuredDocuments, caseId);
+    if (hasRaw && hasMetadata && hasStructured) return false;
+    const results = await Promise.all([
+      hasRaw ? bundle.rawPackages[caseId] : loadRawPackage(sessionId, caseId, bundle.revision),
+      hasMetadata ? bundle.metadataDocuments[caseId] : loadMetadataDocument(sessionId, caseId, bundle.revision),
+      hasStructured ? bundle.structuredDocuments[caseId] : loadStructuredDocument(sessionId, caseId, bundle.revision),
+    ]);
+    bundle.rawPackages[caseId] = results[0];
+    bundle.metadataDocuments[caseId] = results[1];
+    bundle.structuredDocuments[caseId] = results[2];
+    rebuildSnapshot();
+    return true;
+  };
+
+  window.OPENHARNESS_REALTIME_LOAD_OUTPUT = async function (sessionId, version, caseId) {
+    const bundle = activeBundles.find(item => item.sessionId === sessionId);
+    if (!bundle || !bundle.hasOutputsFile) return false;
+    if (bundle.outputs.some(item => item.version === version && item.case_id === caseId)) return false;
+    const key = sessionId + '|' + version + '|' + caseId + '|' + bundle.revision;
+    if (!outputPromises.has(key)) {
+      const query = new URLSearchParams({ session: sessionId, version, case_id: caseId });
+      if (!judgmentDetailPromises.has(key)) {
+        judgmentDetailPromises.set(
+          key,
+          fetchJson(judgmentDetailUrl(sessionId, version, caseId)).catch(() => null)
+        );
+      }
+      outputPromises.set(key, Promise.all([
+        fetchJson(apiBase + '/case-output?' + query.toString()),
+        judgmentDetailPromises.get(key),
+      ]));
+    }
+    const result = await outputPromises.get(key);
+    bundle.outputs.push(result[0]);
+    if (result[1]) {
+      const summary = [...bundle.judgments].reverse().find(
+        item => item.version === version && item.case_id === caseId && !item.invalidated
+      );
+      if (summary) Object.assign(summary, result[1]);
+    }
+    rebuildSnapshot();
+    return true;
+  };
+
+  window.OPENHARNESS_REALTIME_LOAD_TRACE = async function (sessionId, version, caseId) {
+    const bundle = activeBundles.find(item => item.sessionId === sessionId);
+    if (!bundle || !bundle.hasOutputsFile) return false;
+    await window.OPENHARNESS_REALTIME_LOAD_OUTPUT(sessionId, version, caseId);
+    const output = bundle.outputs.find(item => item.version === version && item.case_id === caseId);
+    if (!output || Object.prototype.hasOwnProperty.call(output, 'generationRunTrace')) return false;
+    if (!output.generation_id) {
+      output.generationRunTrace = null;
+      rebuildSnapshot();
+      return true;
+    }
+    const key = sessionId + '|' + version + '|' + caseId + '|' + output.generation_id + '|' + bundle.revision;
+    if (!tracePromises.has(key)) {
+      tracePromises.set(key, fetchJson(
+        generationTraceUrl(sessionId, version, caseId, output.generation_id)
+      ).catch(() => null));
+    }
+    output.generationRunTrace = await tracePromises.get(key);
+    rebuildSnapshot();
+    return true;
+  };
+  window.OPENHARNESS_REALTIME_CONFIG_RESOLVED = config;
+  window.OPENHARNESS_REALTIME_READY = window.OPENHARNESS_REALTIME_REFRESH(true);
+})();

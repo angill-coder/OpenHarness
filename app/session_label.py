@@ -131,6 +131,7 @@ class SessionLabel:
                 ),
                 "llm_backend": (judgment or {}).get("llm_backend"),
                 "model": (judgment or {}).get("model"),
+                "judge_trace": (judgment or {}).get("judge_trace"),
             }
         if not clean_batch:
             return {"error": "批量 Judge 未产出有效评分"}

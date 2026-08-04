@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, Iterable, List, Optional
 
@@ -164,15 +166,47 @@ def judge_cases(
                 "status": "missing_report",
                 "error": "当前版本尚未导入报告",
             }
+        judge_started = time.monotonic()
+        call_traces = []
+
+        def invoke(prompt: str, dimension: str) -> str:
+            call_started = time.monotonic()
+            trace = {
+                "dimension": dimension or "all",
+                "promptSha256": hashlib.sha256(
+                    prompt.encode("utf-8")
+                ).hexdigest(),
+                "promptChars": len(prompt),
+            }
+            try:
+                response = call_model(prompt)
+                trace.update({
+                    "status": "completed",
+                    "durationMs": int(
+                        (time.monotonic() - call_started) * 1000
+                    ),
+                    "response": str(response)[:12000],
+                })
+                call_traces.append(trace)
+                return response
+            except Exception as exc:
+                trace.update({
+                    "status": "failed",
+                    "durationMs": int(
+                        (time.monotonic() - call_started) * 1000
+                    ),
+                    "error": str(exc),
+                })
+                call_traces.append(trace)
+                raise
         try:
             if strategy == JUDGE_STRATEGY_SINGLE:
-                raw = call_model(
-                    build_prompt(
-                        rubric,
-                        report,
-                        _full_case_context(case),
-                    )
+                prompt = build_prompt(
+                    rubric,
+                    report,
+                    _full_case_context(case),
                 )
+                raw = invoke(prompt, "all")
                 parsed = extract_json(raw)
                 checks, reasoning = _validate_payload(parsed, expected)
                 model_calls = 1
@@ -191,16 +225,15 @@ def judge_cases(
                         dimension.get("name") or ""
                     )
                     try:
-                        raw = call_model(
-                            build_prompt(
-                                dimension_rubric,
-                                report,
-                                _dimension_case_context(
-                                    case,
-                                    dimension_name,
-                                ),
-                            )
+                        prompt = build_prompt(
+                            dimension_rubric,
+                            report,
+                            _dimension_case_context(
+                                case,
+                                dimension_name,
+                            ),
                         )
+                        raw = invoke(prompt, dimension_name)
                         parsed = extract_json(raw)
                         dim_checks, dim_reasoning = _validate_payload(
                             parsed,
@@ -223,12 +256,28 @@ def judge_cases(
                     "strategy": strategy,
                     "model_calls": model_calls,
                 },
+                "judge_trace": {
+                    "status": "completed",
+                    "strategy": strategy,
+                    "durationMs": int(
+                        (time.monotonic() - judge_started) * 1000
+                    ),
+                    "calls": call_traces,
+                },
             }
         except Exception as exc:
             return index, {
                 "case_id": case_id,
                 "status": "failed",
                 "error": str(exc),
+                "judge_trace": {
+                    "status": "failed",
+                    "strategy": strategy,
+                    "durationMs": int(
+                        (time.monotonic() - judge_started) * 1000
+                    ),
+                    "calls": call_traces,
+                },
             }
 
     if not case_list:

@@ -204,15 +204,12 @@ class GenerationJobServiceTest(unittest.TestCase):
     def test_default_dataset_path_is_repository_local_data_json(self):
         with patch.dict("os.environ", {}, clear=True):
             settings = GenerationSettings.from_env()
-        self.assertEqual(
-            settings.dataset_path,
-            (
-                APP.parent
-                / "data"
-                / "20260727_test_data"
-                / "data.json"
-            ),
-        )
+        expected = {
+            version: APP.parent / "data" / "research-report" / version / "data.json"
+            for version in ("v1", "v2", "v3")
+        }
+        self.assertEqual(settings.dataset_path, expected["v1"])
+        self.assertEqual(dict(settings.dataset_paths), expected)
         self.assertEqual(settings.parallel, 20)
         self.assertEqual(settings.model, "deepseek-v4-pro-ioa")
         self.assertEqual(
@@ -222,6 +219,30 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertNotIn("auto", settings.models)
         self.assertNotIn("echo", settings.models)
         self.assertEqual(settings.models, SUPPORTED_WB_MODELS)
+
+    def test_session_metadata_routes_to_versioned_dataset(self):
+        v2_dataset = self.root / "v2" / "data.json"
+        v2_dataset.parent.mkdir()
+        v2_dataset.write_text("{}", encoding="utf-8")
+        meta_path = self.root / "sessions" / "test-session" / "meta.json"
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        metadata["experiment_data"] = {"id": "v2", "label": "Data v2"}
+        meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+        settings = GenerationSettings(
+            dataset_path=self.dataset,
+            output_root=self.root / "runs-routed",
+            dataset_paths=(("v1", self.dataset), ("v2", v2_dataset)),
+        )
+        service = GenerationJobService(
+            {"test-session": self.session},
+            settings=settings,
+            runner_func=lambda *_args, **_kwargs: None,
+        )
+
+        self.assertEqual(
+            service.dataset_path_for_session("test-session"),
+            v2_dataset.resolve(),
+        )
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0
@@ -241,6 +262,9 @@ class GenerationJobServiceTest(unittest.TestCase):
             outputs,
             "v0",
             "gen-idempotent",
+            traces={
+                "case-a": {"status": "success", "operations": []},
+            },
         )
         second = self.session.import_generated_outputs(
             outputs,
@@ -263,6 +287,12 @@ class GenerationJobServiceTest(unittest.TestCase):
             / "outputs.jsonl"
         ).read_text(encoding="utf-8").strip().splitlines()
         self.assertEqual(len(output_lines), 2)
+        persisted = [json.loads(line) for line in output_lines]
+        self.assertEqual(
+            persisted[0]["generation_trace"]["status"],
+            "success",
+        )
+        self.assertNotIn("generation_trace", persisted[1])
 
     def test_job_completes_and_imports_all_reports(self):
         fake = FakeRunner()
