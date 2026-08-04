@@ -12,10 +12,10 @@ API:
   GET  /api/session?id=       -> 当前会话完整状态
   POST /api/data              {id, rows?, use_sample?, use_configured?} -> 导入数据
   POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
-  POST /api/advance           {id}  -> 生成下一版 skill(optimizer+gate)
+  POST /api/advance           {id, llm_backend?, llm_model?}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
-  POST /api/run_judge_batch   {id, version?, parallel?, judge_strategy?} -> 并发 Judge 当前版本全部 case
+  POST /api/run_judge_batch   {id, version?, parallel?, judge_strategy?, llm_backend?, llm_model?} -> 并发 Judge 当前版本全部 case
   POST /api/generation/start  {id, idempotency_key?, parallel?, model?} -> 后台调用 WB 并自动批量导入
   GET  /api/generation?id=    -> 查询生成任务
   POST /api/generation/retry  {job_id, parallel?, model?} -> 仅重跑未导入的 case
@@ -46,6 +46,10 @@ import llm_client  # noqa: E402
 from generation_jobs import (  # noqa: E402
     GenerationJobError,
     GenerationJobService,
+)
+from model_config import (  # noqa: E402
+    DEFAULT_EVALUATION_WB_MODEL,
+    SUPPORTED_WB_MODELS,
 )
 from judge_batch import (  # noqa: E402
     JUDGE_STRATEGY_PER_DIMENSION,
@@ -130,7 +134,7 @@ def _load_evidence_metadata(cases, dataset_path):
                 candidates.add(source.parent / "evidence_metadata.json")
         if len(candidates) != 1:
             errors.append(
-                "%s: 无法从 input_files.source 唯一定位 metadata"
+                "%s: 无法从 input_files.source 唯一定位 evidence metadata"
                 % case_id
             )
             continue
@@ -180,7 +184,7 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
     dimensions = rubric.get("dimensions") or []
     L = [
         "你是严格的调研报告评审。",
-        "只评价【报告正文】实际呈现的内容；背景、Evidence 和 GT "
+        "只评价【报告正文】实际呈现的内容；背景和 Evidence Metadata "
         "只用于核验，不得算作报告已经写到。",
         "对本次列出的每一条 check 判 "
         "met(满足)/partial(部分)/miss(不满足)。",
@@ -197,6 +201,8 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
             "不要推测、补评或平衡其他维度。",
         ]
     context = dict(case_context or {})
+    # Judge 不接收 ground truth；即使调用方误传，也在 Prompt 边界丢弃。
+    context.pop("ground_truth", None)
     if context.get("background"):
         L.append(
             "背景信息只用于确定任务范围、研究问题和受众，不是事实证据。"
@@ -207,14 +213,8 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
             "用它核验事实、冲突、口径、样本边界和异常；"
             "报告论断未被索引覆盖时可以判为无法回溯，"
             "但不得仅据此直接认定为事实编造。",
-            "只有与 Evidence 明确冲突或报告给出无依据的确定性事实时，"
+            "只有与 Evidence Metadata 明确冲突或报告给出无依据的确定性事实时，"
             "才对“不编造·不曲解”降档。",
-        ]
-    if context.get("ground_truth"):
-        L += [
-            "Ground Truth 只是可能的参考案例，并不完整，也不绝对正确。",
-            "不得要求报告复刻其结论、论据、措辞或结构；"
-            "只用它辅助识别可能遗漏的问题和关键 claim。",
         ]
     if set(context) <= {"case_id"}:
         L.append("本维度只根据报告正文和 check 本身判断。")
@@ -235,7 +235,6 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
     for key, title in (
         ("background", "背景信息（round 0–1）"),
         ("evidence_metadata", "Evidence Metadata"),
-        ("ground_truth", "Ground Truth（仅作参考案例）"),
     ):
         if context.get(key):
             L += [
@@ -286,11 +285,29 @@ def _judge_parallelism(requested=None):
     return parallel
 
 
+def _llm_selection(payload, purpose):
+    prefix = "OPENHARNESS_%s" % purpose.upper()
+    backend = llm_client.normalize_backend(
+        payload.get("llm_backend")
+        or os.environ.get(prefix + "_LLM_BACKEND", "workbuddy")
+    )
+    model = None
+    if backend == llm_client.LLM_BACKEND_WORKBUDDY:
+        model = llm_client.normalize_workbuddy_model(
+            payload.get("llm_model")
+            or os.environ.get(prefix + "_WB_MODEL")
+            or DEFAULT_EVALUATION_WB_MODEL
+        )
+    return backend, model
+
+
 def _judge_summary(
     results,
     parallel=None,
     strategy=JUDGE_STRATEGY_PER_DIMENSION,
     dimension_count=0,
+    llm_backend="workbuddy",
+    llm_model=None,
 ):
     counts = {
         "judged": 0,
@@ -314,7 +331,15 @@ def _judge_summary(
         "failed_cases": total - success,
         "missing_report_cases": counts["missing_report"],
         "stale_report_cases": counts["stale_report"],
-        "model": os.environ.get("ANTHROPIC_JUDGE_MODEL", "claude-opus-4-8"),
+        "llm_backend": llm_backend,
+        "model": (
+            llm_model
+            if llm_backend == llm_client.LLM_BACKEND_WORKBUDDY
+            else os.environ.get(
+                "ANTHROPIC_JUDGE_MODEL",
+                "claude-opus-4-8",
+            )
+        ),
         "parallel": _judge_parallelism(parallel),
         "judge_strategy": strategy,
         "model_calls_per_case": (
@@ -445,6 +470,25 @@ class Handler(BaseHTTPRequestHandler):
                             "OPENHARNESS_JUDGE_STRATEGY",
                             JUDGE_STRATEGY_PER_DIMENSION,
                         )
+                    ),
+                    "llm_backends": ["api", "workbuddy"],
+                    "evaluation_models": list(SUPPORTED_WB_MODELS),
+                    "evaluation_model_default": DEFAULT_EVALUATION_WB_MODEL,
+                    "judge_llm_backend": os.environ.get(
+                        "OPENHARNESS_JUDGE_LLM_BACKEND",
+                        "workbuddy",
+                    ),
+                    "judge_wb_model": os.environ.get(
+                        "OPENHARNESS_JUDGE_WB_MODEL",
+                        DEFAULT_EVALUATION_WB_MODEL,
+                    ),
+                    "optimizer_llm_backend": os.environ.get(
+                        "OPENHARNESS_OPTIMIZER_LLM_BACKEND",
+                        "workbuddy",
+                    ),
+                    "optimizer_wb_model": os.environ.get(
+                        "OPENHARNESS_OPTIMIZER_WB_MODEL",
+                        DEFAULT_EVALUATION_WB_MODEL,
                     ),
                 }
             )
@@ -657,8 +701,19 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
             try:
+                llm_backend, llm_model = _llm_selection(
+                    b,
+                    "optimizer",
+                )
+            except llm_client.LLMClientError as exc:
+                return self._send(400, {"error": str(exc)})
+            try:
                 with _session_lock(s.id):
-                    result = s.advance(account=acct)
+                    result = s.advance(
+                        account=acct,
+                        llm_backend=llm_backend,
+                        llm_model=llm_model,
+                    )
             except llm_client.LLMClientError as exc:
                 return self._send(
                     502,
@@ -839,7 +894,11 @@ class Handler(BaseHTTPRequestHandler):
                         JUDGE_STRATEGY_PER_DIMENSION,
                     )
                 )
-            except ValueError as exc:
+                judge_llm_backend, judge_llm_model = _llm_selection(
+                    b,
+                    "judge",
+                )
+            except (ValueError, llm_client.LLMClientError) as exc:
                 return self._send(400, {"error": str(exc)})
             ver = b.get("version") or s._eval_target()["version"]
             if ver != s._eval_target()["version"]:
@@ -897,6 +956,8 @@ class Handler(BaseHTTPRequestHandler):
                                     judge_parallel,
                                     judge_strategy,
                                     judge_dimension_count,
+                                    judge_llm_backend,
+                                    judge_llm_model,
                                 ),
                                 "status": "completed",
                                 "total_cases": 0,
@@ -965,6 +1026,14 @@ class Handler(BaseHTTPRequestHandler):
                                         current_report
                                     ),
                                     "rubric_sha256": rubric_sha256,
+                                    "llm_backend": judge_llm_backend,
+                                    "model": (
+                                        judge_llm_model
+                                        or os.environ.get(
+                                            "ANTHROPIC_JUDGE_MODEL",
+                                            "claude-opus-4-8",
+                                        )
+                                    ),
                                 }
                             },
                             ver,
@@ -973,12 +1042,19 @@ class Handler(BaseHTTPRequestHandler):
                         )
                     return item
 
+                def call_judge_model(prompt):
+                    return llm_client.call_llm(
+                        prompt,
+                        backend=judge_llm_backend,
+                        model=judge_llm_model,
+                    )
+
                 results = judge_cases(
                     cases,
                     reports,
                     rubric,
                     _build_judge_prompt,
-                    _call_opus,
+                    call_judge_model,
                     _extract_json,
                     parallel=judge_parallel,
                     on_result=persist_result,
@@ -995,6 +1071,8 @@ class Handler(BaseHTTPRequestHandler):
                     judge_parallel,
                     judge_strategy,
                     judge_dimension_count,
+                    judge_llm_backend,
+                    judge_llm_model,
                 )
                 summary["remaining_cases"] = len(
                     state["judge_progress"]["pending_judge_case_ids"]

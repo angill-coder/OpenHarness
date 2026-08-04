@@ -33,7 +33,11 @@ IS_OFFLINE = False
 
 # ---------------- 提议(改写) ----------------
 
-def _call_rewrite_llm(prompt: str) -> str:
+def _call_rewrite_llm(
+    prompt: str,
+    llm_backend: str = "workbuddy",
+    llm_model: str | None = None,
+) -> str:
     """Skill 全文改写较慢，使用独立的长超时与有限重试。"""
     return llm_client.call_llm(
         prompt,
@@ -42,6 +46,8 @@ def _call_rewrite_llm(prompt: str) -> str:
             "600",
         ),
         retries=os.environ.get("LLM_REWRITE_RETRIES", "2"),
+        backend=llm_backend,
+        model=llm_model,
     )
 
 
@@ -106,21 +112,41 @@ def _render_guard_prompt(instructions_text: str, redline_checks: List[Dict[str, 
     return "\n".join(lines)
 
 
-def _redline_guard(instructions_text: str, rubric: Dict[str, Any]) -> Dict[str, Any]:
+def _redline_guard(
+    instructions_text: str,
+    rubric: Dict[str, Any],
+    llm_backend: str = "workbuddy",
+    llm_model: str | None = None,
+) -> Dict[str, Any]:
     """返回 {ok: bool, dropped: [check_id...], raw: {...}}。任一红线被删 => ok=False。"""
     redlines = optimizer_pipeline._redline_checks(rubric)
     if not redlines:
         return {"ok": True, "dropped": [], "raw": {}}
     raw = llm_client.extract_json(
-        _call_rewrite_llm(_render_guard_prompt(instructions_text, redlines))
+        _call_rewrite_llm(
+            _render_guard_prompt(instructions_text, redlines),
+            llm_backend=llm_backend,
+            llm_model=llm_model,
+        )
     ) or {}
     dropped = [c["id"] for c in redlines if raw.get(c["id"]) is False]
     return {"ok": not dropped, "dropped": dropped, "raw": raw}
 
 
-def propose(session, cur_skill, failures, context) -> Optional[Dict[str, Any]]:
+def propose(
+    session,
+    cur_skill,
+    failures,
+    context,
+    llm_backend: str = "workbuddy",
+    llm_model: str | None = None,
+) -> Optional[Dict[str, Any]]:
     """看迭代记忆,让 LLM 改写整段可编辑区。红线守卫不过则当场拒(返回 None)。"""
-    raw = _call_rewrite_llm(_render_prompt(context))
+    raw = _call_rewrite_llm(
+        _render_prompt(context),
+        llm_backend=llm_backend,
+        llm_model=llm_model,
+    )
     parsed = llm_client.extract_json(raw)
     if not parsed or not (parsed.get("instructions_text") or "").strip():
         raw_text = raw or ""
@@ -137,7 +163,12 @@ def propose(session, cur_skill, failures, context) -> Optional[Dict[str, Any]]:
         return None
 
     instructions_text = parsed["instructions_text"].strip()
-    guard = _redline_guard(instructions_text, session.rubric)
+    guard = _redline_guard(
+        instructions_text,
+        session.rubric,
+        llm_backend=llm_backend,
+        llm_model=llm_model,
+    )
     if not guard["ok"]:
         session.opt_history.append({
             "target": "instructions_freeform",

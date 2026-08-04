@@ -41,6 +41,38 @@ function fmt(x,d=2){return x==null?'-':Number(x).toFixed(d);}
 function bar(v,max=5){return `<div class="barwrap"><div class="bar" style="width:${(v/max*100)||0}%"></div></div>`;}
 function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
+function populateEvaluationModelSelect(id,defaultModel){
+  const el=document.getElementById(id);
+  if(!el||!GEN_CONFIG)return;
+  const models=Array.isArray(GEN_CONFIG.evaluation_models)
+    ?GEN_CONFIG.evaluation_models:[];
+  const desired=el.value||defaultModel||GEN_CONFIG.evaluation_model_default||'claude-opus-4.8';
+  const signature=models.join('\n');
+  if(el.dataset.models!==signature){
+    el.innerHTML=models.map(model=>`<option value="${esc(model)}">${esc(model)}</option>`).join('');
+    el.dataset.models=signature;
+  }
+  el.value=models.includes(desired)
+    ?desired:(GEN_CONFIG.evaluation_model_default||models[0]||'');
+}
+function syncLlmBackendControls(kind){
+  const backend=document.getElementById(kind+'LlmBackend');
+  const wrap=document.getElementById(kind+'WbModelWrap');
+  if(wrap)wrap.style.display=backend&&backend.value==='workbuddy'?'block':'none';
+}
+function readLlmSelection(kind){
+  const backend=(document.getElementById(kind+'LlmBackend')||{}).value||'workbuddy';
+  const result={llm_backend:backend};
+  if(backend==='workbuddy'){
+    const model=(document.getElementById(kind+'WbModel')||{}).value||'';
+    if(!model){toast((kind==='judge'?'Judge':'Optimizer')+' WB 模型不能为空');return null;}
+    result.llm_model=model;
+  }
+  return result;
+}
+document.getElementById('judgeLlmBackend').onchange=()=>syncLlmBackendControls('judge');
+document.getElementById('optimizerLlmBackend').onchange=()=>syncLlmBackendControls('optimizer');
+
 // ---- 1. 生成 V0 ----
 function syncV0StrategyVisibility(){
   const llmMode=(document.getElementById('optModeSel')||{}).value==='llm_rewrite';
@@ -158,11 +190,13 @@ document.getElementById('runJudgeBtn').onclick=async()=>{
     'Judge'
   );
   if(parallel==null)return;
+  const llm=readLlmSelection('judge');
+  if(!llm)return;
   JUDGE_RUNNING=true;renderJudgeStatus();
   toast(`正在以并发 ${parallel} Judge ${progress.reports_ready}/${progress.total_cases} 份报告…`,9000);
   try{
     const j=await api('/api/run_judge_batch','POST',{
-      id:SID,version:STATE.current_version,parallel
+      id:SID,version:STATE.current_version,parallel,...llm
     });
     STATE=j.state;JUDGE_SUMMARY=j.summary;JUDGE_RESULTS=j.results||[];render();
     const s=j.summary;
@@ -197,7 +231,9 @@ document.getElementById('advanceBtn').onclick=async()=>{
   btn.textContent=llmMode?'⏳ 改写中…':'⏳ 生成中…';
   if(msg)msg.innerHTML='<span class="mut">⏳ '+(llmMode?'正在调用 LLM 改写下一版，通常需数十秒，请稍候…':'正在生成下一版，请稍候…')+'</span>';
   try{
-    const j=await api('/api/advance','POST',{id:SID}); STATE=j; render();
+    const llm=readLlmSelection('optimizer');
+    if(!llm){btn.disabled=false;btn.textContent=oldText;return;}
+    const j=await api('/api/advance','POST',{id:SID,...llm}); STATE=j; render();
     const r=j.advance_result;
     if(r){ toast(r.message, 5000);
       document.getElementById('advanceMsg').innerHTML =
@@ -336,6 +372,23 @@ function renderGenerationPanel(){
   const judgeParallelInput=document.getElementById('judgeParallel');
   if(!cfg)return;
 
+  if(GEN_CONFIG){
+    const judgeBackend=document.getElementById('judgeLlmBackend');
+    const optimizerBackend=document.getElementById('optimizerLlmBackend');
+    if(judgeBackend&&!judgeBackend.dataset.initialized){
+      judgeBackend.value=GEN_CONFIG.judge_llm_backend||'workbuddy';
+      judgeBackend.dataset.initialized='1';
+    }
+    if(optimizerBackend&&!optimizerBackend.dataset.initialized){
+      optimizerBackend.value=GEN_CONFIG.optimizer_llm_backend||'workbuddy';
+      optimizerBackend.dataset.initialized='1';
+    }
+    populateEvaluationModelSelect('judgeWbModel',GEN_CONFIG.judge_wb_model);
+    populateEvaluationModelSelect('optimizerWbModel',GEN_CONFIG.optimizer_wb_model);
+    syncLlmBackendControls('judge');
+    syncLlmBackendControls('optimizer');
+  }
+
   if(modelInput&&GEN_CONFIG&&Array.isArray(GEN_CONFIG.models)){
     const desired=modelInput.value||GEN_CONFIG.model||'deepseek-v4-pro-ioa';
     const models=GEN_CONFIG.models.slice();
@@ -391,6 +444,12 @@ function renderGenerationPanel(){
     }
     judgeParallelInput.disabled=active||JUDGE_RUNNING;
   }
+  ['judge','optimizer'].forEach(kind=>{
+    const backend=document.getElementById(kind+'LlmBackend');
+    const model=document.getElementById(kind+'WbModel');
+    if(backend)backend.disabled=active||JUDGE_RUNNING;
+    if(model)model.disabled=active||JUDGE_RUNNING;
+  });
   const generationAction=STATE&&STATE.actions&&STATE.actions.run_generation;
   run.disabled=!STATE||!(generationAction?generationAction.enabled:STATE.n_cases)||active||!GEN_CONFIG||!GEN_CONFIG.ready;
   retry.style.display=GEN_JOB&&!active&&GEN_JOB.failed_case_ids&&GEN_JOB.failed_case_ids.length?'':'none';
@@ -452,6 +511,8 @@ function render(){
     stopInfo;
   const advanceAction=STATE.actions&&STATE.actions.advance;
   const llmMode=STATE.optimizer_mode==='llm_rewrite';
+  const optimizerControls=document.getElementById('optimizerLlmControls');
+  if(optimizerControls)optimizerControls.style.display=llmMode?'flex':'none';
   const advBtn=document.getElementById('advanceBtn');
   advBtn.textContent=llmMode?'✍️ LLM 改写下一版（自由改写 + 自动 gate）':'▶ 生成下一版 skill（optimizer + gate）';
   advBtn.disabled=!(advanceAction?advanceAction.enabled:STATE.can_advance)||generationActive()||JUDGE_RUNNING;
@@ -560,6 +621,7 @@ function renderJudgeStatus(){
   const complete=p.complete;
   el.innerHTML=`<div class="kv"><span>报告已就绪</span><span>${p.reports_ready}/${p.total_cases}</span></div>`+
     `<div class="kv"><span>模型 Judge</span><b class="${complete?'ok-txt':p.judged_cases?'warn-txt':'mut'}">${p.judged_cases}/${p.total_cases}</b></div>`+
+    (JUDGE_SUMMARY?`<div class="kv"><span>最近调用</span><span>${esc(JUDGE_SUMMARY.llm_backend==='workbuddy'?'WorkBuddy CLI':'API')} · ${esc(JUDGE_SUMMARY.model||'—')}</span></div>`:'')+
     (!allReports?`<div class="warn-txt" style="margin-top:5px">仍缺 ${p.total_cases-p.reports_ready} 份报告，请先重试 WB CLI 或手工补齐。</div>`:'')+
     (complete?'<div class="ok-txt" style="margin-top:5px">全部 case 已完成模型 Judge，可以生成下一版 Skill。</div>':'')+
     (action&&!action.enabled&&action.reason&&!complete?`<div class="small mut" style="margin-top:5px">${esc(action.reason)}</div>`:'')+

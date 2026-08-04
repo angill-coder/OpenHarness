@@ -140,6 +140,8 @@ def append_check_judgments(sid: str, version: str, judgments: Dict[str, Dict]):
                 "reasoning": judgment.get("reasoning", {}),
                 "report_sha256": judgment.get("report_sha256"),
                 "rubric_sha256": judgment.get("rubric_sha256"),
+                "llm_backend": judgment.get("llm_backend"),
+                "model": judgment.get("model"),
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
@@ -256,6 +258,8 @@ def _load_check_jsonl(sid: str, fname: str) -> Dict[str, Dict[str, Dict[str, Any
                 "reasoning": rec.get("reasoning", {}),
                 "report_sha256": rec.get("report_sha256"),
                 "rubric_sha256": rec.get("rubric_sha256"),
+                "llm_backend": rec.get("llm_backend"),
+                "model": rec.get("model"),
             }
     return out
 

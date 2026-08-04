@@ -11,13 +11,55 @@ import json
 import os
 import re
 import ssl
+import subprocess
+import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+HARNESS = HERE.parent / "harness"
+if str(HARNESS) not in sys.path:
+    sys.path.insert(0, str(HARNESS))
+
+from model_config import (  # noqa: E402
+    DEFAULT_EVALUATION_WB_MODEL,
+    SUPPORTED_WB_MODELS,
+)
+from workbuddy_batch.adapter import (  # noqa: E402
+    discover_command,
+    infer_product_config,
+)
+from workbuddy_batch.events import EventCollector, assistant_text  # noqa: E402
 
 
 class LLMClientError(RuntimeError):
     """LLM 配置、网络或响应格式错误。"""
+
+
+LLM_BACKEND_API = "api"
+LLM_BACKEND_WORKBUDDY = "workbuddy"
+LLM_BACKENDS = (LLM_BACKEND_API, LLM_BACKEND_WORKBUDDY)
+
+
+def normalize_backend(value=None) -> str:
+    backend = str(value or LLM_BACKEND_API).strip().lower()
+    aliases = {"wb": LLM_BACKEND_WORKBUDDY, "workbuddy_cli": LLM_BACKEND_WORKBUDDY}
+    backend = aliases.get(backend, backend)
+    if backend not in LLM_BACKENDS:
+        raise LLMClientError(
+            "LLM 调用方式仅支持 api 或 workbuddy"
+        )
+    return backend
+
+
+def normalize_workbuddy_model(value=None) -> str:
+    model = str(value or DEFAULT_EVALUATION_WB_MODEL).strip()
+    if model not in SUPPORTED_WB_MODELS:
+        raise LLMClientError("不支持的 WorkBuddy 模型: %s" % model)
+    return model
 
 
 def _timeout_seconds(value=None) -> float:
@@ -69,12 +111,12 @@ def _ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
-def call_llm(
+def _call_api(
     prompt: str,
     timeout_seconds=None,
     retries=None,
 ) -> str:
-    """调 LLM，并把配置、传输与响应错误统一转换为 LLMClientError。"""
+    """通过原有 Anthropic/OpenAI-compatible API 调用 LLM。"""
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise LLMClientError(
@@ -171,6 +213,143 @@ def call_llm(
         return content
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
         raise LLMClientError("上游 LLM 响应格式无效") from exc
+
+
+def _workbuddy_environment(command: tuple[str, ...]) -> dict[str, str]:
+    environment = dict(os.environ)
+    # WorkBuddy 的 Auto Memory 与相关性筛选是独立机制；显式关闭读取与写入。
+    environment["CODEBUDDY_DISABLE_AUTO_MEMORY"] = "1"
+    environment["CODEBUDDY_MEMORY_RELEVANCE_DISABLED"] = "1"
+    environment["CODEBUDDY_MEMORY_EXTRACTION_DISABLED"] = "1"
+    environment["CODEBUDDY_TEAM_MEMORY_ENABLED"] = "0"
+    workbuddy_home = os.environ.get("OPENHARNESS_WB_HOME")
+    if workbuddy_home:
+        environment["CODEBUDDY_CONFIG_DIR"] = str(
+            Path(workbuddy_home).expanduser()
+        )
+    product_config = os.environ.get("OPENHARNESS_WB_PRODUCT_CONFIG")
+    inferred = infer_product_config(command)
+    if product_config:
+        environment["ACC_PRODUCT_CONFIG_PATH"] = str(
+            Path(product_config).expanduser()
+        )
+    elif inferred:
+        environment["ACC_PRODUCT_CONFIG_PATH"] = str(inferred)
+    return environment
+
+
+def _parse_workbuddy_output(raw: str) -> str:
+    collector = EventCollector("openharness-llm")
+    for line in (raw or "").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            collector.consume(event, 0, 0)
+    content = assistant_text(collector.assistant_messages, 0)
+    if not content and isinstance(collector.result, dict):
+        result = collector.result.get("result")
+        if isinstance(result, str):
+            content = result.strip()
+    if not content:
+        raise LLMClientError("WorkBuddy CLI 未返回可用的 assistant 文本")
+    return content
+
+
+def _call_workbuddy(
+    prompt: str,
+    model=None,
+    timeout_seconds=None,
+    retries=None,
+) -> str:
+    selected_model = normalize_workbuddy_model(model)
+    try:
+        command = discover_command(
+            os.environ.get("OPENHARNESS_WB_CLI_PATH") or None
+        )
+    except FileNotFoundError as exc:
+        raise LLMClientError(str(exc)) from exc
+    args = [
+        *command,
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--model",
+        selected_model,
+        "--permission-mode",
+        "bypassPermissions",
+        "--tools",
+        "",
+        "--setting-sources",
+        "",
+        "--no-session-persistence",
+        prompt,
+    ]
+    timeout = _timeout_seconds(timeout_seconds)
+    retry_limit = _retry_count(retries)
+    for attempt in range(retry_limit + 1):
+        try:
+            completed = subprocess.run(
+                args,
+                cwd=tempfile.gettempdir(),
+                env=_workbuddy_environment(command),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            if attempt < retry_limit:
+                time.sleep(min(2 ** attempt, 4))
+                continue
+            raise LLMClientError(
+                "WorkBuddy CLI 调用超时%s"
+                % ("（已重试 %d 次）" % attempt if attempt else "")
+            ) from exc
+        except OSError as exc:
+            raise LLMClientError("无法启动 WorkBuddy CLI: %s" % exc) from exc
+        if completed.returncode == 0:
+            return _parse_workbuddy_output(completed.stdout)
+        if attempt < retry_limit:
+            time.sleep(min(2 ** attempt, 4))
+            continue
+        detail = (completed.stderr or completed.stdout or "").strip()[-800:]
+        raise LLMClientError(
+            "WorkBuddy CLI 返回退出码 %d%s%s"
+            % (
+                completed.returncode,
+                "（已重试 %d 次）" % attempt if attempt else "",
+                ": " + detail if detail else "",
+            )
+        )
+    raise LLMClientError("WorkBuddy CLI 调用失败")
+
+
+def call_llm(
+    prompt: str,
+    timeout_seconds=None,
+    retries=None,
+    backend=None,
+    model=None,
+) -> str:
+    """通过 API 或 WorkBuddy CLI 调用 LLM，并统一错误类型。"""
+    selected_backend = normalize_backend(backend)
+    if selected_backend == LLM_BACKEND_WORKBUDDY:
+        return _call_workbuddy(
+            prompt,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
+        )
+    return _call_api(
+        prompt,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
+    )
 
 
 def _balanced_json_span(text: str):

@@ -78,7 +78,8 @@ class BatchConfig:
     allowed_tools: tuple[str, ...] = ()
     disallowed_tools: tuple[str, ...] = ()
     max_turns: int | None = None
-    setting_sources: str | None = "user,project,local"
+    # 默认不载入用户、项目或本地设置，避免其中的 Memory 进入执行上下文。
+    setting_sources: str | None = ""
     include_partial_messages: bool = True
     verbose: bool = True
     capture_native_session: bool = True

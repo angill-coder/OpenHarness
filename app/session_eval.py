@@ -248,7 +248,12 @@ class SessionEval:
         return r
 
     # ---------- 推进到下一版 ----------
-    def advance(self, account=None):
+    def advance(
+        self,
+        account=None,
+        llm_backend="workbuddy",
+        llm_model=None,
+    ):
         """按 optimizer_mode 派发。switch_search 走原路径(逐字不变);
         llm_rewrite 走 LLM 改写 + 异步 gate。"""
         if not self.cases:
@@ -257,10 +262,19 @@ class SessionEval:
             # 重启兜底:上一轮 pending 候选若已判分完但未结算,先结算
             if getattr(self, "pending_idx", None) is not None:
                 self.settle_pending_candidate(account)
-            return self._advance_llm_rewrite(account)
+            return self._advance_llm_rewrite(
+                account,
+                llm_backend=llm_backend,
+                llm_model=llm_model,
+            )
         return self._advance_switch_search(account)
 
-    def _advance_llm_rewrite(self, account=None):
+    def _advance_llm_rewrite(
+        self,
+        account=None,
+        llm_backend="workbuddy",
+        llm_model=None,
+    ):
         """LLM 自由改写整段 instructions -> 候选态(不动 current_idx)-> 待真实判分后 settle。"""
         cur = self._current()
         if cur["failures"] is None:
@@ -290,7 +304,14 @@ class SessionEval:
         failures = (cur.get("failure_report") or cur.get("failures")) or []
         strategy = optimizer_registry.get_strategy("llm_rewrite")
         context = optimizer_pipeline.build_optimizer_context(self, account)
-        proposal = strategy.propose(self, skill, failures, context)
+        proposal = strategy.propose(
+            self,
+            skill,
+            failures,
+            context,
+            llm_backend=llm_backend,
+            llm_model=llm_model,
+        )
         if proposal is None:
             # propose 内部(红线守卫/无产出)已把拒绝原因写进 opt_history
             note = (self.opt_history[-1].get("reason")
@@ -322,6 +343,8 @@ class SessionEval:
             "change_summary": proposal.get("change_summary", ""),
             "targets": proposal.get("targets_failures", []),
             "result": "pending_real_evaluation",
+            "llm_backend": llm_backend,
+            "model": llm_model,
         })
         persist.append_event(self.id, "version_proposed", {
             "version": cand_ver,
@@ -331,6 +354,8 @@ class SessionEval:
                          ("change_summary", "targets_failures", "preserved",
                           "hypothesis", "self_check_no_hack")},
             "validation": "pending_real_evaluation",
+            "llm_backend": llm_backend,
+            "model": llm_model,
         })
         self._save()
         v = self.view(account)
