@@ -21,7 +21,12 @@ from external_run_models import (
     ReportOutputContract,
 )
 from run_external import _parser
-from workbuddy_batch.adapter import build_environment, build_round_command
+from workbuddy_batch.adapter import (
+    build_environment,
+    build_round_command,
+    discover_command,
+    infer_product_config,
+)
 from workbuddy_batch.models import BatchConfig, CaseSpec, InputFile
 from workbuddy_runner import (
     ExternalRunConfigurationError,
@@ -43,6 +48,35 @@ class ExternalRunnerTest(unittest.TestCase):
             run_id,
             _case_attempt_run_id(case_id, 3),
         )
+
+    def test_windows_desktop_cli_is_discovered_and_prepared(self) -> None:
+        root = self.root / "WorkBuddy"
+        executable = root / "WorkBuddy.exe"
+        cli = (
+            root
+            / "resources"
+            / "app.asar.unpacked"
+            / "cli"
+            / "bin"
+            / "codebuddy"
+        )
+        cli.parent.mkdir(parents=True)
+        executable.write_text("fake", encoding="utf-8")
+        cli.write_text("fake", encoding="utf-8")
+        product = cli.parent.parent / "product.json"
+        product.write_text("{}", encoding="utf-8")
+
+        with (
+            patch("workbuddy_batch.adapter.os.name", "nt"),
+            patch("workbuddy_batch.adapter.Path.home", return_value=self.root),
+            patch("workbuddy_batch.adapter.shutil.which", return_value=None),
+        ):
+            command = discover_command()
+
+        self.assertEqual(command, (str(executable), str(cli)))
+        config = BatchConfig(command=command, output_root=self.root / "runs")
+        self.assertEqual(build_environment(config)["ELECTRON_RUN_AS_NODE"], "1")
+        self.assertEqual(infer_product_config(command), product)
 
     def test_default_parallelism_is_twenty(self) -> None:
         request = ExternalRunRequest(
