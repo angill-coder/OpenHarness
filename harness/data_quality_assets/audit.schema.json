@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project",
+    "case_id",
+    "gt_core",
+    "evidence_classifications",
+    "omissions",
+    "conflicts",
+    "metadata_gaps",
+    "noise_clusters",
+    "scope_risks",
+    "assessment",
+    "recommendations"
+  ],
+  "properties": {
+    "project": {"type": "string"},
+    "case_id": {"type": "string"},
+    "gt_core": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text", "quote", "location", "importance"],
+        "properties": {
+          "id": {"type": "string"},
+          "text": {"type": "string"},
+          "quote": {"type": "string"},
+          "location": {"type": "string"},
+          "importance": {"enum": ["critical", "material"]}
+        }
+      }
+    },
+    "evidence_classifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence_id", "classification", "gt_ids", "reason"],
+        "properties": {
+          "evidence_id": {"type": "string"},
+          "classification": {"enum": ["used", "noise", "conflict"]},
+          "gt_ids": {"type": "array", "items": {"type": "string"}},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gt_id",
+          "gt_text",
+          "gt_quote",
+          "gt_location",
+          "severity",
+          "search_note",
+          "reason"
+        ],
+        "properties": {
+          "gt_id": {"type": "string"},
+          "gt_text": {"type": "string"},
+          "gt_quote": {"type": "string"},
+          "gt_location": {"type": "string"},
+          "severity": {"enum": ["critical", "material"]},
+          "search_note": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_id",
+          "gt_id",
+          "source_text",
+          "source_ref",
+          "gt_text",
+          "gt_quote",
+          "gt_location",
+          "conflict_type",
+          "severity",
+          "reason"
+        ],
+        "properties": {
+          "evidence_id": {"type": "string"},
+          "gt_id": {"type": "string"},
+          "source_text": {"type": "string"},
+          "source_ref": {"type": "string"},
+          "gt_text": {"type": "string"},
+          "gt_quote": {"type": "string"},
+          "gt_location": {"type": "string"},
+          "conflict_type": {
+            "enum": ["numeric", "direction", "conclusion", "factual"]
+          },
+          "severity": {"enum": ["critical", "material"]},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "metadata_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "gt_ids",
+          "gap_type",
+          "importance",
+          "source_fact",
+          "source_ref",
+          "reason"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^MG-[0-9]{3,}$"},
+          "gt_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          },
+          "gap_type": {"enum": ["missing", "underrepresented"]},
+          "importance": {"enum": ["critical", "material"]},
+          "source_fact": {"type": "string", "minLength": 1},
+          "source_ref": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "noise_clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["theme", "evidence_ids", "representative_text", "reason"],
+        "properties": {
+          "theme": {"type": "string"},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}},
+          "representative_text": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "scope_risks": {"type": "array", "items": {"type": "string"}},
+    "assessment": {"type": "string"},
+    "recommendations": {"type": "array", "items": {"type": "string"}}
+  }
+}
