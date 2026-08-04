@@ -48,12 +48,16 @@ class SessionLabel:
         return self.view(account)
 
     # ---------- 导入平台 LLM-judge 的六维评分(RecordedJudge) ----------
-    def import_judgment(self, case_id: str, scores: Dict[str, int],
+    def import_judgment(self, case_id: str, scores: Dict[str, float],
                         reasoning: Dict[str, str] = None, version: str = None, account=None):
         """存一条平台 LLM-as-judge 对真实报告的六维评分, 关联到 (version, case_id)。
         它会覆盖该 case 的 mock 分, 参与分数曲线和红线判定。默认当前版本。"""
         version = version or self._current()["version"]
-        clean = {d: int(s) for d, s in (scores or {}).items() if d in self.dims and s is not None}
+        clean = {
+            d: round(float(s), 3)
+            for d, s in (scores or {}).items()
+            if d in self.dims and s is not None
+        }
         if not case_id or not clean:
             return {"error": "缺少 case_id 或有效的六维分(需属于: %s)" % ", ".join(self.dims)}
         reasoning = {d: str(t) for d, t in (reasoning or {}).items() if d in self.dims}

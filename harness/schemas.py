@@ -75,7 +75,7 @@ class EvalRecord:
     input: Dict[str, Any]
     trace: Dict[str, Any]                  # 完整执行过程,聚类和归因靠它
     output: Dict[str, Any]
-    scores: Dict[str, int] = field(default_factory=dict)
+    scores: Dict[str, float] = field(default_factory=dict)
     judge_reasoning: Dict[str, str] = field(default_factory=dict)
     judge_checks: Dict[str, float] = field(default_factory=dict)
     flagged: List[str] = field(default_factory=list)

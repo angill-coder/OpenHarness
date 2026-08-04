@@ -15,7 +15,7 @@ from typing import Any, Dict, Tuple
 
 
 def score_report(report: Dict[str, Any], case: Dict[str, Any], rubric: Dict[str, Any]
-                 ) -> Tuple[Dict[str, int], Dict[str, str], list, bool]:
+                 ) -> Tuple[Dict[str, float], Dict[str, str], list, bool]:
     if rubric.get("product") == "research_insight":
         return score_report_research(report, case, rubric)
     return score_report_bizreport(report, case, rubric)
@@ -215,15 +215,15 @@ def _hard_floor(rubric, dim_name):
     return None
 
 
-def overall(scores: Dict[str, int], rubric: Dict[str, Any]) -> float:
+def overall(scores: Dict[str, float], rubric: Dict[str, Any]) -> float:
     w = {d["name"]: d["weight"] for d in rubric["dimensions"]}
     return round(sum(scores[k] * w[k] for k in scores if k in w), 3)
 
 
-def dim_from_checks(check_scores: Dict[str, float], rubric: Dict[str, Any]) -> Dict[str, int]:
+def dim_from_checks(check_scores: Dict[str, float], rubric: Dict[str, Any]) -> Dict[str, float]:
     """把逐 check 的 满足/部分/不满足(1/0.5/0) 汇总成六维 1-5 分(供真实标注/judge 复用)。
 
-      dim = round(1 + 4·mean(该维已打分的 checks));全满足=5、全不满足=1。
+      dim = 1 + 4·mean(该维已打分的 checks)，保留三位小数；全满足=5、全不满足=1。
       红线:该维任一带 redline 的 check 判 0 -> 该维封顶 2(承接可回溯性/表达红线)。
     只对"有 checks 且至少打了一条"的维度给分;未打分的维度不出现在结果里。
     """
@@ -240,8 +240,10 @@ def dim_from_checks(check_scores: Dict[str, float], rubric: Dict[str, Any]) -> D
         if not vals:
             continue
         score = 1 + 4 * (sum(vals) / len(vals))
-        score = int(round(score))
         if redline_hit:
-            score = min(score, 2)
-        out[d["name"]] = max(1, min(5, score))
+            score = min(score, 2.0)
+        out[d["name"]] = round(
+            max(1.0, min(5.0, score)),
+            3,
+        )
     return out

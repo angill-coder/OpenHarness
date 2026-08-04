@@ -155,7 +155,11 @@ class SessionEval:
                 r.judge_reasoning = (jchecks.get(r.case_id) or {}).get("reasoning", {})
                 r.score_source = "recorded"
             elif jv is not None:
-                r.scores = {d: int(s) for d, s in jv["scores"].items() if d in self.dims}
+                r.scores = {
+                    d: round(float(s), 3)
+                    for d, s in jv["scores"].items()
+                    if d in self.dims
+                }
                 r.judge_reasoning = dict(jv.get("reasoning", {}))
                 r.flagged = list(jv.get("flagged", []))
                 r.score_source = "recorded"
