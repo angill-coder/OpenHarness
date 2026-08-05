@@ -1,76 +1,46 @@
 # Realtime Dashboard data contract
 
-The Dashboard resolves runtime artifacts relative to the OpenHarness repository root. It never stores or depends on an installation-specific absolute path.
+The Dashboard resolves runtime artifacts relative to the OpenHarness repository root. Browser responses use `runtime:` references and never depend on an installation-specific absolute path.
 
-## Authoritative generation artifacts
+## Authoritative runtime map
 
-Skill content is loaded only from the immutable artifact produced by `compile_session_skill`:
-
-```text
-generation_runs/_session_skills/<session_id>/<skill_version>/<artifact_hash>/<skill_name>/
-├── SKILL.md
-└── references/
-    └── instructions.md
-```
-
-A Skill artifact must match both `session_id` and `skill_version`. When a generation job record exists, its `skill_ref` selects the exact immutable directory; the path is relocated by its `generation_runs/` suffix after the repository is moved. Ambiguous or missing artifacts return 404 and the UI displays a missing state. `state.json` content is never used as a substitute.
-
-Case trace content is loaded only from the generation identified by the matching `outputs.jsonl` row:
-
-```text
-generation_runs/<generation_id>/
-├── generation_result.json
-└── <wb_run_id>/cases/<case_id>/
-    ├── conversation.md
-    └── trace/
-        ├── 1_operations.json
-        └── rounds/<round>/result.json
-```
-
-The lookup requires an exact `generation_id`, `case_id`, session and Skill version association. Missing or conflicting artifacts return 404. Cached `generation_trace` fields in `outputs.jsonl`, Case questions, report text and Judge data are not used to synthesize a generation trace.
-
-## Authoritative evaluation results
-
-Dashboard scores, red-line counts, dimension results, rubric reasoning and Judge detail data are loaded only from `app/sessions/<session_id>/check_judgments.jsonl` (or the configured `OPENHARNESS_SESSIONS_DIR`). `judgments.jsonl` is not used as a fallback because it is not the completed Check evaluation contract.
-## Repository hygiene
-
-`generation_runs/`, `app/sessions/`, datasets and raw source packages are local runtime data and are excluded from the Dashboard PR. The repository should contain only the Dashboard code, adapters, schema documentation and synthetic tests.
-## Loading and cache behavior
-
-The initial page requests one compact Session Summary per experiment. It contains experiment metadata, compact version and Case descriptors, rubric definitions, Check scores, and invalidation markers. It deliberately excludes Skill text, report bodies, Judge reasoning, generation traces, full Metadata documents, and raw-package file listings.
-
-Details are loaded independently on first use:
-
-- SKILL.md and references/instructions.md when a Skill panel opens.
-- Report output and the matching Check reasoning when a Case report opens.
-- Generation trace only when the generation-trace panel opens.
-- Complete Metadata and raw-package listings only when the data panel opens.
-
-Session summaries are cached by file fingerprint. Polling reuses unchanged Sessions, pauses while the page is hidden, and never overlaps an existing refresh. Detail request caches include the Session revision so a changed experiment cannot reuse stale report or Metadata data.
-
-outputs.jsonl uses an append-aware byte-offset index. The index seeks directly to the latest matching version and case_id row, safely rebuilds after truncation or replacement, and ignores an incomplete final line. All caches are derived in memory and are never committed.
-## Portable runtime source map
-
-Dashboard URLs never contain an installation directory. The server resolves three logical roots from the same runtime settings used by the evaluation platform:
-
-- runtime:sessions: OPENHARNESS_SESSIONS_DIR, defaulting to repository-root/app/sessions.
-- runtime:generation_runs: OPENHARNESS_WB_OUTPUT, defaulting to repository-root/generation_runs.
-- runtime:data/v1, v2, v3: OPENHARNESS_WB_DATASET_V1, V2, V3, defaulting to repository-root/data/research-report/<version>/data.json.
-
-Each Session Summary exposes runtime_sources with the following contract:
-
-| Dashboard data | Authoritative platform output |
+| Dashboard module | Authoritative OpenHarness input |
 | --- | --- |
-| Experiment group | runtime:sessions/<session_id>/state.json and meta.json |
-| User, Data type, optimizer, Judge | runtime:sessions/<session_id>/state.json and meta.json |
-| Skill versions | runtime:sessions/<session_id>/state.json |
-| Cases for each Skill version | version and case identifiers from state.json, joined to Check and output rows |
-| Evaluation and Judge Trace | runtime:sessions/<session_id>/check_judgments.jsonl only |
-| Case SKILL.md and instruction.md | runtime:generation_runs/_session_skills/<session_id>/<version>/<artifact_hash>/<skill_name>/ |
-| Case report | runtime:sessions/<session_id>/outputs.jsonl, matched by version and case_id |
-| Case generation Trace | runtime:generation_runs/<generation_id>/<wb_run_id>/cases/<case_id>/trace/ |
-| Raw package and Structured Data | the experiment-selected runtime:data/<data_version>/data.json and that Case's relative input_files sources |
+| Experiment group and dimensions | `app/sessions/<session_id>/state.json` and `meta.json` |
+| Skill versions | `generation_runs/_session_skills/<session_id>/<skill_version>/` |
+| Cases for a Skill version | `generation_runs/<generation_id>/<wb_run_id>/cases/<case_id>/` |
+| Evaluation and Judge Trace | `app/sessions/<session_id>/check_judgments.jsonl` only |
+| SKILL.md and instruction.md | `_session_skills/<session_id>/<version>/<artifact_hash>/<skill_name>/SKILL.md` and `references/instructions.md` |
+| Case report | `<case_id>/artifacts/report.md` |
+| Report-generation conversation | `<case_id>/conversation.md` |
+| Three-level execution detail | `<case_id>/trace/rounds/<round>/request.json`, `result.json`, `trace/1_operations.json`, and `trace/2_events.jsonl` |
+| Token use and step duration | `<case_id>/results.json`; current runner-compatible runs may expose the same authoritative `results.json` at `<wb_run_id>/results.json` |
+| Raw source package | `data/<data_version>/<training-data-directory>/<case_id>/source/` |
+| Complete Case Metadata / Structured Data | `data/<data_version>/<training-data-directory>/<case_id>/structured_data.json` |
 
-Judge Trace has its own data endpoint and is never substituted for, or rendered inside, the report generation Trace. Data lookup never falls back from one Data version to another. Missing exact artifacts produce a local missing state rather than borrowing a similar file.
+The training-data directory name is discovered from the selected version's `data.json` `input_files` mapping. This supports the existing v1/v2/v3 package directory names without hard-coding a machine-specific absolute path.
 
-Absolute paths may exist inside a running process or a local generation-job record because the runner must open local files. They are not returned as Dashboard data references or stored in the browser snapshot. Stored generation skill references are relocated through their _session_skills suffix when an installation moves.
+## Exact-link rules
+
+A generation job links `session_id`, `skill_version`, and `generation_id`. `generation_result.json` then links that generation to its WorkBuddy run and Case directories. The Dashboard rejects session, version, generation, or Case mismatches.
+
+No similar document is used as a fallback:
+
+- `state.json` text never substitutes for SKILL.md or instructions.
+- `outputs.jsonl` never substitutes for `artifacts/report.md`.
+- Trace JSON enriches the second- and third-level execution view but never substitutes for the User/Agent conversation, and Judge Trace is never mixed into report generation.
+- `evidence_metadata.json` or a `.case.json` manifest never substitutes for `structured_data.json`.
+- Data lookup never falls back from one Data version to another.
+
+Missing exact artifacts return a missing state in the UI.
+
+## Loading behavior
+
+The initial Session Summary contains compact experiment descriptors, the generation-authoritative version-to-Case index, rubric definitions, and compact Check results. Large documents load only when requested:
+
+- Skill content when a Skill panel opens.
+- `report.md` and Check reasoning when a Case report opens.
+- `conversation.md` and `results.json` when the generation-chain panel opens.
+- `structured_data.json` and source file listings when the data panel opens.
+
+Runtime data (`generation_runs/`, `app/sessions/`, Data v1/v2/v3, and source packages) remains local and must not be included in the Dashboard PR.

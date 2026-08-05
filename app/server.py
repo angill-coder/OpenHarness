@@ -528,7 +528,7 @@ class Handler(BaseHTTPRequestHandler):
             session_id = (q.get("session") or [""])[0]
             try:
                 document = dashboard_api.session_summary_document(
-                    self._dashboard_sessions_root(), session_id
+                    self._dashboard_sessions_root(), session_id, Path(ROOT)
                 )
                 return self._send(200, document)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -628,14 +628,10 @@ class Handler(BaseHTTPRequestHandler):
             session_id = (q.get("session") or [""])[0]
             version = (q.get("version") or [""])[0]
             case_id = (q.get("case_id") or [""])[0]
-            sessions_root = self._dashboard_sessions_root()
             try:
-                session_root = (sessions_root / session_id).resolve()
-                session_root.relative_to(sessions_root)
-                if not session_id or not version or not case_id:
-                    raise ValueError("session, version and case_id are required")
-                matched = dashboard_api.case_output_document(
-                    session_root / "outputs.jsonl", version, case_id
+                matched = dashboard_api.generation_case_report_document(
+                    Path(ROOT), self._dashboard_sessions_root(),
+                    session_id, version, case_id,
                 )
                 return self._send(200, matched)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -660,6 +656,23 @@ class Handler(BaseHTTPRequestHandler):
                 OSError,
             ) as exc:
                 return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/case-quality":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            case_id = (q.get("case_id") or [""])[0]
+            try:
+                payload = dashboard_api.case_quality_document(
+                    Path(ROOT), self._dashboard_sessions_root(),
+                    self._dashboard_dataset_path(session_id), session_id, case_id
+                )
+                return self._send(200, payload)
+            except (FileNotFoundError, ValueError, OSError) as exc:
+                return self._send(404, {
+                    "available": False,
+                    "error": str(exc),
+                    "requested_case_id": case_id,
+                })
+
         if u.path == "/api/local/raw-package":
             q = parse_qs(u.query)
             session_id = (q.get("session") or [""])[0]

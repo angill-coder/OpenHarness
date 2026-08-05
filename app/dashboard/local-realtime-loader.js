@@ -14,6 +14,7 @@
   let refreshPromise = null;
   const rawPackagePromises = new Map();
   const metadataDocumentPromises = new Map();
+  const qualityDocumentPromises = new Map();
   const structuredDocumentPromises = new Map();
   const skillSourcePromises = new Map();
   const outputPromises = new Map();
@@ -22,6 +23,11 @@
 
   function unique(values) {
     return [...new Set(values)];
+  }
+  function displayTerminology(value) {
+    return String(value ?? '')
+      .replace(/(^|[^A-Za-z0-9_])metadata(?=$|[^A-Za-z0-9_])/ig, '$1Structured Data')
+      .replace(/ground[ _-]*truth/ig, 'Human Report');
   }
   function parseJsonLines(text) {
     const lines = String(text || '').split(/\r?\n/).filter(line => line.trim());
@@ -126,12 +132,23 @@
     return apiBase + '/case-metadata?session=' + encodeURIComponent(sessionId) + '&case_id=' + encodeURIComponent(caseId);
   }
 
+  function qualityDocumentUrl(sessionId, caseId) {
+    return apiBase + '/case-quality?session=' + encodeURIComponent(sessionId) + '&case_id=' + encodeURIComponent(caseId);
+  }
+
+  function retryable(cache, key, promise) {
+    return promise.catch(error => {
+      cache.delete(key);
+      throw error;
+    });
+  }
+
   function loadRawPackage(sessionId, caseId, revision) {
     const key = sessionId + '|' + caseId + '|' + (revision || '');
     if (!rawPackagePromises.has(key)) {
-      rawPackagePromises.set(key, fetchJson(rawPackageUrl(sessionId, caseId))
-        .then(payload => payload.files || [])
-        .catch(() => []));
+      const request = fetchJson(rawPackageUrl(sessionId, caseId))
+        .then(payload => payload.files || []);
+      rawPackagePromises.set(key, retryable(rawPackagePromises, key, request));
     }
     return rawPackagePromises.get(key);
   }
@@ -139,22 +156,41 @@
   function loadMetadataDocument(sessionId, caseId, revision) {
     const key = sessionId + '|' + caseId + '|' + (revision || '');
     if (!metadataDocumentPromises.has(key)) {
-      metadataDocumentPromises.set(key, fetchJson(metadataDocumentUrl(sessionId, caseId))
-        .catch(() => null));
+      const request = fetchJson(metadataDocumentUrl(sessionId, caseId));
+      metadataDocumentPromises.set(key, retryable(metadataDocumentPromises, key, request));
     }
     return metadataDocumentPromises.get(key);
+  }
+
+  function loadQualityDocument(sessionId, caseId, revision) {
+    const key = sessionId + '|' + caseId + '|' + (revision || '');
+    if (!qualityDocumentPromises.has(key)) {
+      const request = fetchJson(qualityDocumentUrl(sessionId, caseId))
+        .catch(error => ({ available: false, error: error.message, scores: {}, details: [] }));
+      qualityDocumentPromises.set(key, request);
+    }
+    return qualityDocumentPromises.get(key);
   }
 
   function loadStructuredDocument(sessionId, caseId, revision) {
     const key = sessionId + '|' + caseId + '|' + (revision || '');
     if (!structuredDocumentPromises.has(key)) {
+      const request = fetchJson(structuredDocumentUrl(sessionId, caseId));
       structuredDocumentPromises.set(
-        key,
-        fetchJson(structuredDocumentUrl(sessionId, caseId)).catch(() => null)
-      );
+        key, retryable(structuredDocumentPromises, key, request));
     }
     return structuredDocumentPromises.get(key);
   }
+  function loadOutputDocument(sessionId, version, caseId, revision) {
+    const key = sessionId + '|' + version + '|' + caseId + '|' + (revision || '');
+    if (!outputPromises.has(key)) {
+      const query = new URLSearchParams({ session: sessionId, version, case_id: caseId });
+      const request = fetchJson(apiBase + '/case-output?' + query.toString());
+      outputPromises.set(key, retryable(outputPromises, key, request));
+    }
+    return outputPromises.get(key);
+  }
+
   async function loadBundle(sessionId, files, revision) {
     const summary = await fetchJson(
       apiBase + '/session-summary?session=' + encodeURIComponent(sessionId)
@@ -165,11 +201,13 @@
       meta: summary.meta || {},
       state: summary.state || {},
       runtimeSources: summary.runtime_sources || {},
+      runtimeModels: summary.runtime_models || {},
       generationSkillSources: {},
       rawPackages: {},
       metadataDocuments: {},
+      structuredDocuments: {},
+      qualityDocuments: {},
       outputs: [],
-      hasOutputsFile: files.has('outputs.jsonl'),
       judgments: summary.judgments || [],
       judgmentFile: summary.judgment_file || null,
       revision,
@@ -251,7 +289,7 @@
       treePaths.find(path => path.endsWith(`/${tail}`)) || null;
   }
 
-  function caseDataFor(item, treePaths, revision, rawFiles, metadataDocument, structuredDocument) {
+  function caseDataFor(item, treePaths, revision, rawFiles, metadataDocument, structuredDocument, qualityDocument) {
     const input = item.input || {};
     const shallowMetadata = Object.prototype.hasOwnProperty.call(item, 'metadata') ? item.metadata : {};
     const rawMetadata = metadataDocument && Object.prototype.hasOwnProperty.call(metadataDocument, 'metadata')
@@ -284,6 +322,7 @@
       metadataSource: metadataDocument?.source || 'state.json · case.metadata',
       metadataDocumentType: metadataDocument?.document_type || 'state_case_metadata',
       metadataEvidenceCount: metadataDocument?.evidence_count ?? null,
+      quality: qualityDocument || { available: false, scores: {}, details: [] },
       structuredData: structuredDocument?.case || null,
       structuredSource: structuredDocument?.source || null,
       rawCase: item,
@@ -292,18 +331,19 @@
   }
 
   function snapshotFrom(bundles, tree, revision, skippedCount) {
-    const canonical = bundles.slice().sort((a, b) => bundleTimestamp(b) - bundleTimestamp(a))[0];
+    const orderedBundles = bundles.slice().sort((a, b) => bundleTimestamp(b) - bundleTimestamp(a));
+    const canonical = orderedBundles[0];
     if (!canonical) throw new Error('没有找到具有完整 state、outputs 和 judgments 的实验会话。');
-    const dimensionDefinitions = bundles.flatMap(bundle => dimensionsFor(bundle.state));
+    const dimensionDefinitions = orderedBundles.flatMap(bundle => dimensionsFor(bundle.state));
     const dimensions = [...new Map(dimensionDefinitions.map(item => [item.id, item])).values()];
     if (!dimensions.length) throw new Error('实验未提供 rubric.dimensions。');
     const treePaths = tree.filter(item => item.type === 'blob').map(item => item.path);
-    const caseItems = [...new Map(bundles.flatMap(bundle => bundle.state.cases || [])
+    const caseItems = [...new Map(orderedBundles.flatMap(bundle => bundle.state.cases || [])
       .map(item => [item.case_id, item])).values()];
     const cases = caseItems.map(item => [item.case_id, item.topic || item.metadata?.display_name || item.case_id]);
     const caseData = caseItems.map(item => {
-      const owner = bundles.find(bundle => bundle.rawPackages?.[item.case_id]?.length || bundle.metadataDocuments?.[item.case_id] || bundle.structuredDocuments?.[item.case_id]);
-      return caseDataFor(item, treePaths, revision, owner?.rawPackages?.[item.case_id] || [], owner?.metadataDocuments?.[item.case_id], owner?.structuredDocuments?.[item.case_id]);
+      const owner = orderedBundles.find(bundle => bundle.rawPackages?.[item.case_id]?.length || bundle.metadataDocuments?.[item.case_id] || bundle.structuredDocuments?.[item.case_id] || bundle.qualityDocuments?.[item.case_id]);
+      return caseDataFor(item, treePaths, revision, owner?.rawPackages?.[item.case_id] || [], owner?.metadataDocuments?.[item.case_id], owner?.structuredDocuments?.[item.case_id], owner?.qualityDocuments?.[item.case_id]);
     });
     const rubrics = [...new Map(dimensionDefinitions.flatMap(dimension => dimension.checks.map(check => [
       check.id, dimension.label, check.label, check.desc, check.redline ? '红线' : '评分',
@@ -313,19 +353,23 @@
     const skills = {};
     const experiments = [];
     const experimentCaseIds = {};
+    const experimentVersionCaseIds = {};
     const experimentRubricIds = {};
     const caseDataByExperiment = {};
     let judgmentCount = 0;
 
-    bundles.sort((a, b) => bundleTimestamp(b) - bundleTimestamp(a)).forEach(bundle => {
+    orderedBundles.forEach(bundle => {
       const localDimensions = dimensionsFor(bundle.state);
       if (!localDimensions.length) return;
       const localCases = bundle.state.cases || [];
       const localCaseIds = localCases.map(item => item.case_id);
       experimentCaseIds[bundle.sessionId] = localCaseIds;
+      Object.entries(bundle.state.generation_version_cases || {}).forEach(([version, ids]) => {
+        experimentVersionCaseIds[`${bundle.sessionId}|${version}`] = Array.isArray(ids) ? ids : [];
+      });
       experimentRubricIds[bundle.sessionId] = localDimensions.flatMap(item => item.checks.map(check => check.id));
       localCases.forEach(item => {
-        caseDataByExperiment[`${bundle.sessionId}|${item.case_id}`] = caseDataFor(item, treePaths, revision, bundle.rawPackages?.[item.case_id] || [], bundle.metadataDocuments?.[item.case_id], bundle.structuredDocuments?.[item.case_id]);
+        caseDataByExperiment[`${bundle.sessionId}|${item.case_id}`] = caseDataFor(item, treePaths, revision, bundle.rawPackages?.[item.case_id] || [], bundle.metadataDocuments?.[item.case_id], bundle.structuredDocuments?.[item.case_id], bundle.qualityDocuments?.[item.case_id]);
       });
       const localDimensionIndex = new Map(localDimensions.map((item, index) => [item.id, index]));
       const outputMap = new Map(bundle.outputs.map(row => [`${row.version}|${row.case_id}`, row]));
@@ -342,6 +386,19 @@
       const explicitOptimizer = bundle.state.experiment_optimizer || bundle.meta.experiment_optimizer || {};
       const explicitOwner = bundle.state.experiment_owner || bundle.meta.experiment_owner || {};
       const explicitJudge = bundle.state.experiment_judge || bundle.meta.experiment_judge || {};
+      const optimizerModel = bundle.runtimeModels.optimizer?.model || null;
+      const judgeModel = bundle.runtimeModels.judge?.model || null;
+      const versionModels = Object.fromEntries(versions.map(skill => {
+        const runtime = bundle.runtimeModels.versions?.[skill.version] || {};
+        return [skill.version, {
+          optimizerModel: runtime.optimizer?.status === 'not_called'
+            ? '\u672a\u8c03\u7528 Optimizer'
+            : displayTerminology(runtime.optimizer?.model || runtime.optimizer?.llm_backend || ''),
+          judgeModel: displayTerminology(runtime.judge?.model || runtime.judge?.llm_backend || ''),
+          judgeCaseId: runtime.judge?.case_id || '',
+        }];
+      }));
+
       const dataId = explicitData.id || (inputModes.length === 1 ? inputModes[0] : (bundle.state.product_id || bundle.meta.product_id || 'experiment-data'));
       const optimizer = explicitOptimizer.id || bundle.state.optimizer_mode || 'openharness';
       const judge = String(explicitJudge.id || bundle.state.judge_version || bundle.meta.judge_version || 'v1').toLowerCase();
@@ -352,16 +409,19 @@
       const experiment = {
         id: bundle.sessionId,
         session: bundle.sessionId,
-        sessionLabel: bundle.state.session_label || bundle.meta.session_label || bundle.sessionId,
+        sessionLabel: displayTerminology(bundle.state.session_label || bundle.meta.session_label || bundle.sessionId),
         data: dataId,
-        dataLabel: explicitData.label || (inputModes.length === 1 ? inputModes[0] : (bundle.meta.product_id || bundle.state.product_id || 'OpenHarness Data')),
+        dataLabel: displayTerminology(explicitData.label || (inputModes.length === 1 ? inputModes[0] : (bundle.meta.product_id || bundle.state.product_id || 'OpenHarness Data'))),
         optimizer,
-        optimizerLabel: explicitOptimizer.label || (optimizer === 'openharness' ? 'OpenHarness' : optimizer),
+        optimizerLabel: displayTerminology(explicitOptimizer.label || (optimizer === 'openharness' ? 'OpenHarness' : optimizer)),
+        optimizerModel: displayTerminology(optimizerModel || ''),
         user: owner[0],
         judge,
-        judgeLabel: explicitJudge.label || ('Judge ' + judge.toUpperCase()),
+        judgeLabel: displayTerminology(explicitJudge.label || ('Judge ' + judge.toUpperCase())),
+        judgeModel: displayTerminology(judgeModel || ''),
+        versionModels,
         judgeBasis,
-        userLabel: owner[1],
+        userLabel: displayTerminology(owner[1]),
         versions: versions.map(skill => skill.version),
         parents: Object.fromEntries(versions.map(skill => [skill.version, skill.parent_version || null])),
         latestVersion: versions[versions.length - 1].version,
@@ -449,13 +509,14 @@
       caseData,
       rubrics,
       experimentCaseIds,
+      experimentVersionCaseIds,
       experimentRubricIds,
       caseDataByExperiment,
       experiments,
       records,
       versionMetrics,
       skills,
-      runtimeSources: Object.fromEntries(bundles.map(bundle => [bundle.sessionId, bundle.runtimeSources || {}])),
+      runtimeSources: Object.fromEntries(orderedBundles.map(bundle => [bundle.sessionId, bundle.runtimeSources || {}])),
     };
   }
 
@@ -540,9 +601,26 @@
     if (Object.prototype.hasOwnProperty.call(bundle.generationSkillSources, version)) return false;
     const key = sessionId + '|' + version + '|' + bundle.revision;
     if (!skillSourcePromises.has(key)) {
-      skillSourcePromises.set(key, fetchJson(skillSourceUrl(sessionId, version)).catch(() => null));
+      const request = fetchJson(skillSourceUrl(sessionId, version));
+      skillSourcePromises.set(key, retryable(skillSourcePromises, key, request));
     }
     bundle.generationSkillSources[version] = await skillSourcePromises.get(key);
+    rebuildSnapshot();
+    return true;
+  };
+
+  window.OPENHARNESS_REALTIME_LOAD_CASE_OVERVIEW = async function (sessionId, caseId) {
+    const bundle = activeBundles.find(item => item.sessionId === sessionId);
+    if (!bundle) return false;
+    const hasRaw = Object.prototype.hasOwnProperty.call(bundle.rawPackages, caseId);
+    const hasQuality = Object.prototype.hasOwnProperty.call(bundle.qualityDocuments, caseId);
+    if (hasRaw && hasQuality) return false;
+    const results = await Promise.all([
+      hasRaw ? bundle.rawPackages[caseId] : loadRawPackage(sessionId, caseId, bundle.revision),
+      hasQuality ? bundle.qualityDocuments[caseId] : loadQualityDocument(sessionId, caseId, bundle.revision),
+    ]);
+    bundle.rawPackages[caseId] = results[0];
+    bundle.qualityDocuments[caseId] = results[1];
     rebuildSnapshot();
     return true;
   };
@@ -553,52 +631,66 @@
     const hasRaw = Object.prototype.hasOwnProperty.call(bundle.rawPackages, caseId);
     const hasMetadata = Object.prototype.hasOwnProperty.call(bundle.metadataDocuments, caseId);
     const hasStructured = Object.prototype.hasOwnProperty.call(bundle.structuredDocuments, caseId);
-    if (hasRaw && hasMetadata && hasStructured) return false;
+    const hasQuality = Object.prototype.hasOwnProperty.call(bundle.qualityDocuments, caseId);
+    if (hasRaw && hasMetadata && hasStructured && hasQuality) return false;
     const results = await Promise.all([
       hasRaw ? bundle.rawPackages[caseId] : loadRawPackage(sessionId, caseId, bundle.revision),
       hasMetadata ? bundle.metadataDocuments[caseId] : loadMetadataDocument(sessionId, caseId, bundle.revision),
       hasStructured ? bundle.structuredDocuments[caseId] : loadStructuredDocument(sessionId, caseId, bundle.revision),
+      hasQuality ? bundle.qualityDocuments[caseId] : loadQualityDocument(sessionId, caseId, bundle.revision),
     ]);
     bundle.rawPackages[caseId] = results[0];
     bundle.metadataDocuments[caseId] = results[1];
     bundle.structuredDocuments[caseId] = results[2];
+    bundle.qualityDocuments[caseId] = results[3];
     rebuildSnapshot();
     return true;
   };
 
   window.OPENHARNESS_REALTIME_LOAD_OUTPUT = async function (sessionId, version, caseId) {
     const bundle = activeBundles.find(item => item.sessionId === sessionId);
-    if (!bundle || !bundle.hasOutputsFile) return false;
+    if (!bundle) return false;
     if (bundle.outputs.some(item => item.version === version && item.case_id === caseId)) return false;
-    const key = sessionId + '|' + version + '|' + caseId + '|' + bundle.revision;
-    if (!outputPromises.has(key)) {
-      const query = new URLSearchParams({ session: sessionId, version, case_id: caseId });
-      if (!judgmentDetailPromises.has(key)) {
-        judgmentDetailPromises.set(
-          key,
-          fetchJson(judgmentDetailUrl(sessionId, version, caseId)).catch(() => null)
-        );
-      }
-      outputPromises.set(key, Promise.all([
-        fetchJson(apiBase + '/case-output?' + query.toString()),
-        judgmentDetailPromises.get(key),
-      ]));
+    const output = await loadOutputDocument(sessionId, version, caseId, bundle.revision);
+    if (bundle.outputs.some(item => item.version === version && item.case_id === caseId)) return false;
+    bundle.outputs.push(output);
+    rebuildSnapshot();
+
+    const detailKey = sessionId + '|' + version + '|' + caseId + '|' + bundle.revision;
+    if (!judgmentDetailPromises.has(detailKey)) {
+      judgmentDetailPromises.set(
+        detailKey,
+        fetchJson(judgmentDetailUrl(sessionId, version, caseId)).catch(() => null)
+      );
     }
-    const result = await outputPromises.get(key);
-    bundle.outputs.push(result[0]);
-    if (result[1]) {
+    void judgmentDetailPromises.get(detailKey).then(detail => {
+      if (!detail) return;
       const summary = [...bundle.judgments].reverse().find(
         item => item.version === version && item.case_id === caseId && !item.invalidated
       );
-      if (summary) Object.assign(summary, result[1]);
-    }
-    rebuildSnapshot();
+      if (!summary) return;
+      Object.assign(summary, detail);
+      rebuildSnapshot();
+      if (typeof window.OPENHARNESS_REALTIME_SNAPSHOT_UPDATED === 'function') {
+        window.OPENHARNESS_REALTIME_SNAPSHOT_UPDATED();
+      }
+    });
     return true;
+  };
+
+  window.OPENHARNESS_REALTIME_PREFETCH_CASE = function (sessionId, version, caseId) {
+    const bundle = activeBundles.find(item => item.sessionId === sessionId);
+    if (!bundle) return;
+    void Promise.allSettled([
+      loadRawPackage(sessionId, caseId, bundle.revision),
+      loadQualityDocument(sessionId, caseId, bundle.revision),
+      loadOutputDocument(sessionId, version, caseId, bundle.revision),
+    ]);
   };
 
   window.OPENHARNESS_REALTIME_LOAD_TRACE = async function (sessionId, version, caseId) {
     const bundle = activeBundles.find(item => item.sessionId === sessionId);
-    if (!bundle || !bundle.hasOutputsFile) return false;
+    if (!bundle) return false;
     await window.OPENHARNESS_REALTIME_LOAD_OUTPUT(sessionId, version, caseId);
     const output = bundle.outputs.find(item => item.version === version && item.case_id === caseId);
     if (!output || Object.prototype.hasOwnProperty.call(output, 'generationRunTrace')) return false;
@@ -609,9 +701,10 @@
     }
     const key = sessionId + '|' + version + '|' + caseId + '|' + output.generation_id + '|' + bundle.revision;
     if (!tracePromises.has(key)) {
-      tracePromises.set(key, fetchJson(
+      const request = fetchJson(
         generationTraceUrl(sessionId, version, caseId, output.generation_id)
-      ).catch(() => null));
+      );
+      tracePromises.set(key, retryable(tracePromises, key, request));
     }
     output.generationRunTrace = await tracePromises.get(key);
     rebuildSnapshot();
