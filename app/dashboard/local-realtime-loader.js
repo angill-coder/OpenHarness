@@ -213,6 +213,10 @@
       revision,
     };
   }
+  const RESEARCH_DIMENSION_IDS=[
+    'traceability','structure','narrative','insight','coverage','expression'
+  ];
+
   function dimensionsFor(state) {
     return (state.rubric?.dimensions || []).map(dimension => ({
       id: dimension.name || dimension.id,
@@ -226,6 +230,11 @@
       })),
     }));
   }
+  function hasResearchDimensions(state) {
+    const ids=new Set(dimensionsFor(state).map(item=>item.id));
+    return RESEARCH_DIMENSION_IDS.every(id=>ids.has(id));
+  }
+
 
   function bundleTimestamp(bundle) {
     const saved = bundle.state._saved_at;
@@ -331,7 +340,12 @@
   }
 
   function snapshotFrom(bundles, tree, revision, skippedCount) {
-    const orderedBundles = bundles.slice().sort((a, b) => bundleTimestamp(b) - bundleTimestamp(a));
+    const allOrderedBundles = bundles.slice().sort((a, b) => bundleTimestamp(b) - bundleTimestamp(a));
+    const researchBundles = allOrderedBundles.filter(bundle=>hasResearchDimensions(bundle.state));
+    const orderedBundles = researchBundles.length ? researchBundles : allOrderedBundles;
+    if(researchBundles.length){
+      skippedCount += allOrderedBundles.length - researchBundles.length;
+    }
     const canonical = orderedBundles[0];
     if (!canonical) throw new Error('没有找到具有完整 state、outputs 和 judgments 的实验会话。');
     const dimensionDefinitions = orderedBundles.flatMap(bundle => dimensionsFor(bundle.state));
@@ -384,6 +398,9 @@
       const inputModes = unique((bundle.state.cases || []).map(item => item.metadata?.experiment_input_mode).filter(Boolean));
       const explicitData = bundle.state.experiment_data || bundle.meta.experiment_data || {};
       const explicitOptimizer = bundle.state.experiment_optimizer || bundle.meta.experiment_optimizer || {};
+      const explicitUser = String(
+        bundle.state.experiment_user || bundle.meta.experiment_user || ''
+      ).trim();
       const explicitOwner = bundle.state.experiment_owner || bundle.meta.experiment_owner || {};
       const explicitJudge = bundle.state.experiment_judge || bundle.meta.experiment_judge || {};
       const optimizerModel = bundle.runtimeModels.optimizer?.model || null;
@@ -403,7 +420,9 @@
       const optimizer = explicitOptimizer.id || bundle.state.optimizer_mode || 'openharness';
       const judge = String(explicitJudge.id || bundle.state.judge_version || bundle.meta.judge_version || 'v1').toLowerCase();
       const judgeBasis = explicitJudge.basis || (judge === 'v3' ? 'source' : 'groundtruth');
-      const owner = explicitOwner.id
+      const owner = explicitUser
+        ? [explicitUser.toLowerCase(), explicitUser]
+        : explicitOwner.id
         ? [explicitOwner.id, explicitOwner.label || explicitOwner.id]
         : [config.user, config.userLabel];
       const experiment = {
