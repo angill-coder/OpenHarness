@@ -43,7 +43,7 @@ class FrontendContractTest(unittest.TestCase):
     def test_judge_completion_rerenders_advance_button(self):
         source = (APP / "app.js").read_text(encoding="utf-8")
         self.assertIn(
-            "finally{\n    JUDGE_RUNNING=false;render();\n  }",
+            "finally{\n    JUDGE_RUNNING=false;stopJudgeProgressPoll();render();\n  }",
             source,
         )
 
@@ -89,3 +89,46 @@ class FrontendContractTest(unittest.TestCase):
             "id:SID,version:STATE.current_version,parallel",
             source,
         )
+    def test_session_creation_captures_dashboard_user(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertLess(html.index('id="userInput"'), html.index('id="pidInput"'))
+        for user in ("Angill", "Sijing", "Zoe"):
+            self.assertIn(f'<option value="{user}"', html)
+        self.assertIn("experiment_user:experimentUser", source)
+
+    def test_evaluation_workflow_layout_removes_right_rail(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn("grid-template-columns:340px minmax(0,1fr)", html)
+        for element_id in ("curveView", "failView", "rubricView", "historyView"):
+            self.assertNotIn(f'id="{element_id}"', html)
+        self.assertNotIn("renderCurve(); renderFail(); renderRubric();", source)
+
+    def test_optimizer_follows_judge_and_keeps_api_model_input(self):
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertLess(html.index('id="outputCard"'), html.index('id="optimizerCard"'))
+        self.assertLess(html.index('id="judgeStatus"'), html.index('id="optimizerLlmControls"'))
+        self.assertIn('id="judgeApiModel"', html)
+        self.assertIn('id="optimizerApiModel"', html)
+        self.assertIn("Judge 调用或输出格式失败会自动重试", html)
+
+    def test_runner_and_judge_show_separate_case_progress(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="generationCases"', html)
+        self.assertIn('id="judgeCases"', html)
+        self.assertIn("function renderRunnerCases()", source)
+        self.assertIn("function renderJudgeCases()", source)
+        self.assertIn("function reportProgressRow(c)", source)
+        self.assertIn('role="progressbar"', source)
+        self.assertIn("startJudgeProgressPoll()", source)
+
+    def test_platform_switcher_replaces_backend_and_session_badges(self):
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn('id="backendBadge"', html)
+        self.assertNotIn('id="sessBadge"', html)
+        self.assertNotIn("getElementById('backendBadge')", source)
+        self.assertNotIn("getElementById('sessBadge')", source)
+        self.assertIn('<nav class="product-nav"', html)
