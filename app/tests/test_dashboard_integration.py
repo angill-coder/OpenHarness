@@ -12,6 +12,24 @@ import dashboard_api  # noqa: E402
 
 
 class DashboardDataContractTest(unittest.TestCase):
+    def test_rubric_guide_uses_session_product_and_repository_relative_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sessions = root / "app" / "sessions"
+            session = sessions / "exp-1"
+            session.mkdir(parents=True)
+            (session / "state.json").write_text(
+                json.dumps({"rubric": {"product": "research_insight"}}),
+                encoding="utf-8",
+            )
+            filename = dashboard_api.RUBRIC_GUIDE_FILES["research_insight"]
+            (root / filename).write_text("# rubric guide", encoding="utf-8")
+
+            document = dashboard_api.rubric_guide_document(
+                root, sessions, "exp-1"
+            )
+
+            self.assertEqual(filename, document["source"])
     def test_custom_sessions_directory_uses_stable_virtual_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             sessions = Path(tmp) / "external-sessions"
@@ -455,8 +473,20 @@ class DashboardDataContractTest(unittest.TestCase):
         self.assertIn("judge === 'v3' ? 'source' : 'groundtruth'", loader)
         self.assertIn("displayTerminology", loader)
         self.assertIn("'Human Report'", loader)
+        self.assertIn(
+            "bundle.state.experiment_user || bundle.meta.experiment_user", loader
+        )
         self.assertIn("judges: unique(", loader)
         self.assertIn("item.judgeLabel", loader)
+        self.assertIn(
+            "'traceability','structure','narrative','insight','coverage','expression'",
+            loader,
+        )
+        self.assertIn(
+            "researchBundles.length ? researchBundles : allOrderedBundles",
+            loader,
+        )
+        self.assertIn("hasResearchDimensions(bundle.state)", loader)
         self.assertIn("new Intl.Collator('zh-CN'", loader)
         self.assertNotIn("async function hydrateBundleRawPackages(bundle)", loader)
         self.assertNotIn("async function hydrateBundleMetadata(bundle)", loader)
@@ -562,6 +592,10 @@ class DashboardDataContractTest(unittest.TestCase):
         self.assertNotIn("judge-trace-card", adapter)
         self.assertNotIn("<b>Judge Trace</b>", adapter)
         self.assertIn("conversation.md", adapter)
+        self.assertIn("tracePanelWithRuntimeHeader", adapter)
+        self.assertIn("removeTraceHeaderElement", adapter)
+        self.assertIn("headerStart=html.indexOf", adapter)
+        self.assertNotIn('[sS]*?</small>', adapter)
         self.assertNotIn("d.questions[0]||cases[caseIndex][1]", adapter)
         self.assertNotIn("最终报告已生成并进入 Judge", adapter)
         self.assertNotIn("judgeTrace: judgment.judge_trace || null", loader)
@@ -619,6 +653,11 @@ class DashboardDataContractTest(unittest.TestCase):
         self.assertIn("available.includes('v0')?'v0':available[0]", page)
         self.assertIn("state.compareVersions=first&&latest&&first!==latest?[first,latest]", page)
         self.assertNotIn("[available[available.length-1],available[Math.max(0,available.length-2)]]", page)
+        self.assertIn("function orderedVersions(e)", page)
+        self.assertIn("orderedVersions(e).forEach(v=>", page)
+        self.assertIn("orderedVersions(e).map(version=>compareVersionCard", page)
+        self.assertNotIn("versions(e).slice().reverse().forEach(v=>", page)
+        self.assertNotIn("versions(e).slice().reverse().map(version=>compareVersionCard", page)
         self.assertIn("counts.modified+counts.added+counts.deleted", page)
         self.assertIn("counts.modified", page)
         self.assertIn("counts.added", page)
@@ -652,7 +691,7 @@ class DashboardDataContractTest(unittest.TestCase):
         self.assertIn("const caseId=cases[caseIndex]?.[0];", page)
         self.assertIn("remapCaseStateKey", page)
         self.assertIn("OPENHARNESS_REALTIME_PREFETCH_CASE", page)
-        self.assertIn("const orderedBundles = bundles.slice().sort", loader)
+        self.assertIn("const allOrderedBundles = bundles.slice().sort", loader)
         self.assertNotIn("bundles.sort((a, b)", loader)
         self.assertIn("OPENHARNESS_REALTIME_LOAD_CASE_OVERVIEW", loader)
         self.assertIn("loadOutputDocument(sessionId, version, caseId", loader)
@@ -674,8 +713,8 @@ class DashboardDataContractTest(unittest.TestCase):
         self.assertIn("tag='';", page)
         self.assertIn('<th class="node-head">Skill 版本</th>', page)
         self.assertNotIn('<th class="node-head">层级</th>', page)
-        self.assertIn("grid-template-columns:minmax(250px,max-content) minmax(220px,max-content)", page)
-        self.assertIn("min-width:482px;margin-left:8px", page)
+        self.assertIn("grid-template-columns:minmax(200px,max-content) minmax(176px,max-content)", page)
+        self.assertIn("min-width:388px;margin-left:8px", page)
         self.assertIn("max-width:none;overflow:visible;text-overflow:clip", page)
         self.assertIn("definition=(window.OPENHARNESS_SANDBOX?.experiments||[]).find", page)
         self.assertIn("versionModels:definition.versionModels||{}", page)
@@ -764,6 +803,7 @@ class DashboardDataContractTest(unittest.TestCase):
             )
             (session / "state.json").write_text(json.dumps({
                 "id": "exp-1",
+                "experiment_user": "Zoe",
                 "rubric": {"dimensions": [{"name": "quality", "checks": []}]},
                 "versions": [{"skill": {
                     "version": "v1", "parent_version": None,
@@ -817,6 +857,7 @@ class DashboardDataContractTest(unittest.TestCase):
             self.assertNotIn("instructions", first["state"]["versions"][0])
             self.assertNotIn("few_shots", first["state"]["versions"][0])
             self.assertEqual("case-1", first["state"]["cases"][0]["case_id"])
+            self.assertEqual("Zoe", first["state"]["experiment_user"])
             self.assertEqual("check_judgments.jsonl", first["judgment_file"])
             self.assertNotIn("judge_trace", first["judgments"][0])
             self.assertEqual(
@@ -1022,6 +1063,20 @@ class DashboardDataContractTest(unittest.TestCase):
         self.assertIn("Comparison cards keep independent vertical positions", theme)
         self.assertIn("overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain", theme)
         self.assertIn("max-height:calc(var(--aligned-viewport-height,100dvh) - 52px)!important", theme)
+
+    def test_multi_experiment_case_reuses_version_compare_layout(self):
+        page = (APP_DIR / "dashboard" / "experiment-evaluation-tree.html").read_text(
+            encoding="utf-8"
+        )
+        theme = (APP_DIR / "dashboard" / "openharness-theme.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--multi-skill-frame-height:1200px", theme)
+        self.assertNotIn("--multi-expanded-frame-height", theme)
+        self.assertNotIn(".table-card.multi-experiment-layout .compare-version-drawer>.compare-case-list{", theme)
+        self.assertNotIn(".table-card.multi-experiment-layout .version-case-report-drawer{", theme)
+        self.assertIn("layoutClass='',evaluationExperimentIndex=isVersionCompareMode()?0:experimentIndex", page)
+        self.assertIn(".version-case-report-drawer{\n  height:calc(100vh - 52px)!important", theme)
 
     def test_compare_generation_trace_table_headers_use_dark_surface(self):
         theme = (APP_DIR / "dashboard" / "openharness-theme.css").read_text(

@@ -814,3 +814,338 @@ body{font-size:15px!important;line-height:1.7!important}
 .version-case-report-drawer .trace-panel .md-table th{
   border-color:#3a4553!important;background:#171f29!important;color:#e4eaf2!important
 }
+
+.version-summary-grid .version-panel-head-top .compare-version-remove{
+  border-color:#74505a!important;background:#33232a!important;color:#ff9ba3!important
+}
+.version-summary-grid .version-panel-head-top .compare-version-remove:hover{
+  border-color:#a96570!important;background:#482a33!important;color:#ffd3d6!important
+}
+
+/* Multi-experiment Skill documents keep their own vertical viewport.
+   This only repairs scrolling; experiment-card height and alignment remain
+   on the original pre-alignment layout. */
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible{
+  display:flex!important;min-height:0!important;flex-direction:column;
+  overflow-x:hidden!important;overflow-y:hidden!important
+}
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible>.skill-doc-box{
+  display:flex!important;min-height:0!important;flex:1 1 0;flex-direction:column
+}
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible>.skill-doc-box>.inline-document{
+  display:block;min-height:0!important;max-height:none!important;flex:1 1 auto;
+  overflow-x:hidden!important;overflow-y:auto!important;
+  overscroll-behavior:contain;scrollbar-gutter:stable;
+  scrollbar-width:auto;scrollbar-color:#526278 #121820
+}
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible>.skill-doc-box.doc-collapsed{
+  flex:0 0 auto
+}
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible>.skill-doc-box>.inline-document::-webkit-scrollbar{
+  width:10px
+}
+
+/* Keep the final Markdown block above the clipped edge of the experiment
+   column when the document scrollbar reaches its maximum position. */
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible>.skill-doc-box>.inline-document{
+  box-sizing:border-box;padding-bottom:120px!important;scroll-padding-bottom:120px
+}
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible>.skill-doc-box>.inline-document::after{
+  content:"";display:block;clear:both;width:100%;height:24px
+}
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible>.skill-doc-box>.inline-document>*:last-child{
+  scroll-margin-bottom:120px
+}
+.table-card.multi-experiment-layout .skill-doc-stack.skill-doc-collapsible{
+  box-sizing:border-box;padding-bottom:10px!important
+}
+.table-card.multi-experiment-layout .compare-version-stack:has(.skill-doc-stack.skill-doc-collapsible){
+  box-sizing:border-box;padding-bottom:64px!important;scroll-padding-bottom:64px
+}
+.table-card.multi-experiment-layout .compare-version-stack:has(.skill-doc-stack.skill-doc-collapsible)::after{
+  content:"";display:block;height:24px
+}
+
+/* Multi-experiment Skill content keeps a fixed 1200px reading frame.
+   Case lists and reports intentionally reuse the same viewport-sized layout
+   as same-experiment version comparison. */
+.table-card.multi-experiment-layout{
+  --multi-skill-frame-height:1200px
+}
+.table-card.multi-experiment-layout .compare-version-drawer>.inline-drawer:has(>.skill-doc-stack){
+  box-sizing:border-box;display:flex!important;height:var(--multi-skill-frame-height)!important;
+  min-height:var(--multi-skill-frame-height)!important;max-height:var(--multi-skill-frame-height)!important;
+  flex-direction:column;overflow:hidden!important
+}
+.table-card.multi-experiment-layout .compare-version-drawer>.inline-drawer:has(>.skill-doc-stack)>.skill-doc-stack,
+.table-card.multi-experiment-layout .compare-version-drawer>.inline-drawer:has(>.skill-doc-stack)>.skill-doc-stack.skill-doc-collapsible{
+  box-sizing:border-box;height:auto!important;min-height:0!important;max-height:none!important;
+  flex:1 1 auto;overflow:hidden!important
+}
+.table-card.multi-experiment-layout .compare-version-stack{
+  grid-auto-rows:max-content!important;align-content:start!important
+}
+.table-card.multi-experiment-layout .compare-version-card.expanded:has(.compare-version-drawer){
+  height:max-content!important;min-height:max-content!important;align-self:start!important
+}
+.table-card.multi-experiment-layout .compare-version-drawer{
+  height:max-content!important;min-height:max-content!important
+}
+@media(max-width:900px){
+  .table-card.multi-experiment-layout .compare-version-drawer>.inline-drawer:has(>.skill-doc-stack){
+    height:auto!important;min-height:0!important;max-height:none!important
+  }
+}
+
+/* Keep both view-mode toggles in matching title-bar positions. */
+.latest-head-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:10px;
+}
+.latest-head .latest-mode{flex:0 0 auto}
+.latest-head .latest-mode button{
+  min-height:29px;
+  padding:5px 10px;
+}
+.latest-selection-head{
+  display:grid;
+  align-items:start;
+  gap:3px;
+  text-align:left;
+}
+.latest-selection-head .latest-count{
+  display:inline-flex;min-height:26px;align-items:center;justify-content:center;white-space:nowrap;
+  padding:3px 7px;border:1px solid #435166;border-radius:5px
+
+/* Keep the Skill/Case actions on one line in the skill-version score table. */
+.single-metrics{table-layout:fixed!important}
+.single-metrics col.node-col{width:36%!important}
+.single-metrics col.metric-col{width:6.75%!important}
+.single-metrics col.metric-col:nth-child(5){width:10%!important}
+.single-metrics .node-actions{
+  flex:0 0 auto;min-width:max-content;white-space:nowrap
+}
+.single-metrics .single-version-actions{
+  flex:0 0 auto;flex-wrap:nowrap;white-space:nowrap
+}
+.single-metrics .single-version-action{
+  flex:0 0 auto;min-width:max-content;white-space:nowrap
+}
+
+/* The trace header shows content only; source paths and run-status tags stay hidden. */
+.trace-panel-head .trace-level-note,
+.trace-panel-head>span{
+  display:none!important
+}
+
+/* Contextual rubric scoring guide. */
+.eval-list-title{
+  display:flex;align-items:center;gap:12px;width:100%
+}
+.eval-panel-inner .eval-list-title>button.rubric-guide-button{
+  appearance:none!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;
+  flex:0 0 auto!important;min-width:max-content!important;margin:0 0 0 auto!important;
+  border:1px solid #42658d!important;border-radius:999px!important;
+  background:linear-gradient(135deg,#223c59 0%,#192b40 100%)!important;color:#eaf4ff!important;
+  padding:6px 13px!important;font-size:12px!important;font-weight:750!important;letter-spacing:.02em;cursor:pointer;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 4px 12px rgba(0,0,0,.2)!important;
+  transition:background .16s ease,border-color .16s ease,transform .16s ease
+}
+.eval-panel-inner .eval-list-title>button.rubric-guide-button:hover,
+.eval-panel-inner .eval-list-title>button.rubric-guide-button:focus{
+  border-color:#76aee8!important;background:linear-gradient(135deg,#2b5077 0%,#203a57 100%)!important;
+  color:#fff!important;outline:none;transform:translateY(-1px)
+}
+.rubric-guide-modal-card{
+  width:min(1380px,calc(100vw - 32px))!important;
+  height:calc(100vh - 32px);max-height:calc(100vh - 32px)!important
+}
+.rubric-guide-document{
+  max-width:none!important;padding:24px 30px!important;scroll-margin-top:18px
+}
+.rubric-guide-document h2{
+  margin-top:30px;padding-bottom:8px;border-bottom:1px solid #344255
+}
+.rubric-guide-document h3{
+  margin-top:26px;padding:12px 14px;border-radius:7px;background:#202a37;scroll-margin-top:18px
+}
+.rubric-guide-modal .metadata-modal-body{
+  padding:20px 24px 30px!important;background:#0d1218!important
+}
+.rubric-guide-modal .rubric-guide-hero{
+  width:min(1180px,100%);margin:0 auto 16px;padding:15px 18px!important;
+  border:1px solid #42607f!important;border-left:4px solid #6bb5ff!important;
+  background:linear-gradient(135deg,#20344d 0%,#172536 100%)!important
+}
+.rubric-guide-modal .rubric-guide-hero b{
+  color:#ffffff!important;font-size:18px!important;letter-spacing:.01em
+}
+.rubric-guide-modal .rubric-guide-hero span{
+  color:#b9cce2!important;font-size:12px!important;overflow-wrap:anywhere
+}
+.rubric-guide-document{
+  box-sizing:border-box;width:min(1180px,100%);max-width:1180px!important;margin:0 auto!important;
+  padding:30px 36px 42px!important;border:1px solid #344355!important;border-radius:10px!important;
+  background:#151b23!important;color:#dce6f2!important;font-size:15px!important;line-height:1.78!important;
+  box-shadow:0 16px 38px rgba(0,0,0,.24)!important
+}
+.rubric-guide-document p,
+.rubric-guide-document li,
+.rubric-guide-document dd,
+.rubric-guide-document dt{
+  color:#d4dfec!important
+}
+.rubric-guide-document h1{
+  margin:0 0 24px!important;color:#ffffff!important;font-size:28px!important;line-height:1.35!important
+}
+.rubric-guide-document h2{
+  margin:34px 0 16px!important;padding:0 0 10px!important;border-bottom:1px solid #46576b!important;
+  color:#f7fbff!important;font-size:21px!important;line-height:1.45!important
+}
+.rubric-guide-document h3{
+  margin:28px 0 14px!important;padding:12px 15px!important;border:1px solid #3b5068!important;
+  border-radius:8px!important;background:#202b38!important;color:#f3f8ff!important;
+  font-size:17px!important;line-height:1.5!important
+}
+.rubric-guide-document h4{color:#eaf3ff!important;font-size:15px!important}
+.rubric-guide-document strong,.rubric-guide-document b{color:#ffffff!important}
+.rubric-guide-document em{color:#b9c9dc!important}
+.rubric-guide-document a{color:#83c2ff!important;text-decoration-color:#4f82b3!important}
+.rubric-guide-document code{
+  padding:2px 6px!important;border:1px solid #354a61!important;border-radius:5px!important;
+  background:#0e151d!important;color:#9ed0ff!important
+}
+.rubric-guide-document pre{
+  padding:16px 18px!important;border:1px solid #34465a!important;border-radius:8px!important;
+  background:#0b1118!important;color:#dceaff!important;white-space:pre-wrap!important;overflow-wrap:anywhere
+}
+.rubric-guide-document blockquote{
+  margin:18px 0!important;padding:13px 16px!important;border-left:4px solid #68aef1!important;
+  background:#1b2a3a!important;color:#d7e7f8!important
+}
+.rubric-guide-document hr{border:0!important;border-top:1px solid #3b495a!important;margin:28px 0!important}
+.rubric-guide-document .md-table{margin:18px 0!important;overflow:auto!important;border-radius:8px!important}
+.rubric-guide-document table{
+  width:100%!important;border-collapse:collapse!important;background:#141b24!important;color:#dce6f2!important
+}
+.rubric-guide-document th{
+  border:1px solid #43546a!important;background:#243244!important;color:#f5f9ff!important;
+  font-weight:800!important;text-align:left!important
+}
+.rubric-guide-document td{
+  border:1px solid #384759!important;background:#18212b!important;color:#d4dfec!important;
+  vertical-align:top!important
+}
+.rubric-guide-document tr:nth-child(even) td{background:#1b2530!important}
+.rubric-guide-document ul,.rubric-guide-document ol{padding-left:28px!important}
+.rubric-guide-document li::marker{color:#79b9f5!important}
+@media(max-width:760px){
+  .rubric-guide-modal .metadata-modal-body{padding:12px!important}
+  .rubric-guide-document{padding:22px 18px 30px!important;font-size:14px!important}
+  .rubric-guide-document h1{font-size:23px!important}
+}
+/* Rubric scoring guide: fixed-height, title-free, high-contrast reading surface. */
+.rubric-guide-modal-card{
+  height:900px!important;
+  max-height:min(900px,calc(100vh - 32px))!important;
+  border-color:#52657c!important;
+  background:#0d131b!important
+}
+.rubric-guide-modal .rubric-guide-modal-head{
+  box-sizing:border-box;display:flex!important;flex:0 0 50px;min-height:50px;
+  align-items:center;justify-content:flex-end!important;padding:8px 14px!important;
+  border-bottom:1px solid #405066!important;background:#151e29!important
+}
+.rubric-guide-modal .metadata-modal-body{
+  box-sizing:border-box;flex:1;min-height:0;overflow-y:auto!important;
+  padding:22px 28px 34px!important;background:#0b1017!important;color:#edf3fa!important;
+  scrollbar-gutter:stable
+}
+.rubric-guide-modal .metadata-modal-close{
+  min-width:72px;border:1px solid #6683a5!important;border-radius:8px!important;
+  background:#22344a!important;color:#f5f9ff!important;font-size:13px!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08)!important
+}
+.rubric-guide-modal .metadata-modal-close:hover,
+.rubric-guide-modal .metadata-modal-close:focus-visible{
+  border-color:#8ec5ff!important;background:#2e4b6d!important;color:#fff!important
+}
+.rubric-guide-modal .rubric-guide-document{
+  width:min(1220px,100%)!important;max-width:1220px!important;margin:0 auto!important;
+  padding:34px 40px 52px!important;border:1px solid #465a72!important;
+  background:#141d27!important;color:#e9f0f8!important
+}
+.rubric-guide-modal .rubric-guide-document p,
+.rubric-guide-modal .rubric-guide-document li,
+.rubric-guide-modal .rubric-guide-document dd,
+.rubric-guide-modal .rubric-guide-document dt,
+.rubric-guide-modal .rubric-guide-document span{
+  color:#e1eaf4!important
+}
+.rubric-guide-modal .rubric-guide-document h1,
+.rubric-guide-modal .rubric-guide-document h2,
+.rubric-guide-modal .rubric-guide-document h3,
+.rubric-guide-modal .rubric-guide-document h4,
+.rubric-guide-modal .rubric-guide-document strong,
+.rubric-guide-modal .rubric-guide-document b{
+  color:#fff!important
+}
+.rubric-guide-modal .rubric-guide-document h2{border-bottom-color:#52657b!important}
+.rubric-guide-modal .rubric-guide-document h3{
+  border-color:#4b6380!important;background:#202e3d!important
+}
+.rubric-guide-modal .rubric-guide-document table{
+  border:1px solid #53677f!important;background:#101821!important;color:#eef4fb!important
+}
+.rubric-guide-modal .rubric-guide-document th{
+  border-color:#60758e!important;background:#293b50!important;color:#fff!important
+}
+.rubric-guide-modal .rubric-guide-document td{
+  border-color:#4a5e75!important;background:#192531!important;color:#e5edf7!important
+}
+.rubric-guide-modal .rubric-guide-document tr:nth-child(even) td{
+  background:#1e2b38!important
+}
+.rubric-guide-modal .rubric-guide-document blockquote{
+  border-left-color:#7fc3ff!important;background:#1d3042!important;color:#edf6ff!important
+}
+.rubric-guide-modal .rubric-guide-document code{
+  border-color:#506b89!important;background:#09121c!important;color:#b9ddff!important
+}
+.rubric-guide-modal .rubric-guide-document pre{
+  border-color:#485d75!important;background:#080f17!important;color:#e3efff!important
+}
+.rubric-guide-modal .rubric-guide-loading,
+.rubric-guide-modal .metadata-empty-block{
+  color:#e7eef7!important;background:#17212d!important;border-color:#4a5c72!important
+}
+@media(max-width:760px){
+  .rubric-guide-modal-card{height:900px!important;max-height:calc(100vh - 20px)!important}
+  .rubric-guide-modal .metadata-modal-body{padding:12px!important}
+  .rubric-guide-modal .rubric-guide-document{padding:24px 18px 36px!important}
+}
+/* Rubric guide fills the viewport vertically; its body owns scrolling. */
+.rubric-guide-modal{
+  box-sizing:border-box;padding:8px!important;align-items:stretch!important
+}
+.rubric-guide-modal .rubric-guide-modal-card{
+  height:calc(100vh - 16px)!important;
+  height:calc(100dvh - 16px)!important;
+  max-height:calc(100vh - 16px)!important;
+  max-height:calc(100dvh - 16px)!important;
+  min-height:0!important;margin:auto!important
+}
+.rubric-guide-modal .metadata-modal-body{
+  height:auto!important;max-height:none!important;min-height:0!important;overflow-y:auto!important
+}
+.rubric-guide-modal .rubric-guide-document{
+  min-height:100%;background:#141d27!important;color:#e9f0f8!important
+}
+.rubric-guide-modal .rubric-guide-document>p{
+  padding:0!important;background:transparent!important;color:#e5edf7!important
+}
+.rubric-guide-modal .rubric-guide-document>*{
+  opacity:1!important
+}

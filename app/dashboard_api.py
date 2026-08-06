@@ -18,6 +18,15 @@ SESSION_FILES = {
 
 VIRTUAL_SESSIONS_ROOT = "app/sessions"
 
+RUBRIC_GUIDE_FILES = {
+    "research_insight": (
+        "".join(chr(code) for code in (0x8C03, 0x7814, 0x6D1E, 0x5BDF, 0x6C47, 0x62A5, 0x52A9, 0x624B))
+        + "_Rubric"
+        + "".join(chr(code) for code in (0x843D, 0x5730, 0x6587, 0x6863))
+        + ".md"
+    ),
+}
+
 _SUMMARY_CACHE: dict[str, tuple[tuple[object, ...], dict[str, object]]] = {}
 _JUDGMENT_CACHE: dict[str, tuple[tuple[object, ...], dict[tuple[str, str], dict[str, object]]]] = {}
 _CACHE_LOCK = threading.RLock()
@@ -593,7 +602,7 @@ def _compact_case(item: object) -> dict[str, object] | None:
 def _compact_state(state: dict[str, object]) -> dict[str, object]:
     scalar_keys = (
         "id", "product_id", "optimizer_mode", "_saved_at", "session_label",
-        "experiment_data", "experiment_optimizer", "experiment_owner",
+        "experiment_data", "experiment_optimizer", "experiment_user", "experiment_owner",
         "experiment_judge", "judge_version",
     )
     compact = {key: state.get(key) for key in scalar_keys if key in state}
@@ -1020,6 +1029,36 @@ def session_summary_document(
         with _CACHE_LOCK:
             _SUMMARY_CACHE[cache_key] = (fingerprint, document)
     return document
+
+def rubric_guide_document(
+    root: Path, sessions_root: Path, session_id: str,
+) -> dict[str, object]:
+    """Return the human-readable rubric guide matching a dashboard session."""
+    session_id = _safe_generation_segment(session_id, "session id")
+    root = root.resolve()
+    sessions_root = sessions_root.resolve()
+    session_root = (sessions_root / session_id).resolve()
+    session_root.relative_to(sessions_root)
+    state_path = session_root / "state.json"
+    if not state_path.is_file():
+        raise FileNotFoundError("Session state.json does not exist")
+    state = _read_json_document(state_path)
+    rubric = state.get("rubric")
+    rubric = rubric if isinstance(rubric, dict) else {}
+    product = str(rubric.get("product") or state.get("product_id") or "").strip()
+    filename = RUBRIC_GUIDE_FILES.get(product)
+    if not filename:
+        raise FileNotFoundError("Rubric guide is not configured for product: %s" % product)
+    target = (root / filename).resolve()
+    target.relative_to(root)
+    if not target.is_file():
+        raise FileNotFoundError("Rubric guide does not exist: %s" % filename)
+    return {
+        "session_id": session_id,
+        "product": product,
+        "source": filename,
+        "markdown": target.read_text(encoding="utf-8"),
+    }
 
 def _case_judgment_row(
     sessions_root: Path,
