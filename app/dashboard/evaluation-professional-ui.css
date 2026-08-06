@@ -23,9 +23,9 @@ button{transition:background .15s,border-color .15s,color .15s,box-shadow .15s}b
 .table-card.compare-layout.compare-focused .version-summary-grid .skill-doc-box{display:flex;min-height:0;flex-direction:column}
 .version-compare-card.compare-focused .version-summary-grid .skill-doc-box .inline-document,
 .table-card.compare-layout.compare-focused .version-summary-grid .skill-doc-box .inline-document{height:auto!important;min-height:0!important;max-height:none!important;flex:1;overflow:auto}
-.sandbox-diff-line{margin:-1px -3px;padding:1px 3px;border-radius:3px;background:#fff0a8;color:inherit;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.sandbox-diff-line{color:#ffd86b}
 .skill-diff-badge.no-diff{background:#e9f7ef;color:#22724d}
-.cross-experiment-diff{position:relative;margin-left:-7px!important;margin-right:-7px!important;padding:3px 7px!important;border-radius:4px;background:linear-gradient(90deg,#fff0a8 0,#fff7cf 100%);box-shadow:inset 3px 0 #e4b72e}
+.cross-experiment-diff{color:#ffd86b}
 
 /* Collapsible evaluation rail for multi-version and multi-experiment report drawers */
 .version-case-report-drawer{--version-eval-default:33.333%;grid-template-columns:minmax(52px,var(--version-eval-width,var(--version-eval-default))) 8px minmax(360px,1fr)}
