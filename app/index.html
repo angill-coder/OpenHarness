@@ -183,7 +183,7 @@
         <div style="flex:1">
           <label for="optimizerLlmBackend">Optimizer 模型调用方式</label>
           <select id="optimizerLlmBackend">
-            <option value="api">Claude API</option>
+            <option value="api">API</option>
             <option value="workbuddy" selected>WorkBuddy CLI</option>
           </select>
         </div>
@@ -193,6 +193,15 @@
             <option value="claude-opus-4.8">claude-opus-4.8</option>
           </select>
         </div>
+        <div id="optimizerApiModelWrap" style="flex:1;display:none">
+          <label for="optimizerApiModel">Optimizer API 模型</label>
+          <input id="optimizerApiModel" list="evaluationApiModels" placeholder="选择或输入模型名">
+        </div>
+        <datalist id="evaluationApiModels">
+          <option value="claude-opus-5"></option>
+          <option value="claude-opus-4.8"></option>
+          <option value="gpt-5.6-sol"></option>
+        </datalist>
       </div>
       <div id="advanceBox" class="row" style="margin-top:10px">
         <button id="advanceBtn" disabled>▶ 生成下一版 skill（optimizer + gate）</button>
@@ -251,7 +260,7 @@
         <div style="flex:1">
           <label for="judgeLlmBackend">Judge 模型调用方式</label>
           <select id="judgeLlmBackend">
-            <option value="api">Claude API</option>
+            <option value="api">API</option>
             <option value="workbuddy" selected>WorkBuddy CLI</option>
           </select>
         </div>
@@ -261,6 +270,10 @@
             <option value="claude-opus-4.8">claude-opus-4.8</option>
           </select>
         </div>
+        <div id="judgeApiModelWrap" style="flex:1;display:none">
+          <label for="judgeApiModel">Judge API 模型</label>
+          <input id="judgeApiModel" list="evaluationApiModels" placeholder="选择或输入模型名">
+        </div>
         <div>
           <label for="judgeParallel">Judge 最大并发</label>
           <input id="judgeParallel" type="number" min="1" step="1" style="width:110px">
@@ -269,6 +282,7 @@
       <div class="row" style="margin-top:10px">
         <button class="ok" id="runJudgeBtn">▶ 批量 Judge 全部 case</button>
       </div>
+      <p class="small mut" style="margin:7px 0 0">Judge 调用或输出格式失败会自动重试，最多额外 3 次；成功维度会保留，重跑时只补缺失维度。</p>
       <div id="judgeStatus" class="small" style="margin-top:8px"></div>
       <div id="checkPanel" class="small" style="margin-top:8px"></div>
     </div>

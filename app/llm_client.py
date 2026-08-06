@@ -25,6 +25,7 @@ if str(HARNESS) not in sys.path:
     sys.path.insert(0, str(HARNESS))
 
 from model_config import (  # noqa: E402
+    DEFAULT_EVALUATION_API_MODEL,
     DEFAULT_EVALUATION_WB_MODEL,
     SUPPORTED_WB_MODELS,
 )
@@ -59,6 +60,18 @@ def normalize_workbuddy_model(value=None) -> str:
     model = str(value or DEFAULT_EVALUATION_WB_MODEL).strip()
     if model not in SUPPORTED_WB_MODELS:
         raise LLMClientError("不支持的 WorkBuddy 模型: %s" % model)
+    return model
+
+
+def normalize_api_model(value=None) -> str:
+    """API 模型允许使用预设值，也允许用户输入中转服务支持的模型名。"""
+    model = str(
+        value
+        or os.environ.get("ANTHROPIC_JUDGE_MODEL")
+        or DEFAULT_EVALUATION_API_MODEL
+    ).strip()
+    if not model:
+        raise LLMClientError("API 模型不能为空")
     return model
 
 
@@ -115,6 +128,7 @@ def _call_api(
     prompt: str,
     timeout_seconds=None,
     retries=None,
+    model=None,
 ) -> str:
     """通过原有 Anthropic/OpenAI-compatible API 调用 LLM。"""
     key = os.environ.get("ANTHROPIC_API_KEY")
@@ -126,7 +140,7 @@ def _call_api(
         "ANTHROPIC_BASE_URL",
         "https://api.anthropic.com",
     ).rstrip("/")
-    model = os.environ.get("ANTHROPIC_JUDGE_MODEL", "claude-opus-4-8")
+    selected_model = normalize_api_model(model)
     style = os.environ.get("LLM_API_STYLE", "").lower() or (
         "anthropic" if "anthropic.com" in base else "openai"
     )
@@ -152,7 +166,7 @@ def _call_api(
     if max_tokens <= 0:
         raise LLMClientError("LLM_MAX_TOKENS 必须大于 0")
     body = json.dumps({
-        "model": model,
+        "model": selected_model,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
@@ -349,6 +363,7 @@ def call_llm(
         prompt,
         timeout_seconds=timeout_seconds,
         retries=retries,
+        model=model,
     )
 
 

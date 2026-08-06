@@ -55,19 +55,39 @@ function populateEvaluationModelSelect(id,defaultModel){
   el.value=models.includes(desired)
     ?desired:(GEN_CONFIG.evaluation_model_default||models[0]||'');
 }
+function populateApiModelInput(id,defaultModel){
+  const el=document.getElementById(id);
+  if(!el||!GEN_CONFIG)return;
+  const models=Array.isArray(GEN_CONFIG.api_models)?GEN_CONFIG.api_models:[];
+  const list=document.getElementById('evaluationApiModels');
+  const signature=models.join('\n');
+  if(list&&list.dataset.models!==signature){
+    list.innerHTML=models.map(model=>`<option value="${esc(model)}"></option>`).join('');
+    list.dataset.models=signature;
+  }
+  if(!el.dataset.initialized){
+    el.value=defaultModel||GEN_CONFIG.api_model_default||'claude-opus-4.8';
+    el.dataset.initialized='1';
+  }
+}
 function syncLlmBackendControls(kind){
   const backend=document.getElementById(kind+'LlmBackend');
-  const wrap=document.getElementById(kind+'WbModelWrap');
-  if(wrap)wrap.style.display=backend&&backend.value==='workbuddy'?'block':'none';
+  const isWorkbuddy=backend&&backend.value==='workbuddy';
+  const wbWrap=document.getElementById(kind+'WbModelWrap');
+  const apiWrap=document.getElementById(kind+'ApiModelWrap');
+  if(wbWrap)wbWrap.style.display=isWorkbuddy?'block':'none';
+  if(apiWrap)apiWrap.style.display=isWorkbuddy?'none':'block';
 }
 function readLlmSelection(kind){
   const backend=(document.getElementById(kind+'LlmBackend')||{}).value||'workbuddy';
   const result={llm_backend:backend};
-  if(backend==='workbuddy'){
-    const model=(document.getElementById(kind+'WbModel')||{}).value||'';
-    if(!model){toast((kind==='judge'?'Judge':'Optimizer')+' WB 模型不能为空');return null;}
-    result.llm_model=model;
+  const inputId=kind+(backend==='workbuddy'?'WbModel':'ApiModel');
+  const model=((document.getElementById(inputId)||{}).value||'').trim();
+  if(!model){
+    toast((kind==='judge'?'Judge':'Optimizer')+' '+(backend==='workbuddy'?'WB':'API')+' 模型不能为空');
+    return null;
   }
+  result.llm_model=model;
   return result;
 }
 document.getElementById('judgeLlmBackend').onchange=()=>syncLlmBackendControls('judge');
@@ -385,6 +405,8 @@ function renderGenerationPanel(){
     }
     populateEvaluationModelSelect('judgeWbModel',GEN_CONFIG.judge_wb_model);
     populateEvaluationModelSelect('optimizerWbModel',GEN_CONFIG.optimizer_wb_model);
+    populateApiModelInput('judgeApiModel',GEN_CONFIG.judge_api_model);
+    populateApiModelInput('optimizerApiModel',GEN_CONFIG.optimizer_api_model);
     syncLlmBackendControls('judge');
     syncLlmBackendControls('optimizer');
   }
@@ -412,6 +434,7 @@ function renderGenerationPanel(){
     cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>启动时编译当前 Session 版本</span></div>`+
       `<div class="kv"><span>模型 / 默认并发</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel}</span></div>`+
       `<div class="kv"><span>报告重试</span><span>最多额外 ${GEN_CONFIG.max_report_retries} 次</span></div>`+
+      `<div class="kv"><span>Judge 重试</span><span>最多额外 ${GEN_CONFIG.judge_max_retries} 次</span></div>`+
       `<div class="small mut" style="margin-top:5px">每个任务冻结完整 Skill 目录、版本和哈希，WB CLI 只执行该副本。</div>`;
   }
   const active=generationActive();

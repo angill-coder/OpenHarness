@@ -120,9 +120,18 @@ class SessionLabel:
             clean = self._norm_checks((judgment or {}).get("checks"))
             if not clean:
                 continue
+            previous = (
+                self.judge_checks.setdefault(version, {}).get(case_id) or {}
+            )
+            merged_checks = dict(previous.get("checks") or {})
+            merged_checks.update(clean)
+            merged_reasoning = dict(previous.get("reasoning") or {})
+            merged_reasoning.update(
+                (judgment or {}).get("reasoning") or {}
+            )
             clean_batch[case_id] = {
-                "checks": clean,
-                "reasoning": (judgment or {}).get("reasoning") or {},
+                "checks": merged_checks,
+                "reasoning": merged_reasoning,
                 "report_sha256": (judgment or {}).get(
                     "report_sha256"
                 ),

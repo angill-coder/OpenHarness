@@ -50,12 +50,16 @@ from generation_jobs import (  # noqa: E402
     GenerationJobService,
 )
 from model_config import (  # noqa: E402
+    DEFAULT_EVALUATION_API_MODEL,
     DEFAULT_EVALUATION_WB_MODEL,
+    SUPPORTED_API_MODELS,
     SUPPORTED_WB_MODELS,
 )
 from judge_batch import (  # noqa: E402
+    DEFAULT_JUDGE_MAX_RETRIES,
     JUDGE_STRATEGY_PER_DIMENSION,
     judge_cases,
+    normalize_judge_max_retries,
     normalize_judge_strategy,
 )
 from workbuddy_batch.dataset import load_openharness_rows  # noqa: E402
@@ -300,6 +304,13 @@ def _llm_selection(payload, purpose):
             or os.environ.get(prefix + "_WB_MODEL")
             or DEFAULT_EVALUATION_WB_MODEL
         )
+    else:
+        model = llm_client.normalize_api_model(
+            payload.get("llm_model")
+            or os.environ.get(prefix + "_API_MODEL")
+            or os.environ.get("ANTHROPIC_JUDGE_MODEL")
+            or DEFAULT_EVALUATION_API_MODEL
+        )
     return backend, model
 
 
@@ -310,10 +321,12 @@ def _judge_summary(
     dimension_count=0,
     llm_backend="workbuddy",
     llm_model=None,
+    max_retries=DEFAULT_JUDGE_MAX_RETRIES,
 ):
     counts = {
         "judged": 0,
         "failed": 0,
+        "partial": 0,
         "missing_report": 0,
         "stale_report": 0,
     }
@@ -331,19 +344,15 @@ def _judge_summary(
         "total_cases": total,
         "judged_cases": success,
         "failed_cases": total - success,
+        "partial_cases": counts["partial"],
         "missing_report_cases": counts["missing_report"],
         "stale_report_cases": counts["stale_report"],
         "llm_backend": llm_backend,
-        "model": (
-            llm_model
-            if llm_backend == llm_client.LLM_BACKEND_WORKBUDDY
-            else os.environ.get(
-                "ANTHROPIC_JUDGE_MODEL",
-                "claude-opus-4-8",
-            )
-        ),
+        "model": llm_model or DEFAULT_EVALUATION_API_MODEL,
         "parallel": _judge_parallelism(parallel),
         "judge_strategy": strategy,
+        "max_retries": normalize_judge_max_retries(max_retries),
+        "max_attempts": normalize_judge_max_retries(max_retries) + 1,
         "model_calls_per_case": (
             dimension_count
             if strategy == JUDGE_STRATEGY_PER_DIMENSION
@@ -774,9 +783,17 @@ class Handler(BaseHTTPRequestHandler):
                             JUDGE_STRATEGY_PER_DIMENSION,
                         )
                     ),
+                    "judge_max_retries": normalize_judge_max_retries(
+                        os.environ.get(
+                            "OPENHARNESS_JUDGE_MAX_RETRIES",
+                            DEFAULT_JUDGE_MAX_RETRIES,
+                        )
+                    ),
                     "llm_backends": ["api", "workbuddy"],
                     "evaluation_models": list(SUPPORTED_WB_MODELS),
                     "evaluation_model_default": DEFAULT_EVALUATION_WB_MODEL,
+                    "api_models": list(SUPPORTED_API_MODELS),
+                    "api_model_default": DEFAULT_EVALUATION_API_MODEL,
                     "judge_llm_backend": os.environ.get(
                         "OPENHARNESS_JUDGE_LLM_BACKEND",
                         "workbuddy",
@@ -785,6 +802,13 @@ class Handler(BaseHTTPRequestHandler):
                         "OPENHARNESS_JUDGE_WB_MODEL",
                         DEFAULT_EVALUATION_WB_MODEL,
                     ),
+                    "judge_api_model": os.environ.get(
+                        "OPENHARNESS_JUDGE_API_MODEL",
+                        os.environ.get(
+                            "ANTHROPIC_JUDGE_MODEL",
+                            DEFAULT_EVALUATION_API_MODEL,
+                        ),
+                    ),
                     "optimizer_llm_backend": os.environ.get(
                         "OPENHARNESS_OPTIMIZER_LLM_BACKEND",
                         "workbuddy",
@@ -792,6 +816,13 @@ class Handler(BaseHTTPRequestHandler):
                     "optimizer_wb_model": os.environ.get(
                         "OPENHARNESS_OPTIMIZER_WB_MODEL",
                         DEFAULT_EVALUATION_WB_MODEL,
+                    ),
+                    "optimizer_api_model": os.environ.get(
+                        "OPENHARNESS_OPTIMIZER_API_MODEL",
+                        os.environ.get(
+                            "ANTHROPIC_JUDGE_MODEL",
+                            DEFAULT_EVALUATION_API_MODEL,
+                        ),
                     ),
                 }
             )
@@ -1197,6 +1228,14 @@ class Handler(BaseHTTPRequestHandler):
                         JUDGE_STRATEGY_PER_DIMENSION,
                     )
                 )
+                judge_max_retries = normalize_judge_max_retries(
+                    b.get("max_retries")
+                    if "max_retries" in b
+                    else os.environ.get(
+                        "OPENHARNESS_JUDGE_MAX_RETRIES",
+                        DEFAULT_JUDGE_MAX_RETRIES,
+                    )
+                )
                 judge_llm_backend, judge_llm_model = _llm_selection(
                     b,
                     "judge",
@@ -1242,10 +1281,21 @@ class Handler(BaseHTTPRequestHandler):
                 rubric_sha256 = _json_sha256(rubric)
                 force_all = bool(b.get("force_all"))
                 if not force_all:
+                    expected_check_ids = {
+                        str(check["id"])
+                        for dimension in rubric.get("dimensions", [])
+                        for check in dimension.get("checks", [])
+                        if check.get("id")
+                    }
                     cases = [
                         case
                         for case in cases
-                        if case["case_id"] not in existing
+                        if not expected_check_ids.issubset(
+                            set(
+                                (existing.get(case["case_id"]) or {})
+                                .get("checks", {})
+                            )
+                        )
                     ]
                 if not cases:
                     with _session_lock(s.id):
@@ -1261,6 +1311,7 @@ class Handler(BaseHTTPRequestHandler):
                                     judge_dimension_count,
                                     judge_llm_backend,
                                     judge_llm_model,
+                                    judge_max_retries,
                                 ),
                                 "status": "completed",
                                 "total_cases": 0,
@@ -1287,7 +1338,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(409, {"error": str(exc)})
 
                 def persist_result(item):
-                    if item.get("status") != "judged":
+                    if item.get("status") not in {"judged", "partial"}:
                         return item
                     case_id = item["case_id"]
                     with _session_lock(s.id):
@@ -1332,10 +1383,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "llm_backend": judge_llm_backend,
                                     "model": (
                                         judge_llm_model
-                                        or os.environ.get(
-                                            "ANTHROPIC_JUDGE_MODEL",
-                                            "claude-opus-4-8",
-                                        )
+                                        or DEFAULT_EVALUATION_API_MODEL
                                     ),
                                     "judge_trace": item.get("judge_trace"),
                                 }
@@ -1351,6 +1399,7 @@ class Handler(BaseHTTPRequestHandler):
                         prompt,
                         backend=judge_llm_backend,
                         model=judge_llm_model,
+                        retries=0,
                     )
 
                 results = judge_cases(
@@ -1363,6 +1412,10 @@ class Handler(BaseHTTPRequestHandler):
                     parallel=judge_parallel,
                     on_result=persist_result,
                     strategy=judge_strategy,
+                    max_retries=judge_max_retries,
+                    existing_judgments=(
+                        {} if force_all else existing
+                    ),
                 )
                 with _session_lock(s.id):
                     s.evaluate(acct)
@@ -1377,6 +1430,7 @@ class Handler(BaseHTTPRequestHandler):
                     judge_dimension_count,
                     judge_llm_backend,
                     judge_llm_model,
+                    judge_max_retries,
                 )
                 summary["remaining_cases"] = len(
                     state["judge_progress"]["pending_judge_case_ids"]
