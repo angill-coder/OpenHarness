@@ -118,6 +118,32 @@ class TestLLMClientErrors(unittest.TestCase):
                     llm_client.call_llm("prompt")
         self.assertIn("响应格式无效", str(ctx.exception))
 
+    def test_api_backend_uses_selected_custom_model(self):
+        env = {
+            "ANTHROPIC_API_KEY": "test-key",
+            "ANTHROPIC_BASE_URL": "https://llm.example",
+            "ANTHROPIC_JUDGE_MODEL": "fallback-model",
+            "LLM_API_STYLE": "openai",
+        }
+        response = _FakeResponse(json.dumps({
+            "choices": [{"message": {"content": "ok"}}],
+        }).encode("utf-8"))
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(
+                urllib.request,
+                "urlopen",
+                return_value=response,
+            ) as call:
+                result = llm_client.call_llm(
+                    "prompt",
+                    backend="api",
+                    model="custom-provider-model",
+                )
+        self.assertEqual(result, "ok")
+        request = call.call_args.args[0]
+        body = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(body["model"], "custom-provider-model")
+
     def test_workbuddy_backend_uses_selected_model_and_extracts_text(self):
         event = json.dumps({
             "type": "assistant",

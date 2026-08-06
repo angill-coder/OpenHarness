@@ -553,10 +553,21 @@ class SessionCore:
         reports_ready = {
             case_id for case_id in case_ids if (reports.get(case_id) or "").strip()
         }
+        expected_checks = {
+            str(check["id"])
+            for dimension in self.rubric.get("dimensions", [])
+            for check in dimension.get("checks", [])
+            if check.get("id")
+        }
         judged = {
             case_id
             for case_id in case_ids
-            if (check_judgments.get(case_id) or {}).get("checks")
+            if expected_checks.issubset(
+                set(
+                    (check_judgments.get(case_id) or {})
+                    .get("checks", {})
+                )
+            )
             or case_id in direct_judgments
         }
         requires_model_judge = self.rubric.get("product") == "research_insight"
@@ -686,10 +697,18 @@ class SessionCore:
             return False
         checks = self.judge_checks.get(version, {})
         direct = self.report_judgments.get(version, {})
+        expected_checks = {
+            str(check["id"])
+            for dimension in self.rubric.get("dimensions", [])
+            for check in dimension.get("checks", [])
+            if check.get("id")
+        }
         judged = {
             case_id
             for case_id in case_ids
-            if (checks.get(case_id) or {}).get("checks")
+            if expected_checks.issubset(
+                set((checks.get(case_id) or {}).get("checks", {}))
+            )
             or case_id in direct
         }
         return judged == case_ids
@@ -705,10 +724,18 @@ class SessionCore:
         }
         checks = self.judge_checks.get(version, {})
         direct = self.report_judgments.get(version, {})
+        expected_checks = {
+            str(check["id"])
+            for dimension in self.rubric.get("dimensions", [])
+            for check in dimension.get("checks", [])
+            if check.get("id")
+        }
         judged = {
             case_id
             for case_id in case_ids
-            if (checks.get(case_id) or {}).get("checks")
+            if expected_checks.issubset(
+                set((checks.get(case_id) or {}).get("checks", {}))
+            )
             or case_id in direct
         }
         status, _actions = self._workflow_state(

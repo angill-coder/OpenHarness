@@ -61,6 +61,18 @@ class JudgeBatchTest(unittest.TestCase):
             self.assertEqual(backend, "workbuddy")
             self.assertEqual(model, "claude-opus-4.8")
 
+    def test_api_backend_preserves_per_request_model(self):
+        for purpose in ("judge", "optimizer"):
+            backend, model = _llm_selection(
+                {
+                    "llm_backend": "api",
+                    "llm_model": "custom-provider-model",
+                },
+                purpose,
+            )
+            self.assertEqual(backend, "api")
+            self.assertEqual(model, "custom-provider-model")
+
     def test_judge_parallel_override_has_no_artificial_cap(self):
         self.assertEqual(_judge_parallelism(200), 200)
         with self.assertRaisesRegex(ValueError, "至少为 1"):
@@ -249,6 +261,84 @@ class JudgeBatchTest(unittest.TestCase):
         self.assertEqual(results[0]["status"], "failed")
         self.assertIn("Q2", results[0]["error"])
 
+    def test_judge_retries_three_times_then_succeeds(self):
+        attempts = []
+
+        def call_model(_prompt):
+            attempts.append(1)
+            if len(attempts) <= 3:
+                raise RuntimeError("temporary failure")
+            return json.dumps(
+                {
+                    "checks": {"Q1": "met", "Q2": "met"},
+                    "reasoning": {},
+                }
+            )
+
+        results = judge_cases(
+            [{"case_id": "case-a"}],
+            {"case-a": "report"},
+            RUBRIC,
+            build_prompt,
+            call_model,
+            extract_json,
+        )
+
+        self.assertEqual(len(attempts), 4)
+        self.assertEqual(results[0]["status"], "judged")
+        self.assertEqual(results[0]["judge_meta"]["retries"], 3)
+        self.assertEqual(
+            [call["attempt"] for call in results[0]["judge_trace"]["calls"]],
+            [1, 2, 3, 4],
+        )
+
+    def test_judge_stops_after_three_retries(self):
+        attempts = []
+
+        def call_model(_prompt):
+            attempts.append(1)
+            raise RuntimeError("provider unavailable")
+
+        results = judge_cases(
+            [{"case_id": "case-a"}],
+            {"case-a": "report"},
+            RUBRIC,
+            build_prompt,
+            call_model,
+            extract_json,
+        )
+
+        self.assertEqual(len(attempts), 4)
+        self.assertEqual(results[0]["status"], "failed")
+        self.assertIn("已重试 3 次", results[0]["error"])
+
+    def test_invalid_schema_is_retried_in_place(self):
+        attempts = []
+
+        def call_model(_prompt):
+            attempts.append(1)
+            if len(attempts) == 1:
+                return json.dumps({"reasoning": {"Q1": "missing checks"}})
+            return json.dumps(
+                {
+                    "checks": {"Q1": "met", "Q2": "met"},
+                    "reasoning": {},
+                }
+            )
+
+        results = judge_cases(
+            [{"case_id": "case-a"}],
+            {"case-a": "report"},
+            RUBRIC,
+            build_prompt,
+            call_model,
+            extract_json,
+        )
+
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(results[0]["status"], "judged")
+        self.assertEqual(results[0]["judge_meta"]["retries"], 1)
+
     def test_result_callback_persists_each_success_as_completed(self):
         completed = []
         results = judge_cases(
@@ -370,7 +460,7 @@ class JudgeBatchTest(unittest.TestCase):
             {"strategy": "per_dimension", "model_calls": 6},
         )
 
-    def test_per_dimension_failure_marks_only_that_case_failed(self):
+    def test_per_dimension_failure_preserves_successful_dimensions(self):
         rubric = {
             "dimensions": [
                 {"name": "structure", "checks": [{"id": "S1"}]},
@@ -397,8 +487,61 @@ class JudgeBatchTest(unittest.TestCase):
             extract_json,
             strategy=JUDGE_STRATEGY_PER_DIMENSION,
         )
-        self.assertEqual(results[0]["status"], "failed")
+        self.assertEqual(results[0]["status"], "partial")
+        self.assertEqual(results[0]["checks"], {"S1": "met"})
         self.assertIn("narrative", results[0]["error"])
+
+    def test_per_dimension_resume_only_runs_missing_dimensions(self):
+        rubric = {
+            "dimensions": [
+                {"name": "structure", "checks": [{"id": "S1"}]},
+                {"name": "narrative", "checks": [{"id": "N1"}]},
+            ]
+        }
+        calls = []
+
+        def dimension_prompt(current_rubric, _report, _context):
+            dimension = current_rubric["dimensions"][0]
+            return json.dumps(
+                {
+                    "name": dimension["name"],
+                    "check_id": dimension["checks"][0]["id"],
+                }
+            )
+
+        def call_model(prompt):
+            payload = json.loads(prompt)
+            calls.append(payload["name"])
+            return json.dumps(
+                {
+                    "checks": {payload["check_id"]: "met"},
+                    "reasoning": {},
+                }
+            )
+
+        results = judge_cases(
+            [{"case_id": "case-a"}],
+            {"case-a": "report"},
+            rubric,
+            dimension_prompt,
+            call_model,
+            extract_json,
+            strategy=JUDGE_STRATEGY_PER_DIMENSION,
+            existing_judgments={
+                "case-a": {
+                    "checks": {"S1": "met"},
+                    "reasoning": {"S1": "preserved"},
+                }
+            },
+        )
+
+        self.assertEqual(calls, ["narrative"])
+        self.assertEqual(results[0]["status"], "judged")
+        self.assertEqual(
+            results[0]["checks"],
+            {"S1": "met", "N1": "met"},
+        )
+        self.assertEqual(results[0]["reasoning"]["S1"], "preserved")
 
     def test_per_dimension_call_count_follows_rubric(self):
         rubric = {

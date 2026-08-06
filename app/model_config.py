@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""OpenHarness 前端与后端共用的 WorkBuddy 模型配置。"""
+"""OpenHarness 前端与后端共用的模型配置。"""
+
+SUPPORTED_API_MODELS = (
+    "claude-opus-5",
+    "claude-opus-4.8",
+    "gpt-5.6-sol",
+)
 
 SUPPORTED_WB_MODELS = (
     "deepseek-v4-pro-ioa",
@@ -31,3 +37,4 @@ SUPPORTED_WB_MODELS = (
 
 DEFAULT_GENERATION_WB_MODEL = "deepseek-v4-pro-ioa"
 DEFAULT_EVALUATION_WB_MODEL = "claude-opus-4.8"
+DEFAULT_EVALUATION_API_MODEL = "claude-opus-4.8"

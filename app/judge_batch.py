@@ -22,6 +22,7 @@ JUDGE_STRATEGIES = {
     JUDGE_STRATEGY_SINGLE,
     JUDGE_STRATEGY_PER_DIMENSION,
 }
+DEFAULT_JUDGE_MAX_RETRIES = 3
 
 _DIMENSION_CONTEXT_KEYS = {
     "traceability": ("background", "structured_data"),
@@ -43,6 +44,21 @@ def normalize_judge_strategy(value: str | None) -> str:
             % (strategy, ", ".join(sorted(JUDGE_STRATEGIES)))
         )
     return strategy
+
+
+def normalize_judge_max_retries(value=None) -> int:
+    raw = DEFAULT_JUDGE_MAX_RETRIES if value is None else value
+    if isinstance(raw, bool) or (
+        isinstance(raw, float) and not raw.is_integer()
+    ):
+        raise ValueError("Judge 重试次数必须是非负整数")
+    try:
+        retries = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Judge 重试次数必须是非负整数") from exc
+    if retries < 0:
+        raise ValueError("Judge 重试次数必须是非负整数")
+    return retries
 
 
 def _expected_check_ids(rubric: Dict) -> List[str]:
@@ -144,6 +160,8 @@ def judge_cases(
     parallel: int = 3,
     on_result: Optional[Callable[[Dict], Optional[Dict]]] = None,
     strategy: str = JUDGE_STRATEGY_SINGLE,
+    max_retries: int = DEFAULT_JUDGE_MAX_RETRIES,
+    existing_judgments: Optional[Dict[str, Dict]] = None,
 ) -> List[Dict]:
     """批量 Judge，返回与输入 case 顺序一致的逐 case 结果。
 
@@ -152,6 +170,8 @@ def judge_cases(
     """
     case_list = list(cases)
     strategy = normalize_judge_strategy(strategy)
+    max_retries = normalize_judge_max_retries(max_retries)
+    existing_judgments = existing_judgments or {}
     expected = _expected_check_ids(rubric)
     if not expected:
         raise ValueError("Rubric 未配置任何 Judge checks")
@@ -169,36 +189,49 @@ def judge_cases(
         judge_started = time.monotonic()
         call_traces = []
 
-        def invoke(prompt: str, dimension: str) -> str:
-            call_started = time.monotonic()
-            trace = {
-                "dimension": dimension or "all",
-                "promptSha256": hashlib.sha256(
-                    prompt.encode("utf-8")
-                ).hexdigest(),
-                "promptChars": len(prompt),
-            }
-            try:
-                response = call_model(prompt)
-                trace.update({
-                    "status": "completed",
-                    "durationMs": int(
-                        (time.monotonic() - call_started) * 1000
-                    ),
-                    "response": str(response)[:12000],
-                })
-                call_traces.append(trace)
-                return response
-            except Exception as exc:
-                trace.update({
-                    "status": "failed",
-                    "durationMs": int(
-                        (time.monotonic() - call_started) * 1000
-                    ),
-                    "error": str(exc),
-                })
-                call_traces.append(trace)
-                raise
+        def invoke(prompt: str, dimension: str, expected_ids):
+            last_error = None
+            for retry_index in range(max_retries + 1):
+                call_started = time.monotonic()
+                trace = {
+                    "dimension": dimension or "all",
+                    "attempt": retry_index + 1,
+                    "retry": retry_index,
+                    "promptSha256": hashlib.sha256(
+                        prompt.encode("utf-8")
+                    ).hexdigest(),
+                    "promptChars": len(prompt),
+                }
+                try:
+                    response = call_model(prompt)
+                    trace["response"] = str(response)[:12000]
+                    parsed = extract_json(response)
+                    checks, reasoning = _validate_payload(
+                        parsed,
+                        expected_ids,
+                    )
+                    trace.update({
+                        "status": "completed",
+                        "durationMs": int(
+                            (time.monotonic() - call_started) * 1000
+                        ),
+                    })
+                    call_traces.append(trace)
+                    return checks, reasoning, retry_index + 1
+                except Exception as exc:
+                    last_error = exc
+                    trace.update({
+                        "status": "failed",
+                        "durationMs": int(
+                            (time.monotonic() - call_started) * 1000
+                        ),
+                        "error": str(exc),
+                    })
+                    call_traces.append(trace)
+            raise RuntimeError(
+                "%s Judge 失败（已重试 %d 次）: %s"
+                % (dimension or "整份报告", max_retries, last_error)
+            ) from last_error
         try:
             if strategy == JUDGE_STRATEGY_SINGLE:
                 prompt = build_prompt(
@@ -206,12 +239,20 @@ def judge_cases(
                     report,
                     _full_case_context(case),
                 )
-                raw = invoke(prompt, "all")
-                parsed = extract_json(raw)
-                checks, reasoning = _validate_payload(parsed, expected)
+                checks, reasoning, model_attempts = invoke(
+                    prompt,
+                    "all",
+                    expected,
+                )
                 model_calls = 1
+                errors = []
             else:
-                checks, reasoning = {}, {}
+                previous = existing_judgments.get(case_id) or {}
+                checks = dict(previous.get("checks") or {})
+                reasoning = dict(previous.get("reasoning") or {})
+                errors = []
+                model_calls = 0
+                model_attempts = 0
                 dimensions = [
                     dimension
                     for dimension in rubric.get("dimensions", [])
@@ -224,6 +265,12 @@ def judge_cases(
                     dimension_name = str(
                         dimension.get("name") or ""
                     )
+                    if all(
+                        check_id in checks
+                        for check_id in dimension_ids
+                    ):
+                        continue
+                    model_calls += 1
                     try:
                         prompt = build_prompt(
                             dimension_rubric,
@@ -233,31 +280,38 @@ def judge_cases(
                                 dimension_name,
                             ),
                         )
-                        raw = invoke(prompt, dimension_name)
-                        parsed = extract_json(raw)
-                        dim_checks, dim_reasoning = _validate_payload(
-                            parsed,
+                        dim_checks, dim_reasoning, _attempts = invoke(
+                            prompt,
+                            dimension_name,
                             dimension_ids,
                         )
                     except Exception as exc:
-                        raise RuntimeError(
-                            "维度 %s Judge 失败: %s"
-                            % (dimension_name or "unknown", exc)
-                        ) from exc
+                        errors.append(str(exc))
+                        continue
                     checks.update(dim_checks)
                     reasoning.update(dim_reasoning)
-                model_calls = len(dimensions)
+                model_attempts = len(call_traces)
+            status = "judged" if not errors else (
+                "partial" if checks else "failed"
+            )
+            judge_meta = {
+                "strategy": strategy,
+                "model_calls": model_calls,
+            }
+            if model_attempts > model_calls:
+                judge_meta.update({
+                    "model_attempts": model_attempts,
+                    "retries": model_attempts - model_calls,
+                })
             return index, {
                 "case_id": case_id,
-                "status": "judged",
+                "status": status,
                 "checks": checks,
                 "reasoning": reasoning,
-                "judge_meta": {
-                    "strategy": strategy,
-                    "model_calls": model_calls,
-                },
+                **({"error": "; ".join(errors)} if errors else {}),
+                "judge_meta": judge_meta,
                 "judge_trace": {
-                    "status": "completed",
+                    "status": "completed" if not errors else status,
                     "strategy": strategy,
                     "durationMs": int(
                         (time.monotonic() - judge_started) * 1000

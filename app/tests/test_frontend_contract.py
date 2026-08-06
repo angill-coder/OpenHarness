@@ -14,9 +14,29 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("readLlmSelection('optimizer')", source)
         self.assertIn("id=\"judgeLlmBackend\"", html)
         self.assertIn("id=\"optimizerLlmBackend\"", html)
-        self.assertIn("claude-opus-4.8", html)
+        self.assertIn('id="judgeApiModel"', html)
+        self.assertIn('id="optimizerApiModel"', html)
+        for model in (
+            "claude-opus-5",
+            "claude-opus-4.8",
+            "gpt-5.6-sol",
+        ):
+            self.assertIn('value="%s"' % model, html)
+        self.assertIn("?'WbModel':'ApiModel'", source)
+        self.assertIn("result.llm_model=model", source)
         self.assertIn(
             '<option value="workbuddy" selected>WorkBuddy CLI</option>',
+            html,
+        )
+
+    def test_api_model_input_allows_custom_names(self):
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn(
+            '<input id="judgeApiModel" list="evaluationApiModels"',
+            html,
+        )
+        self.assertIn(
+            '<input id="optimizerApiModel" list="evaluationApiModels"',
             html,
         )
 
