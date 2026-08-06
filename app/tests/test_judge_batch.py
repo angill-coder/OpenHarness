@@ -977,6 +977,37 @@ class ModelOnlySessionTest(unittest.TestCase):
             "optimizer_no_applicable_change",
         )
 
+    def test_ready_report_can_be_judged_before_all_reports_exist(self):
+        session = Session(
+            "judge-ready-partial",
+            "生成调研洞察报告",
+            "research_insight",
+        )
+        session.import_data(
+            [
+                {"case_id": "case-a", "input": {"brief": "A"}},
+                {"case_id": "case-b", "input": {"brief": "B"}},
+            ]
+        )
+        state = session.import_output("case-a", "report A")
+
+        self.assertEqual(
+            state["judge_progress"]["judgeable_case_ids"],
+            ["case-a"],
+        )
+        self.assertTrue(state["actions"]["run_judge"]["enabled"])
+        self.assertFalse(state["actions"]["advance"]["enabled"])
+
+    def test_experiment_user_round_trips_through_snapshot(self):
+        session = Session(
+            "user-round-trip",
+            "生成调研洞察报告",
+            "research_insight",
+            experiment_user="Zoe",
+        )
+        self.assertEqual(session.view()["experiment_user"], "Zoe")
+        restored = Session.restore(session.to_snapshot())
+        self.assertEqual(restored.view()["experiment_user"], "Zoe")
 
 if __name__ == "__main__":
     unittest.main()
