@@ -889,6 +889,7 @@ class Handler(BaseHTTPRequestHandler):
                 with _session_lock(sid):
                     out.append({"id": sid, "product_id": s.product_id,
                                 "requirement": s.requirement,
+                                "experiment_user": getattr(s, "experiment_user", ""),
                                 "current_version": s._current()["version"],
                                 "n_versions": len(s.versions), "n_cases": len(s.cases),
                                 "created_at": meta.get("created_at")})
@@ -914,6 +915,11 @@ class Handler(BaseHTTPRequestHandler):
             mode = (b.get("optimizer_mode") or "switch_search").strip() or "switch_search"
             if mode not in ("switch_search", "llm_rewrite"):
                 return self._send(400, {"error": "非法 optimizer_mode: %s" % mode})
+            experiment_user = str(b.get("experiment_user") or "Zoe").strip()
+            if experiment_user not in ("Angill", "Sijing", "Zoe"):
+                return self._send(
+                    400, {"error": "experiment_user must be one of: Angill, Sijing, Zoe"}
+                )
             v0_strategy = (
                 b.get("v0_strategy") or "base_skill"
             ).strip() or "base_skill"
@@ -939,6 +945,7 @@ class Handler(BaseHTTPRequestHandler):
                     prefer_real=PREFER_REAL,
                     optimizer_mode=mode,
                     optimizer_stop=stop,
+                    experiment_user=experiment_user,
                     v0_strategy=v0_strategy,
                 )
             except llm_client.LLMClientError as e:
@@ -1282,7 +1289,11 @@ class Handler(BaseHTTPRequestHandler):
                     for case in cases
                     if not (reports.get(case["case_id"]) or "").strip()
                 ]
-                if missing_reports:
+                missing_report_ids = set(missing_reports)
+                cases = [
+                    case for case in cases if case["case_id"] not in missing_report_ids
+                ]
+                if not cases:
                     return self._send(
                         409,
                         {

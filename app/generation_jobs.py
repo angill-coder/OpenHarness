@@ -496,6 +496,65 @@ class GenerationJobService:
             }
         return index
 
+    def _write_session_dataset(
+        self,
+        session_id: str,
+        version: str,
+        session_cases: Dict[str, Dict],
+        requested: Iterable[str],
+    ) -> Path:
+        """Snapshot inline Session inputs for cases absent from configured data."""
+        rows = []
+        for case_id in requested:
+            source = session_cases[case_id]
+            input_payload = source.get("input")
+            if not isinstance(input_payload, dict) or not input_payload:
+                raise GenerationJobError(
+                    "Session case %s 缺少可供 Runner 使用的 input" % case_id
+                )
+            topic = str(
+                source.get("topic") or input_payload.get("topic") or case_id
+            )
+            brief = str(input_payload.get("brief") or "").strip()
+            prompt = (
+                "请根据以下用户输入与其中的原始素材生成完整调研报告。"
+                "只能使用这些材料，不得引入未提供的事实。\n\n"
+                "主题：%s\n%s\n\n用户输入 JSON：\n%s"
+                % (
+                    topic,
+                    ("任务要求：" + brief) if brief else "",
+                    json.dumps(input_payload, ensure_ascii=False, indent=2),
+                )
+            )
+            rows.append(
+                {
+                    "case_id": case_id,
+                    "split": str(source.get("split") or "dev"),
+                    "input": input_payload,
+                    "turns": [
+                        {"round": 0, "label": "task", "prompt": prompt}
+                    ],
+                    "metadata": {"source_kind": "session_inline"},
+                }
+            )
+        payload = {
+            "schema_version": "openharness-wb/v1",
+            "defaults": {"skills": ["research-report"]},
+            "cases": rows,
+        }
+        content = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+        target_dir = (
+            self.settings.output_root / "_session_datasets" / session_id
+        )
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / ("%s-%s.json" % (version, digest))
+        if not target.exists():
+            temporary = target.with_suffix(".tmp")
+            temporary.write_text(content, encoding="utf-8")
+            temporary.replace(target)
+        return target.resolve()
+
     def _persist(self, job: GenerationJob) -> None:
         job.updated_at = time.time()
         persist.save_generation_job(
@@ -622,11 +681,13 @@ class GenerationJobService:
                 raise GenerationJobError(
                     "请先给 Session 导入评测数据"
                 )
-            session_cases = {
-                str(item["case_id"]): str(
-                    item.get("split") or "dev"
-                )
+            session_case_rows = {
+                str(item["case_id"]): item
                 for item in session.cases
+            }
+            session_cases = {
+                case_id: str(item.get("split") or "dev")
+                for case_id, item in session_case_rows.items()
             }
             version = session._eval_target()["version"]
             skill = _skill_for_version(session, version)
@@ -662,10 +723,18 @@ class GenerationJobService:
             )
         missing_dataset = sorted(set(requested) - set(dataset))
         if missing_dataset:
-            raise GenerationJobError(
-                "data.json 缺少这些 Session case 的映射: "
-                + ", ".join(missing_dataset)
+            if set(missing_dataset) != set(requested):
+                raise GenerationJobError(
+                    "data.json 仅覆盖部分 Session case，缺少: "
+                    + ", ".join(missing_dataset)
+                )
+            dataset_path = self._write_session_dataset(
+                session_id,
+                version,
+                session_case_rows,
+                requested,
             )
+            dataset = self._dataset_index(dataset_path)
 
         now = time.time()
         job_id = "job-%s-%s" % (
