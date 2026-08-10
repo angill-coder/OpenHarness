@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Dict, Iterable, List, Optional
@@ -30,7 +31,7 @@ _DIMENSION_CONTEXT_KEYS = {
     "narrative": (),
     "insight": ("background", "structured_data"),
     "coverage": ("background", "structured_data"),
-    "expression": (),
+    "expression": ("delivery_constraints", "report_stats"),
 }
 
 
@@ -127,18 +128,108 @@ def _background_context(case: Dict) -> Dict:
     return background
 
 
-def _full_case_context(case: Dict) -> Dict:
+def _delivery_constraints_context(case: Dict) -> Dict:
+    value = case.get("delivery_constraints")
+    if not isinstance(value, dict):
+        case_input = case.get("input") or {}
+        if isinstance(case_input, dict):
+            value = case_input.get("report_length")
+    result = {}
+    if isinstance(value, dict):
+        for key in ("max_pages", "max_chars", "chars_per_page"):
+            if value.get(key) not in (None, ""):
+                result[key] = value[key]
+        if value.get("counting_rule"):
+            result["counting_rule"] = str(value["counting_rule"])
+    prompt_candidates = []
+    for turn in case.get("turns") or []:
+        if not isinstance(turn, dict):
+            continue
+        prompt_candidates.append(
+            str(
+                turn.get("prompt")
+                or turn.get("input")
+                or turn.get("text")
+                or ""
+            )
+        )
+    case_input = case.get("input") or {}
+    if isinstance(case_input, dict):
+        prompt_candidates.append(str(case_input.get("intake") or ""))
+    for prompt_text in prompt_candidates:
+        length_lines = [
+            line.strip()
+            for line in prompt_text.splitlines()
+            if "报告篇幅" in line or "篇幅要求" in line
+        ]
+        if length_lines:
+            result["user_prompt"] = "\n".join(length_lines)
+            if "max_pages" not in result:
+                match = re.search(r"(\d+)\s*页", result["user_prompt"])
+                if match:
+                    result["max_pages"] = int(match.group(1))
+            if "max_chars" not in result:
+                match = re.search(
+                    r"(?:不超过|控制在|约)?\s*(\d+)\s*(?:字|个?字符)",
+                    result["user_prompt"],
+                )
+                if match:
+                    result["max_chars"] = int(match.group(1))
+            if "chars_per_page" not in result and "max_pages" in result:
+                result["chars_per_page"] = 1000
+            if (
+                "max_chars" not in result
+                and result.get("max_pages")
+                and result.get("chars_per_page")
+            ):
+                result["max_chars"] = (
+                    int(result["max_pages"])
+                    * int(result["chars_per_page"])
+                )
+            break
+    return result
+
+
+def _report_stats(report_text: str) -> Dict:
+    """Return deterministic Markdown-visible length metrics for E4."""
+    text = str(report_text or "")
+    visible = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    visible = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", visible)
+    visible = re.sub(r"(?m)^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$", "", visible)
+    visible = re.sub(r"(?m)^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+", "", visible)
+    visible = re.sub(r"```[^\n]*|```", "", visible)
+    visible = re.sub(r"[*_`~|]", "", visible)
+    visible_chars = len(re.sub(r"\s+", "", visible))
+    return {
+        "raw_chars": len(text),
+        "visible_chars": visible_chars,
+        "estimated_pages_at_1000_chars": round(visible_chars / 1000.0, 3),
+        "counting_rule": (
+            "去除 Markdown 标记与空白后的可见字符；表格单元格文字计入"
+        ),
+    }
+
+
+def _full_case_context(case: Dict, report_text: str = "") -> Dict:
     context = {
         "case_id": str(case.get("case_id") or ""),
         "background": _background_context(case),
+        "report_stats": _report_stats(report_text),
     }
+    delivery_constraints = _delivery_constraints_context(case)
+    if delivery_constraints:
+        context["delivery_constraints"] = delivery_constraints
     if case.get("structured_data"):
         context["structured_data"] = case["structured_data"]
     return context
 
 
-def _dimension_case_context(case: Dict, dimension_name: str) -> Dict:
-    full = _full_case_context(case)
+def _dimension_case_context(
+    case: Dict,
+    dimension_name: str,
+    report_text: str = "",
+) -> Dict:
+    full = _full_case_context(case, report_text)
     keys = _DIMENSION_CONTEXT_KEYS.get(dimension_name)
     if keys is None:
         # 自定义 rubric 的未知维度沿用完整上下文，避免兼容性退化。
@@ -237,7 +328,7 @@ def judge_cases(
                 prompt = build_prompt(
                     rubric,
                     report,
-                    _full_case_context(case),
+                    _full_case_context(case, report),
                 )
                 checks, reasoning, model_attempts = invoke(
                     prompt,
@@ -278,6 +369,7 @@ def judge_cases(
                             _dimension_case_context(
                                 case,
                                 dimension_name,
+                                report,
                             ),
                         )
                         dim_checks, dim_reasoning, _attempts = invoke(

@@ -83,7 +83,7 @@ RESEARCH_DIRECTIVE_DEFINITIONS: Dict[str, Dict[str, object]] = {
         "text": "关键数据和对比必须用 Markdown 表格或合适的结构化形式呈现。",
     },
     "match_exec_length": {
-        "text": "面向高管精炼表达，控制在约 1.5 页量级并删除注水内容。",
+        "text": "面向高管精炼表达，遵守用户确认的页数或字数上限；页数按每页不超过约 1000 个中文可见字符折算，未指定时默认 3000 字以内。删除注水，但不得删减关键问题、关键 Claim、口径、冲突和证据边界。",
     },
     "require_rigorous_wording": {
         "text": "结论先行，限定条件清楚，措辞严谨且不模棱两可。",

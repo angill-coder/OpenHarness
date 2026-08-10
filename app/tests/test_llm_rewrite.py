@@ -379,7 +379,8 @@ class TestFreeformCompile(unittest.TestCase):
     def test_freeform_replaces_editable_keeps_structure(self):
         gen = generator_mod.generate_v0(
             "面向总裁，先收集背景、hypothesis 和材料重点分布，"
-            "再按摘要、关键发现、启示三段式输出，数据多时用图表。",
+            "并确认报告篇幅，再按摘要、关键发现、启示三段式输出，"
+            "数据多时用图表。",
             "research_insight",
             optimizer_mode="llm_rewrite",
         )
@@ -387,6 +388,8 @@ class TestFreeformCompile(unittest.TestCase):
         contract = sk.instructions.get("requirement_contract", "")
         self.assertIn("总裁/最高管理层", contract)
         self.assertIn("材料重点分布", contract)
+        self.assertIn("报告篇幅", contract)
+        self.assertIn("1000 个中文可见字符", contract)
         self.assertIn("严格三段式", contract)
         self.assertIn("markdown 表格或清晰图表", contract)
         prop = {"instructions_text": "## 硬规则（改写）\n1. 不编造、冲突不混用、单源降级、样本偏差、证据不足留白。",
@@ -404,6 +407,7 @@ class TestFreeformCompile(unittest.TestCase):
         self.assertNotIn("生命线", txt)                   # 旧可编辑区被替换
         self.assertIn("本会话任务契约（冻结", txt)
         self.assertIn("材料重点分布", txt)
+        self.assertIn("报告篇幅", txt)
         self.assertIn("报告结构（面向高管，三部分", txt)   # 结构层保留
         self.assertIn("OPENHARNESS_DIRECTIVES", txt)      # manifest 保留
         self.assertIn("OPENHARNESS_VERSION_RULES_START", txt)

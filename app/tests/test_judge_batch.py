@@ -16,6 +16,7 @@ for path in (str(APP), str(HARNESS)):
 from judge_batch import (  # noqa: E402
     JUDGE_STRATEGY_PER_DIMENSION,
     JUDGE_STRATEGY_SIX_AGENT,
+    _delivery_constraints_context,
     judge_cases,
     normalize_judge_strategy,
 )
@@ -55,6 +56,22 @@ def extract_json(text):
 
 
 class JudgeBatchTest(unittest.TestCase):
+    def test_length_constraint_falls_back_to_user_prompt(self):
+        context = _delivery_constraints_context(
+            {
+                "turns": [
+                    {"round": 0, "prompt": "任务"},
+                    {
+                        "round": 1,
+                        "prompt": "4. 报告篇幅：控制在4页以内。",
+                    },
+                ]
+            }
+        )
+        self.assertEqual(context["max_pages"], 4)
+        self.assertEqual(context["max_chars"], 4000)
+        self.assertEqual(context["chars_per_page"], 1000)
+
     def test_judge_and_optimizer_default_to_workbuddy_opus(self):
         for purpose in ("judge", "optimizer"):
             backend, model, effort = _llm_selection({}, purpose)
@@ -118,6 +135,27 @@ class JudgeBatchTest(unittest.TestCase):
         self.assertNotIn("Human Report", prompt)
         self.assertNotIn("事实 A", prompt)
         self.assertIn('"Q1": "met"', prompt)
+
+    def test_server_prompt_includes_length_constraint_and_measured_stats(self):
+        prompt = _build_judge_prompt(
+            RUBRIC,
+            "报告正文",
+            {
+                "case_id": "case-a",
+                "delivery_constraints": {
+                    "max_pages": 2,
+                    "max_chars": 2000,
+                },
+                "report_stats": {
+                    "visible_chars": 2150,
+                    "estimated_pages_at_1000_chars": 2.15,
+                },
+            },
+        )
+        self.assertIn("用户确认的交付篇幅", prompt)
+        self.assertIn('"max_chars": 2000', prompt)
+        self.assertIn("平台计算的报告长度", prompt)
+        self.assertIn('"visible_chars": 2150', prompt)
 
     def test_judges_all_cases_and_preserves_dataset_order(self):
         cases = [
@@ -215,9 +253,17 @@ class JudgeBatchTest(unittest.TestCase):
                     "case_id": "case-a",
                     "turns": [
                         {"round": 0, "prompt": "任务"},
-                        {"round": 1, "prompt": "背景"},
+                        {
+                            "round": 1,
+                            "prompt": "背景\n4. 报告篇幅：控制在3页以内。",
+                        },
                     ],
                     "human_report": {"human_report_text": "HR"},
+                    "delivery_constraints": {
+                        "max_pages": 3,
+                        "max_chars": 3000,
+                        "chars_per_page": 1000,
+                    },
                     "structured_data": evidence,
                 }
             ],
@@ -235,8 +281,22 @@ class JudgeBatchTest(unittest.TestCase):
             {
                 "case_id",
                 "background",
+                "delivery_constraints",
+                "report_stats",
                 "structured_data",
             },
+        )
+        self.assertEqual(
+            prompts[0]["case_context"]["delivery_constraints"]["max_chars"],
+            3000,
+        )
+        self.assertIn(
+            "控制在3页以内",
+            prompts[0]["case_context"]["delivery_constraints"]["user_prompt"],
+        )
+        self.assertGreater(
+            prompts[0]["case_context"]["report_stats"]["visible_chars"],
+            0,
         )
         self.assertEqual(
             results[0]["judge_meta"],
@@ -432,9 +492,17 @@ class JudgeBatchTest(unittest.TestCase):
                     "case_id": "case-a",
                     "turns": [
                         {"round": 0, "prompt": "任务"},
-                        {"round": 1, "prompt": "背景"},
+                        {
+                            "round": 1,
+                            "prompt": "背景\n4. 报告篇幅：控制在2页以内。",
+                        },
                     ],
                     "human_report": {"human_report_text": "HR"},
+                    "delivery_constraints": {
+                        "max_pages": 2,
+                        "max_chars": 2000,
+                        "chars_per_page": 1000,
+                    },
                     "structured_data": {
                         "schema": "openharness-structured-data/v1",
                         "case_id": "case-a",
@@ -467,8 +535,20 @@ class JudgeBatchTest(unittest.TestCase):
                 "structured_data",
             },
         )
-        for dimension in ("structure", "narrative", "expression"):
+        for dimension in ("structure", "narrative"):
             self.assertEqual(set(prompts[dimension]), {"case_id"})
+        self.assertEqual(
+            set(prompts["expression"]),
+            {"case_id", "delivery_constraints", "report_stats"},
+        )
+        self.assertEqual(
+            prompts["expression"]["delivery_constraints"]["max_chars"],
+            2000,
+        )
+        self.assertIn(
+            "控制在2页以内",
+            prompts["expression"]["delivery_constraints"]["user_prompt"],
+        )
         self.assertEqual(
             results[0]["checks"],
             {

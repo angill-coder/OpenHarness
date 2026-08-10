@@ -226,6 +226,16 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
             "只有与 Structured Data 明确冲突或报告给出无依据的确定性事实时，"
             "才对“不编造·不曲解”降档。",
         ]
+    if context.get("delivery_constraints"):
+        L.append(
+            "Delivery Constraints 是用户确认的交付要求；评价 E4 时以其中的"
+            " max_pages/max_chars 为准，不再套用固定页数。"
+        )
+    if context.get("report_stats"):
+        L.append(
+            "Report Stats 是平台按统一规则计算的报告长度；评价 E4 时直接比较"
+            " visible_chars 与 max_chars，不要凭版式主观估页数。"
+        )
     if set(context) <= {"case_id"}:
         L.append("本维度只根据报告正文和 check 本身判断。")
     L += ["", "## 逐条 check（每条都要打分）"]
@@ -245,6 +255,8 @@ def _build_judge_prompt(rubric, report_text, case_context) -> str:
     for key, title in (
         ("background", "背景信息（round 0–1）"),
         ("structured_data", "Structured Data"),
+        ("delivery_constraints", "用户确认的交付篇幅"),
+        ("report_stats", "平台计算的报告长度"),
     ):
         if context.get(key):
             L += [

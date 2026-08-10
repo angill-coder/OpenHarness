@@ -97,6 +97,7 @@ class CaseDatasetTest(unittest.TestCase):
                     "1": {
                         "research_background": "具体研究背景。",
                         "hypo": "具体研究假设。",
+                        "report_pages": 2,
                         "metadata": {"industry": "测试行业"},
                     }
                 },
@@ -125,6 +126,13 @@ class CaseDatasetTest(unittest.TestCase):
         self.assertEqual(case["metadata"]["industry"], "测试行业")
         self.assertIn("具体研究背景。", case["turns"][1]["prompt"])
         self.assertIn("具体研究假设。", case["turns"][1]["prompt"])
+        self.assertIn(
+            "4. 报告篇幅：控制在2页以内。", case["turns"][1]["prompt"]
+        )
+        self.assertNotIn("1000个中文", case["turns"][1]["prompt"])
+        self.assertNotIn("2000字", case["turns"][1]["prompt"])
+        self.assertEqual(case["delivery_constraints"]["max_pages"], 2)
+        self.assertEqual(case["delivery_constraints"]["max_chars"], 2000)
 
     def test_strict_mode_rejects_missing_intake(self) -> None:
         materials = self.root / "materials"
