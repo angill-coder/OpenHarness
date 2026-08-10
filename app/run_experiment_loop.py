@@ -164,6 +164,7 @@ class ExperimentLoop:
         max_optimizer_attempts: int = 3,
         generation_parallel: Optional[int] = None,
         judge_parallel: Optional[int] = None,
+        max_settled_candidates: Optional[int] = None,
         log_path: Optional[Path] = None,
     ):
         self.base_url = base_url.rstrip("/")
@@ -181,6 +182,11 @@ class ExperimentLoop:
         )
         self.generation_parallel = generation_parallel
         self.judge_parallel = judge_parallel
+        self.max_settled_candidates = (
+            None
+            if max_settled_candidates is None
+            else max(1, int(max_settled_candidates))
+        )
         self.log_path = log_path
         self._last_generation_marker = None
         self._judge_rounds: Dict[str, int] = {}
@@ -463,6 +469,26 @@ class ExperimentLoop:
         while True:
             try:
                 state = self.session_state()
+                settled_candidates = [
+                    item
+                    for item in (state.get("versions") or [])
+                    if item.get("version") != "v0"
+                    and item.get("candidate_state")
+                    in {"adopted", "rejected"}
+                ]
+                if (
+                    self.max_settled_candidates is not None
+                    and len(settled_candidates)
+                    >= self.max_settled_candidates
+                ):
+                    self.emit(
+                        "automation_completed",
+                        reason="已完成指定数量的候选判定",
+                        settled_candidates=len(settled_candidates),
+                        current_version=state.get("current_version"),
+                        best_version=state.get("best_version"),
+                    )
+                    return 0
                 generation = self.generation_state()
                 action = plan_next_action(
                     state,
@@ -560,6 +586,11 @@ def main(argv=None):
     parser.add_argument("--generation-parallel", type=int)
     parser.add_argument("--judge-parallel", type=int)
     parser.add_argument(
+        "--max-settled-candidates",
+        type=int,
+        help="指定数量的非 v0 候选完成 Gate 判定后退出。",
+    )
+    parser.add_argument(
         "--once",
         action="store_true",
         help="只输出下一动作，不执行变更。",
@@ -594,6 +625,7 @@ def main(argv=None):
             max_optimizer_attempts=args.max_optimizer_attempts,
             generation_parallel=args.generation_parallel,
             judge_parallel=args.judge_parallel,
+            max_settled_candidates=args.max_settled_candidates,
             log_path=log_path,
         )
         return loop.run(once=args.once)

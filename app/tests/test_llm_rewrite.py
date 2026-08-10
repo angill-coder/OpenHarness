@@ -414,9 +414,9 @@ class TestFreeformCompile(unittest.TestCase):
             "```json\n%s\n```" % json.dumps({
                 "instructions_text": draft,
                 "draft_summary": "依据需求和 rubric 起草",
-                "covered_redlines": ["T2", "T3", "T5", "E4"],
+                "covered_redlines": ["T1", "T2", "T3", "T5", "E5"],
             }, ensure_ascii=False),
-            json.dumps({"T2": True, "T3": True, "T5": True, "E4": True}),
+            json.dumps({"T1": True, "T2": True, "T3": True, "T5": True, "E5": True}),
         ]
         prompts = []
 
@@ -459,7 +459,7 @@ class TestFreeformCompile(unittest.TestCase):
         draft = "## 从零规则\n1. 所有事实与结论必须有素材支持。"
         replies = [
             json.dumps({"instructions_text": draft}),
-            json.dumps({"T2": True, "T3": True, "T5": True, "E4": True}),
+            json.dumps({"T1": True, "T2": True, "T3": True, "T5": True, "E5": True}),
         ]
         old_base = persist._BASE
         with tempfile.TemporaryDirectory() as tmp:
@@ -497,13 +497,13 @@ class TestRedlineGuard(unittest.TestCase):
         llm_client.call_llm = self._orig
 
     def test_guard_rejects_when_redline_dropped(self):
-        llm_client.call_llm = lambda p, **kwargs: '{"T2": true, "T3": false, "T5": true, "E4": true}'
+        llm_client.call_llm = lambda p, **kwargs: '{"T1": true, "T2": true, "T3": false, "T5": true, "E5": true}'
         r = optimizer02._redline_guard("正文", self.rubric)
         self.assertFalse(r["ok"])
         self.assertIn("T3", r["dropped"])
 
     def test_guard_passes_when_all_kept(self):
-        llm_client.call_llm = lambda p, **kwargs: '{"T2": true, "T3": true, "T5": true, "E4": true}'
+        llm_client.call_llm = lambda p, **kwargs: '{"T1": true, "T2": true, "T3": true, "T5": true, "E5": true}'
         r = optimizer02._redline_guard("正文", self.rubric)
         self.assertTrue(r["ok"])
 
@@ -535,7 +535,7 @@ class TestRedlineGuard(unittest.TestCase):
 def _fake_llm(rewrite_text):
     def _call(prompt, **kwargs):
         if "红线义务清单" in prompt:                 # 守卫调用
-            return '{"T2": true, "T3": true, "T5": true, "E4": true}'
+            return '{"T1": true, "T2": true, "T3": true, "T5": true, "E5": true}'
         return ('{"instructions_text": %s, "change_summary": "改写", '
                 '"targets_failures": [], "preserved": [], "hypothesis": "h", '
                 '"self_check_no_hack": true}') % _json_str(rewrite_text)

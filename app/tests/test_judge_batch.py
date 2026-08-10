@@ -860,7 +860,7 @@ class ModelOnlySessionTest(unittest.TestCase):
         )
         self.assertEqual(
             state["failure_report"][0]["pattern_id"],
-            "trace_fabrication",
+            "trace_faithfulness",
         )
 
         # 本用例只验证真实 failure → optimizer proposal 的状态流，
