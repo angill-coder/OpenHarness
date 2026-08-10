@@ -67,6 +67,21 @@ export LLM_API_STYLE=anthropic          # 第三方 OpenAI 兼容网关填 opena
 export OPENHARNESS_JUDGE_PARALLEL=20    # 默认 20；可在 Web UI 调整
 ```
 
+Judge 与 LLM Optimizer 都支持三种调用方式：`api`、`workbuddy`、`codex`。
+选择 Codex CLI 时默认使用 `gpt-5.6-sol` 和 `medium` 推理力度；Web UI
+可分别为 Judge 与 Optimizer 调整推理力度。Codex CLI 不在 `PATH` 时设置：
+
+```bash
+export OPENHARNESS_CODEX_CLI_PATH=/path/to/codex
+export OPENHARNESS_JUDGE_CODEX_MODEL=gpt-5.6-sol
+export OPENHARNESS_JUDGE_CODEX_REASONING_EFFORT=medium
+export OPENHARNESS_OPTIMIZER_CODEX_MODEL=gpt-5.6-sol
+export OPENHARNESS_OPTIMIZER_CODEX_REASONING_EFFORT=medium
+```
+
+Codex 调用使用非交互、临时会话和只读沙箱；Prompt 通过 stdin 传入，最终文本
+通过 `--output-last-message` 回收，不写入 OpenHarness 工作区。
+
 调研汇报数据统一安装在 `data/research-report/v1|v2|v3/`，每个目录的 `data.json` 是 Runner、Judge 和 Dashboard 共用的唯一入口。Session `meta.json` 中的 `experiment_data.id` 决定使用 v1、v2 还是 v3；原始 source 始终以 `data.json` 所在目录为相对路径根。这些目录已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查三个实际路径。
 
 `OPENHARNESS_WB_DATASET_V1/V2/V3` 可分别覆盖三个入口。旧的 `OPENHARNESS_WB_DATASET` 仍保留兼容；若设置，会作为未单独配置版本的统一 fallback。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。

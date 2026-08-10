@@ -16,14 +16,21 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("id=\"optimizerLlmBackend\"", html)
         self.assertIn('id="judgeApiModel"', html)
         self.assertIn('id="optimizerApiModel"', html)
+        self.assertIn('<option value="codex">Codex CLI</option>', html)
+        self.assertIn('id="judgeCodexModel"', html)
+        self.assertIn('id="optimizerCodexModel"', html)
+        self.assertIn('id="judgeCodexReasoning"', html)
+        self.assertIn('id="optimizerCodexReasoning"', html)
         for model in (
             "claude-opus-5",
             "claude-opus-4.8",
             "gpt-5.6-sol",
         ):
             self.assertIn('value="%s"' % model, html)
-        self.assertIn("?'WbModel':'ApiModel'", source)
+        self.assertIn("backend==='codex'?'CodexModel':'ApiModel'", source)
         self.assertIn("result.llm_model=model", source)
+        self.assertIn("result.llm_reasoning_effort=effort", source)
+        self.assertIn("GEN_CONFIG.codex_reasoning_effort_default||'medium'", source)
         self.assertIn(
             '<option value="workbuddy" selected>WorkBuddy CLI</option>',
             html,

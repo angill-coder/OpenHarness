@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import sys
@@ -25,8 +26,12 @@ if str(HARNESS) not in sys.path:
     sys.path.insert(0, str(HARNESS))
 
 from model_config import (  # noqa: E402
+    DEFAULT_CODEX_REASONING_EFFORT,
     DEFAULT_EVALUATION_API_MODEL,
+    DEFAULT_EVALUATION_CODEX_MODEL,
     DEFAULT_EVALUATION_WB_MODEL,
+    SUPPORTED_CODEX_MODELS,
+    SUPPORTED_CODEX_REASONING_EFFORTS,
     SUPPORTED_WB_MODELS,
 )
 from workbuddy_batch.adapter import (  # noqa: E402
@@ -42,16 +47,25 @@ class LLMClientError(RuntimeError):
 
 LLM_BACKEND_API = "api"
 LLM_BACKEND_WORKBUDDY = "workbuddy"
-LLM_BACKENDS = (LLM_BACKEND_API, LLM_BACKEND_WORKBUDDY)
+LLM_BACKEND_CODEX = "codex"
+LLM_BACKENDS = (
+    LLM_BACKEND_API,
+    LLM_BACKEND_WORKBUDDY,
+    LLM_BACKEND_CODEX,
+)
 
 
 def normalize_backend(value=None) -> str:
     backend = str(value or LLM_BACKEND_API).strip().lower()
-    aliases = {"wb": LLM_BACKEND_WORKBUDDY, "workbuddy_cli": LLM_BACKEND_WORKBUDDY}
+    aliases = {
+        "wb": LLM_BACKEND_WORKBUDDY,
+        "workbuddy_cli": LLM_BACKEND_WORKBUDDY,
+        "codex_cli": LLM_BACKEND_CODEX,
+    }
     backend = aliases.get(backend, backend)
     if backend not in LLM_BACKENDS:
         raise LLMClientError(
-            "LLM 调用方式仅支持 api 或 workbuddy"
+            "LLM 调用方式仅支持 api、workbuddy 或 codex"
         )
     return backend
 
@@ -73,6 +87,23 @@ def normalize_api_model(value=None) -> str:
     if not model:
         raise LLMClientError("API 模型不能为空")
     return model
+
+
+def normalize_codex_model(value=None) -> str:
+    model = str(value or DEFAULT_EVALUATION_CODEX_MODEL).strip()
+    if model not in SUPPORTED_CODEX_MODELS:
+        raise LLMClientError("不支持的 Codex 模型: %s" % model)
+    return model
+
+
+def normalize_codex_reasoning_effort(value=None) -> str:
+    effort = str(value or DEFAULT_CODEX_REASONING_EFFORT).strip().lower()
+    if effort not in SUPPORTED_CODEX_REASONING_EFFORTS:
+        raise LLMClientError(
+            "不支持的 Codex 推理力度: %s；可选值为 %s"
+            % (effort, ", ".join(SUPPORTED_CODEX_REASONING_EFFORTS))
+        )
+    return effort
 
 
 def _timeout_seconds(value=None) -> float:
@@ -343,19 +374,137 @@ def _call_workbuddy(
     raise LLMClientError("WorkBuddy CLI 调用失败")
 
 
+def _discover_codex_command() -> tuple[str, ...]:
+    configured = (os.environ.get("OPENHARNESS_CODEX_CLI_PATH") or "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_file():
+            raise LLMClientError("Codex CLI 不存在: %s" % path)
+        return (str(path),)
+    executable = shutil.which("codex")
+    if not executable:
+        raise LLMClientError(
+            "找不到 Codex CLI。请安装 codex 或设置 OPENHARNESS_CODEX_CLI_PATH"
+        )
+    return (executable,)
+
+
+def codex_configuration() -> dict:
+    try:
+        command = _discover_codex_command()
+        return {"ready": True, "error": None, "command": command[0]}
+    except LLMClientError as exc:
+        return {"ready": False, "error": str(exc), "command": None}
+
+
+def _call_codex(
+    prompt: str,
+    model=None,
+    reasoning_effort=None,
+    timeout_seconds=None,
+    retries=None,
+) -> str:
+    """通过无状态 Codex CLI 调用模型，不加载用户配置或项目规则。"""
+    selected_model = normalize_codex_model(model)
+    selected_effort = normalize_codex_reasoning_effort(reasoning_effort)
+    command = _discover_codex_command()
+    timeout = _timeout_seconds(timeout_seconds)
+    retry_limit = _retry_count(retries)
+    for attempt in range(retry_limit + 1):
+        with tempfile.TemporaryDirectory(prefix="openharness-codex-") as tmp:
+            output_path = Path(tmp) / "last-message.txt"
+            args = [
+                *command,
+                "--sandbox",
+                "read-only",
+                "--ask-for-approval",
+                "never",
+                "--model",
+                selected_model,
+                "--config",
+                'model_reasoning_effort="%s"' % selected_effort,
+                "exec",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--ignore-rules",
+                "--skip-git-repo-check",
+                "--color",
+                "never",
+                "--output-last-message",
+                str(output_path),
+                "-",
+            ]
+            try:
+                completed = subprocess.run(
+                    args,
+                    cwd=tmp,
+                    env=dict(os.environ),
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                if attempt < retry_limit:
+                    time.sleep(min(2 ** attempt, 4))
+                    continue
+                raise LLMClientError(
+                    "Codex CLI 调用超时%s"
+                    % ("（已重试 %d 次）" % attempt if attempt else "")
+                ) from exc
+            except OSError as exc:
+                raise LLMClientError("无法启动 Codex CLI: %s" % exc) from exc
+            if completed.returncode == 0:
+                content = (
+                    output_path.read_text(encoding="utf-8").strip()
+                    if output_path.is_file()
+                    else ""
+                )
+                if not content:
+                    content = (completed.stdout or "").strip()
+                if content:
+                    return content
+                raise LLMClientError("Codex CLI 未返回可用的最终文本")
+            if attempt < retry_limit:
+                time.sleep(min(2 ** attempt, 4))
+                continue
+            detail = (completed.stderr or completed.stdout or "").strip()[-800:]
+            raise LLMClientError(
+                "Codex CLI 返回退出码 %d%s%s"
+                % (
+                    completed.returncode,
+                    "（已重试 %d 次）" % attempt if attempt else "",
+                    ": " + detail if detail else "",
+                )
+            )
+    raise LLMClientError("Codex CLI 调用失败")
+
+
 def call_llm(
     prompt: str,
     timeout_seconds=None,
     retries=None,
     backend=None,
     model=None,
+    reasoning_effort=None,
 ) -> str:
-    """通过 API 或 WorkBuddy CLI 调用 LLM，并统一错误类型。"""
+    """通过 API、WorkBuddy CLI 或 Codex CLI 调用 LLM。"""
     selected_backend = normalize_backend(backend)
     if selected_backend == LLM_BACKEND_WORKBUDDY:
         return _call_workbuddy(
             prompt,
             model=model,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
+        )
+    if selected_backend == LLM_BACKEND_CODEX:
+        return _call_codex(
+            prompt,
+            model=model,
+            reasoning_effort=reasoning_effort,
             timeout_seconds=timeout_seconds,
             retries=retries,
         )

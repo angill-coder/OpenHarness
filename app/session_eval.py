@@ -253,6 +253,7 @@ class SessionEval:
         account=None,
         llm_backend="workbuddy",
         llm_model=None,
+        llm_reasoning_effort=None,
     ):
         """按 optimizer_mode 派发。switch_search 走原路径(逐字不变);
         llm_rewrite 走 LLM 改写 + 异步 gate。"""
@@ -266,6 +267,7 @@ class SessionEval:
                 account,
                 llm_backend=llm_backend,
                 llm_model=llm_model,
+                llm_reasoning_effort=llm_reasoning_effort,
             )
         return self._advance_switch_search(account)
 
@@ -274,6 +276,7 @@ class SessionEval:
         account=None,
         llm_backend="workbuddy",
         llm_model=None,
+        llm_reasoning_effort=None,
     ):
         """LLM 自由改写整段 instructions -> 候选态(不动 current_idx)-> 待真实判分后 settle。"""
         cur = self._current()
@@ -311,6 +314,7 @@ class SessionEval:
             context,
             llm_backend=llm_backend,
             llm_model=llm_model,
+            llm_reasoning_effort=llm_reasoning_effort,
         )
         if proposal is None:
             # propose 内部(红线守卫/无产出)已把拒绝原因写进 opt_history
@@ -345,6 +349,7 @@ class SessionEval:
             "result": "pending_real_evaluation",
             "llm_backend": llm_backend,
             "model": llm_model,
+            "reasoning_effort": llm_reasoning_effort,
         })
         persist.append_event(self.id, "version_proposed", {
             "version": cand_ver,
@@ -356,6 +361,7 @@ class SessionEval:
             "validation": "pending_real_evaluation",
             "llm_backend": llm_backend,
             "model": llm_model,
+            "reasoning_effort": llm_reasoning_effort,
         })
         self._save()
         v = self.view(account)

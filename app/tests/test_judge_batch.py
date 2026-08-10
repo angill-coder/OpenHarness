@@ -57,13 +57,14 @@ def extract_json(text):
 class JudgeBatchTest(unittest.TestCase):
     def test_judge_and_optimizer_default_to_workbuddy_opus(self):
         for purpose in ("judge", "optimizer"):
-            backend, model = _llm_selection({}, purpose)
+            backend, model, effort = _llm_selection({}, purpose)
             self.assertEqual(backend, "workbuddy")
             self.assertEqual(model, "claude-opus-4.8")
+            self.assertIsNone(effort)
 
     def test_api_backend_preserves_per_request_model(self):
         for purpose in ("judge", "optimizer"):
-            backend, model = _llm_selection(
+            backend, model, effort = _llm_selection(
                 {
                     "llm_backend": "api",
                     "llm_model": "custom-provider-model",
@@ -72,6 +73,30 @@ class JudgeBatchTest(unittest.TestCase):
             )
             self.assertEqual(backend, "api")
             self.assertEqual(model, "custom-provider-model")
+            self.assertIsNone(effort)
+
+    def test_codex_backend_defaults_to_gpt56_sol_and_medium(self):
+        for purpose in ("judge", "optimizer"):
+            backend, model, effort = _llm_selection(
+                {"llm_backend": "codex"},
+                purpose,
+            )
+            self.assertEqual(backend, "codex")
+            self.assertEqual(model, "gpt-5.6-sol")
+            self.assertEqual(effort, "medium")
+
+    def test_codex_backend_preserves_selected_effort(self):
+        backend, model, effort = _llm_selection(
+            {
+                "llm_backend": "codex",
+                "llm_model": "gpt-5.6-sol",
+                "llm_reasoning_effort": "high",
+            },
+            "judge",
+        )
+        self.assertEqual((backend, model, effort), (
+            "codex", "gpt-5.6-sol", "high",
+        ))
 
     def test_judge_parallel_override_has_no_artificial_cap(self):
         self.assertEqual(_judge_parallelism(200), 200)

@@ -261,6 +261,7 @@
           <select id="judgeLlmBackend">
             <option value="api">API</option>
             <option value="workbuddy" selected>WorkBuddy CLI</option>
+            <option value="codex">Codex CLI</option>
           </select>
         </div>
         <div id="judgeWbModelWrap" style="flex:1">
@@ -272,6 +273,23 @@
         <div id="judgeApiModelWrap" style="flex:1;display:none">
           <label for="judgeApiModel">Judge API 模型</label>
           <input id="judgeApiModel" list="evaluationApiModels" placeholder="选择或输入模型名">
+        </div>
+        <div id="judgeCodexModelWrap" style="flex:1;display:none">
+          <label for="judgeCodexModel">Judge Codex 模型</label>
+          <select id="judgeCodexModel">
+            <option value="gpt-5.6-sol">gpt-5.6-sol</option>
+          </select>
+        </div>
+        <div id="judgeCodexReasoningWrap" style="flex:1;display:none">
+          <label for="judgeCodexReasoning">推理力度</label>
+          <select id="judgeCodexReasoning">
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+            <option value="max">max</option>
+            <option value="ultra">ultra</option>
+          </select>
         </div>
         <div>
           <label for="judgeParallel">Judge 最大并发</label>
@@ -296,6 +314,7 @@
           <select id="optimizerLlmBackend">
             <option value="api">API</option>
             <option value="workbuddy" selected>WorkBuddy CLI</option>
+            <option value="codex">Codex CLI</option>
           </select>
         </div>
         <div id="optimizerWbModelWrap" style="flex:1">
@@ -307,6 +326,23 @@
         <div id="optimizerApiModelWrap" style="flex:1;display:none">
           <label for="optimizerApiModel">Optimizer API 模型</label>
           <input id="optimizerApiModel" list="evaluationApiModels" placeholder="选择或输入模型名">
+        </div>
+        <div id="optimizerCodexModelWrap" style="flex:1;display:none">
+          <label for="optimizerCodexModel">Optimizer Codex 模型</label>
+          <select id="optimizerCodexModel">
+            <option value="gpt-5.6-sol">gpt-5.6-sol</option>
+          </select>
+        </div>
+        <div id="optimizerCodexReasoningWrap" style="flex:1;display:none">
+          <label for="optimizerCodexReasoning">推理力度</label>
+          <select id="optimizerCodexReasoning">
+            <option value="low">low</option>
+            <option value="medium" selected>medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+            <option value="max">max</option>
+            <option value="ultra">ultra</option>
+          </select>
         </div>
         <datalist id="evaluationApiModels">
           <option value="claude-opus-5"></option>

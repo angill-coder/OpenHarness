@@ -617,6 +617,9 @@ def _compact_state(state: dict[str, object]) -> dict[str, object]:
             compact["optimizer_runtime"] = {
                 "model": latest_optimizer_run.get("model"),
                 "llm_backend": latest_optimizer_run.get("llm_backend"),
+                "reasoning_effort": latest_optimizer_run.get(
+                    "reasoning_effort"
+                ),
             }
     compact["rubric"] = state.get("rubric") or {}
     compact["versions"] = [
@@ -678,6 +681,7 @@ def _event_runtime_models(
             record: dict[str, object] = {
                 "model": model,
                 "llm_backend": backend,
+                "reasoning_effort": payload.get("reasoning_effort"),
                 "event_type": event_type,
                 "ts": item.get("ts"),
                 "source": "events.jsonl",
@@ -759,6 +763,7 @@ def _summary_runtime_models(
             record: dict[str, object] = {
                 "model": model,
                 "llm_backend": backend,
+                "reasoning_effort": item.get("reasoning_effort"),
                 "status": "recorded",
                 "source": "state.json",
                 "source_field": "opt_history",
@@ -801,6 +806,7 @@ def _summary_runtime_models(
         active_judgments[key] = {
             "model": item.get("model"),
             "llm_backend": item.get("llm_backend"),
+            "reasoning_effort": item.get("reasoning_effort"),
             "ts": item.get("ts"),
             "status": "completed",
             "source": "check_judgments.jsonl",
@@ -834,7 +840,7 @@ def _summary_judgments(path: Path) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     allowed = {
         "version", "case_id", "checks", "invalidated", "reason", "scores",
-        "ts", "llm_backend", "model",
+        "ts", "llm_backend", "model", "reasoning_effort",
     }
     with path.open("rb") as stream:
         for raw in stream:
