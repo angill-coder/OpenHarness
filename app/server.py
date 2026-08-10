@@ -542,6 +542,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, document)
             except (FileNotFoundError, ValueError, OSError) as exc:
                 return self._send(404, {"error": str(exc)})
+        if u.path == "/api/local/rubric-guide":
+            q = parse_qs(u.query)
+            session_id = (q.get("session") or [""])[0]
+            try:
+                document = dashboard_api.rubric_guide_document(
+                    Path(ROOT), self._dashboard_sessions_root(), session_id
+                )
+                return self._send(200, document)
+            except (FileNotFoundError, ValueError, UnicodeError, OSError) as exc:
+                return self._send(404, {"error": str(exc)})
         if u.path == "/api/local/config":
             dataset_path = self._dashboard_dataset_path()
             return self._send(200, {

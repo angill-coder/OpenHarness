@@ -170,7 +170,94 @@
     modal.setAttribute('aria-hidden','false');
   }
 
+  const textFromCodes=(...codes)=>String.fromCodePoint(...codes);
+  const rubricGuideCache=new Map();
+  const closeRubricGuide=()=>{
+    const modal=document.querySelector('#rubricGuideModal');
+    if(!modal)return;
+    modal.classList.remove('on');
+    modal.setAttribute('aria-hidden','true');
+  };
+  const applyRubricGuideLayout=()=>{
+    const modal=document.querySelector('#rubricGuideModal');
+    const card=modal&&modal.querySelector('.rubric-guide-modal-card');
+    const head=modal&&modal.querySelector('.rubric-guide-modal-head');
+    const content=document.querySelector('#rubricGuideContent');
+    if(!modal||!card||!content)return;
+    const force=(element,styles)=>Object.entries(styles).forEach(([name,value])=>
+      element.style.setProperty(name,value,'important'));
+    force(modal,{padding:'8px','align-items':'stretch','justify-content':'center'});
+    force(card,{
+      display:'flex','flex-direction':'column',
+      width:'min(1380px,calc(100vw - 16px))',
+      height:'calc(100dvh - 16px)','max-height':'calc(100dvh - 16px)',
+      'min-height':'calc(100dvh - 16px)',margin:'auto'
+    });
+    if(head)force(head,{flex:'0 0 50px','min-height':'50px'});
+    force(content,{
+      flex:'1 1 auto',height:'0','min-height':'0','max-height':'none',
+      overflow:'auto',background:'#0b1017',color:'#edf3fa'
+    });
+    const documentNode=content.querySelector('.rubric-guide-document');
+    if(!documentNode)return;
+    force(documentNode,{'min-height':'100%',background:'#141d27',color:'#e9f0f8'});
+    documentNode.querySelectorAll('p,li,dd,dt,span').forEach(node=>
+      force(node,{background:'transparent',color:'#e5edf7',opacity:'1'}));
+    documentNode.querySelectorAll('blockquote').forEach(node=>
+      force(node,{background:'#1d3042',color:'#edf6ff','border-left':'4px solid #7fc3ff'}));
+    documentNode.querySelectorAll('pre').forEach(node=>
+      force(node,{background:'#080f17',color:'#e3efff',border:'1px solid #485d75'}));
+    documentNode.querySelectorAll('code').forEach(node=>
+      force(node,{background:'#09121c',color:'#b9ddff','border-color':'#506b89'}));
+    documentNode.querySelectorAll('.md-table').forEach(node=>
+      force(node,{background:'transparent',color:'#e5edf7'}));
+    documentNode.querySelectorAll('table').forEach(node=>
+      force(node,{background:'#101821',color:'#eef4fb','border-color':'#53677f'}));
+    documentNode.querySelectorAll('th').forEach(node=>
+      force(node,{background:'#293b50',color:'#fff','border-color':'#60758e'}));
+    documentNode.querySelectorAll('td').forEach(node=>
+      force(node,{background:'#192531',color:'#e5edf7','border-color':'#4a5e75'}));
+    documentNode.querySelectorAll('hr').forEach(node=>
+      force(node,{background:'transparent','border-color':'#52657b'}));
+  };
+  const openRubricGuide=async(sessionId)=>{
+    const modal=document.querySelector('#rubricGuideModal');
+    const content=document.querySelector('#rubricGuideContent');
+    if(!modal||!content||!sessionId)return;
+    modal.classList.add('on');
+    applyRubricGuideLayout();
+    modal.setAttribute('aria-hidden','false');
+    content.innerHTML='<div class="rubric-guide-loading">'+textFromCodes(0x6B63,0x5728,0x8BFB,0x53D6)+' Rubric '+textFromCodes(0x8BC4,0x5206,0x89C4,0x5219,0x2026)+'</div>';
+    try{
+      let payload=rubricGuideCache.get(sessionId);
+      if(!payload){
+        const response=await fetch('/api/local/rubric-guide?session='+encodeURIComponent(sessionId));
+        payload=await response.json();
+        if(!response.ok)throw new Error(payload.error||('HTTP '+response.status));
+        rubricGuideCache.set(sessionId,payload);
+      }
+      content.innerHTML='<article class="inline-document rubric-guide-document">'+markdown(payload.markdown||'')+'</article>';
+      applyRubricGuideLayout();
+      content.scrollTop=0;
+    }catch(error){
+      content.innerHTML='<div class="metadata-empty-block">'+textFromCodes(0x8BC4,0x5206,0x4F9D,0x636E,0x52A0,0x8F7D,0x5931,0x8D25,0xFF1A)+escapeHTML(error.message)+'</div>';
+    }
+  };
+  document.addEventListener('click',event=>{
+    const trigger=event.target.closest('.rubric-guide-button[data-rubric-guide]');
+    if(!trigger)return;
+    event.preventDefault();
+    openRubricGuide(trigger.dataset.rubricGuide);
+  });
+  document.querySelector('#rubricGuideClose')?.addEventListener('click',closeRubricGuide);
+  document.querySelector('#rubricGuideModal')?.addEventListener('click',event=>{
+    if(event.target.id==='rubricGuideModal')closeRubricGuide();
+  });
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Escape')closeRubricGuide();
+  });
   window.openQualityModal=openQualityModal;
+  window.openRubricGuide=openRubricGuide;
   window.OPENHARNESS_SANDBOX_ADAPTER=function(){
     SB=window.OPENHARNESS_SANDBOX;
     if(!SB)throw new Error('OPENHARNESS_SANDBOX snapshot is missing');
@@ -183,6 +270,49 @@
     cases=SB.cases;
     caseData=SB.caseData;
     rubrics=SB.rubrics;
+    if(!evaluationPanelHTML.__rubricGuideWrapped){
+      const evaluationPanelWithRubricGuide=evaluationPanelHTML;
+      const wrappedEvaluationPanel=function(...args){
+        const template=document.createElement('template');
+        template.innerHTML=evaluationPanelWithRubricGuide(...args);
+        const experiment=state.experiments[Number(args[1])||0]||state.experiments[0];
+        const sessionId=experiment?.session||'';
+        const title=template.content.querySelector('.eval-list-title');
+        if(title&&sessionId){
+          const button=document.createElement('button');
+          button.type='button';
+          button.className='rubric-guide-button';
+          button.dataset.rubricGuide=sessionId;
+          const buttonStyle={
+            appearance:'none',
+            display:'inline-flex',
+            'align-items':'center',
+            'justify-content':'center',
+            flex:'0 0 auto',
+            'min-width':'max-content',
+            margin:'0 0 0 auto',
+            border:'1px solid #42658d',
+            'border-radius':'999px',
+            background:'#1f3046',
+            color:'#f4f8ff',
+            padding:'6px 13px',
+            'font-size':'12px',
+            'font-weight':'750',
+            cursor:'pointer'
+          };
+          Object.entries(buttonStyle).forEach(([name,value])=>button.style.setProperty(name,value,'important'));
+          button.textContent=textFromCodes(0x67E5,0x770B,0x8BC4,0x5206,0x89C4,0x5219);
+          title.appendChild(button);
+          title.style.setProperty('display','flex','important');
+          title.style.setProperty('align-items','center','important');
+          title.style.setProperty('width','100%','important');
+          title.style.setProperty('gap','12px','important');
+        }
+        return template.innerHTML;
+      };
+      wrappedEvaluationPanel.__rubricGuideWrapped=true;
+      evaluationPanelHTML=wrappedEvaluationPanel;
+    }
     versions=function(experiment){const item=def(experiment);return item?item.versions.slice():[]};
     versionParents=function(experiment){const item=def(experiment);return item?item.parents:{}};
     parentVersion=function(experiment,version){return versionParents(experiment)[version]||'—'};
@@ -196,7 +326,8 @@
     renderLatestOverview=function(){
       let rows=[],selectedCount=state.experiments.length,f=state.latestFilters;
       SB.experiments.forEach(item=>{if(f.session!=='all'&&f.session!==item.session||f.user!=='all'&&f.user!==item.user||f.data!=='all'&&f.data!==item.data||f.optimizer!=='all'&&f.optimizer!==item.optimizer||f.judge!=='all'&&f.judge!==item.judge)return;let e=experimentFromSnapshot(item),v=item.latestVersion,m=metric(e,v),selected=state.experiments.some(x=>def(x)?.id===item.id),disabled=!selected&&selectedCount>=3;rows.push('<tr class="'+(selected?'selected ':'')+(disabled?'disabled':'')+'" data-latest-session="'+item.session+'" data-latest-user="'+item.user+'" data-latest-data="'+item.data+'" data-latest-optimizer="'+item.optimizer+'" data-latest-judge="'+item.judge+'" aria-selected="'+selected+'"><td><button class="latest-pick '+(selected?'selected':'')+'" '+(disabled?'disabled':'')+'>'+(selected?'✓ 已选':disabled?'已达上限':'+ 添加')+'</button></td><td>'+escapeHTML(item.sessionLabel)+'</td><td>'+escapeHTML(item.userLabel)+'</td><td>'+escapeHTML(item.dataLabel)+'</td><td>'+escapeHTML(item.optimizerLabel)+'</td><td>'+escapeHTML(item.judgeLabel)+'</td><td class="latest-version">'+v+'</td><td class="score">'+m.total.toFixed(2)+'</td><td class="'+(m.red?'red':'score')+'">'+m.red+'</td>'+m.dims.map(x=>'<td class="score">'+x.toFixed(1)+'</td>').join('')+'</tr>')});
-      document.querySelector('#latestOverview').innerHTML='<div class="latest-head"><div><b>最新评测表现</b><small>'+SB.meta.judgmentCount+' 条 Case×版本 Judgment · '+SB.meta.checkCount+' 条 Check；点击一行加入下方评测与对比区域</small></div><span class="latest-count">已选 '+selectedCount+' / 3 · 当前 '+rows.length+' 条</span></div><div class="latest-wrap"><table class="latest-table"><thead><tr><th>选择</th><th><label class="latest-filter-head"><span>会话</span><select data-latest-filter="session">'+latestFilterOptions(sessions,f.session)+'</select></label></th><th><label class="latest-filter-head"><span>用户</span><select data-latest-filter="user">'+latestFilterOptions(users,f.user)+'</select></label></th><th><label class="latest-filter-head"><span>Data 类型</span><select data-latest-filter="data">'+latestFilterOptions(dataTypes,f.data)+'</select></label></th><th><label class="latest-filter-head"><span>Optimizer</span><select data-latest-filter="optimizer">'+latestFilterOptions(optimizers,f.optimizer)+'</select></label></th><th><label class="latest-filter-head"><span>Judge</span><select data-latest-filter="judge">'+latestFilterOptions(judges,f.judge)+'</select></label></th><th>最新版本</th><th>总分</th><th>红线</th>'+dims.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
+      document.querySelector('#latestHint').textContent=SB.meta.judgmentCount+' 条 Case×版本 Judgment · '+SB.meta.checkCount+' 条 Check；点击一行加入下方评测与对比区域';
+      document.querySelector('#latestOverviewBody').innerHTML='<div class="latest-wrap"><table class="latest-table"><thead><tr><th><div class="latest-selection-head"><span>选择</span><span class="latest-count" id="latestCount">已选 '+selectedCount+' / 3 · 当前 '+rows.length+' 条</span></div></th><th><label class="latest-filter-head"><span>会话</span><select data-latest-filter="session">'+latestFilterOptions(sessions,f.session)+'</select></label></th><th><label class="latest-filter-head"><span>用户</span><select data-latest-filter="user">'+latestFilterOptions(users,f.user)+'</select></label></th><th><label class="latest-filter-head"><span>Data 类型</span><select data-latest-filter="data">'+latestFilterOptions(dataTypes,f.data)+'</select></label></th><th><label class="latest-filter-head"><span>Optimizer</span><select data-latest-filter="optimizer">'+latestFilterOptions(optimizers,f.optimizer)+'</select></label></th><th><label class="latest-filter-head"><span>Judge</span><select data-latest-filter="judge">'+latestFilterOptions(judges,f.judge)+'</select></label></th><th>最新版本</th><th>总分</th><th>红线</th>'+dims.map(d=>'<th>'+d+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
     };
     reportSideDataHTML=function(experiment,version,caseIndex,metadataKey){const d=dataFor(caseIndex,experiment),files=d.files||[];return '<section class="report-side-data"><div class="report-side-data-head"><div><b>数据展示</b><small>'+files.length+' 个原始文件</small></div><button class="report-side-metadata" data-open-metadata="'+metadataKey+'">Structured Data ↗</button></div><div class="source-type-summary">'+sourceSummary(files)+'</div><div class="report-side-source-list">'+sourceLinks(caseIndex,experiment)+'</div></section>'};
     caseDataDrawer=function(experiment,version,caseIndex,key){const d=dataFor(caseIndex,experiment),files=d.files||[],fileHTML=files.map(file=>sourceFileAnchor(file,'case-source-link')).join('');return '<tr class="single-case-data-row"><td colspan="10"><div class="case-data-drawer"><div class="case-data-head"><b>数据展示 · '+escapeHTML(cases[caseIndex][0])+'</b><small>'+escapeHTML(selectedLabel(dataTypes,experiment.data))+' · '+escapeHTML(version)+'</small></div><div class="case-data-grid"><button class="case-metadata-card" data-open-metadata="'+key+'"><b>Structured Data</b><span>'+escapeHTML(d.sample)+'；'+escapeHTML(d.scope)+'</span><em>查看完整 Structured Data →</em></button><section class="case-source-package"><div class="source-package-head"><h4>原始资料包 · '+files.length+' 个文件</h4><div class="source-type-summary">'+sourceSummary(files)+'</div></div><div class="case-source-list">'+(fileHTML||'<div class="source-empty">当前实验未收录可访问的原始资料文件</div>')+'</div></section></div></div></td></tr>'};    compareCaseDataDrawer=function(experiment,experimentIndex,version,caseIndex){return caseDataDrawer(experiment,version,caseIndex,experimentIndex+'|'+version+'|'+caseIndex).replace(/^<tr[^>]*><td[^>]*>|<\/td><\/tr>$/g,'')};
@@ -274,6 +405,21 @@
       const flow=hasTrace?turns.map(turnHTML).join(''):'<div class="trace-empty"><b>生成链路缺失</b><p>generation_runs 中没有可建立三级关系的 request、result 与 events/operations；未使用其他文件替代。</p></div>';
       return '<aside class="trace-panel trace-panel-codex"><div class="trace-panel-head"><div><b>报告生成链路</b><small class="trace-level-note">第一级：User / Agent 对话 · 来源：'+escapeHTML(trace.source||'conversation.md 未找到')+'</small></div><span>'+escapeHTML(trace.status||'missing')+' · '+traceDuration(metrics.durationMs||trace.durationMs)+'</span></div>'+
         (hasTrace?metricCards+stepRows:'')+'<div class="trace-conversation">'+flow+'</div></aside>';
-    };    compareDataPackage=function(){return ''};
+    };
+    const tracePanelWithRuntimeHeader=tracePanelHTML;
+    const removeTraceHeaderElement=(html,startTag,endTag,fromIndex=0)=>{
+      const start=html.indexOf(startTag,fromIndex);
+      if(start<0)return html;
+      const end=html.indexOf(endTag,start+startTag.length);
+      return end<0?html:html.slice(0,start)+html.slice(end+endTag.length);
+    };
+    tracePanelHTML=function(...args){
+      let html=tracePanelWithRuntimeHeader(...args);
+      html=removeTraceHeaderElement(html,'<small class="trace-level-note">','</small>');
+      const headerStart=html.indexOf('<div class="trace-panel-head">');
+      if(headerStart>=0)html=removeTraceHeaderElement(html,'<span>','</span>',headerStart);
+      return html;
+    };
+    compareDataPackage=function(){return ''};
   };
 })();
