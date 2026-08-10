@@ -92,25 +92,81 @@ function populateApiModelInput(id,defaultModel){
     el.dataset.initialized='1';
   }
 }
+function populateCodexModelSelect(id,defaultModel){
+  const el=document.getElementById(id);
+  if(!el||!GEN_CONFIG)return;
+  const models=Array.isArray(GEN_CONFIG.codex_models)?GEN_CONFIG.codex_models:[];
+  const desired=el.dataset.initialized
+    ?el.value:(defaultModel||GEN_CONFIG.codex_model_default||'gpt-5.6-sol');
+  const signature=models.join('\n');
+  if(el.dataset.models!==signature){
+    el.innerHTML=models.map(model=>`<option value="${esc(model)}">${esc(model)}</option>`).join('');
+    el.dataset.models=signature;
+  }
+  el.value=models.includes(desired)
+    ?desired:(GEN_CONFIG.codex_model_default||models[0]||'');
+  el.dataset.initialized='1';
+}
+function populateCodexReasoningSelect(id,defaultEffort){
+  const el=document.getElementById(id);
+  if(!el||!GEN_CONFIG)return;
+  const efforts=Array.isArray(GEN_CONFIG.codex_reasoning_efforts)
+    ?GEN_CONFIG.codex_reasoning_efforts:[];
+  const desired=el.dataset.initialized
+    ?el.value:(defaultEffort||GEN_CONFIG.codex_reasoning_effort_default||'medium');
+  const signature=efforts.join('\n');
+  if(el.dataset.efforts!==signature){
+    el.innerHTML=efforts.map(effort=>`<option value="${esc(effort)}">${esc(effort)}</option>`).join('');
+    el.dataset.efforts=signature;
+  }
+  el.value=efforts.includes(desired)
+    ?desired:(GEN_CONFIG.codex_reasoning_effort_default||efforts[0]||'medium');
+  el.dataset.initialized='1';
+}
 function syncLlmBackendControls(kind){
   const backend=document.getElementById(kind+'LlmBackend');
-  const isWorkbuddy=backend&&backend.value==='workbuddy';
+  const selected=(backend&&backend.value)||'workbuddy';
+  const isWorkbuddy=selected==='workbuddy';
+  const isApi=selected==='api';
+  const isCodex=selected==='codex';
   const wbWrap=document.getElementById(kind+'WbModelWrap');
   const apiWrap=document.getElementById(kind+'ApiModelWrap');
+  const codexModelWrap=document.getElementById(kind+'CodexModelWrap');
+  const codexReasoningWrap=document.getElementById(kind+'CodexReasoningWrap');
   if(wbWrap)wbWrap.style.display=isWorkbuddy?'block':'none';
-  if(apiWrap)apiWrap.style.display=isWorkbuddy?'none':'block';
+  if(apiWrap)apiWrap.style.display=isApi?'block':'none';
+  if(codexModelWrap)codexModelWrap.style.display=isCodex?'block':'none';
+  if(codexReasoningWrap)codexReasoningWrap.style.display=isCodex?'block':'none';
 }
 function readLlmSelection(kind){
   const backend=(document.getElementById(kind+'LlmBackend')||{}).value||'workbuddy';
   const result={llm_backend:backend};
-  const inputId=kind+(backend==='workbuddy'?'WbModel':'ApiModel');
+  const inputId=kind+(
+    backend==='workbuddy'?'WbModel':backend==='codex'?'CodexModel':'ApiModel'
+  );
   const model=((document.getElementById(inputId)||{}).value||'').trim();
   if(!model){
-    toast((kind==='judge'?'Judge':'Optimizer')+' '+(backend==='workbuddy'?'WB':'API')+' 模型不能为空');
+    const backendLabel=backend==='workbuddy'?'WB':backend==='codex'?'Codex':'API';
+    toast((kind==='judge'?'Judge':'Optimizer')+' '+backendLabel+' 模型不能为空');
     return null;
   }
   result.llm_model=model;
+  if(backend==='codex'){
+    if(GEN_CONFIG&&GEN_CONFIG.codex_cli_ready===false){
+      toast(GEN_CONFIG.codex_cli_error||'Codex CLI 当前不可用');
+      return null;
+    }
+    const effort=((document.getElementById(kind+'CodexReasoning')||{}).value||'').trim();
+    if(!effort){
+      toast((kind==='judge'?'Judge':'Optimizer')+' Codex 推理力度不能为空');
+      return null;
+    }
+    result.llm_reasoning_effort=effort;
+  }
   return result;
+}
+function llmBackendLabel(backend){
+  return backend==='workbuddy'?'WorkBuddy CLI':backend==='codex'?'Codex CLI':'API';
 }
 document.getElementById('judgeLlmBackend').onchange=()=>syncLlmBackendControls('judge');
 document.getElementById('optimizerLlmBackend').onchange=()=>syncLlmBackendControls('optimizer');
@@ -485,6 +541,14 @@ function renderGenerationPanel(){
     populateEvaluationModelSelect('optimizerWbModel',GEN_CONFIG.optimizer_wb_model);
     populateApiModelInput('judgeApiModel',GEN_CONFIG.judge_api_model);
     populateApiModelInput('optimizerApiModel',GEN_CONFIG.optimizer_api_model);
+    populateCodexModelSelect('judgeCodexModel',GEN_CONFIG.judge_codex_model);
+    populateCodexModelSelect('optimizerCodexModel',GEN_CONFIG.optimizer_codex_model);
+    populateCodexReasoningSelect(
+      'judgeCodexReasoning',GEN_CONFIG.judge_codex_reasoning_effort
+    );
+    populateCodexReasoningSelect(
+      'optimizerCodexReasoning',GEN_CONFIG.optimizer_codex_reasoning_effort
+    );
     syncLlmBackendControls('judge');
     syncLlmBackendControls('optimizer');
   }
@@ -726,7 +790,7 @@ function renderJudgeStatus(){
   const complete=p.complete;
   el.innerHTML=`<div class="kv"><span>报告已就绪</span><span>${p.reports_ready}/${p.total_cases}</span></div>`+
     `<div class="kv"><span>模型 Judge</span><b class="${complete?'ok-txt':p.judged_cases?'warn-txt':'mut'}">${p.judged_cases}/${p.total_cases}</b></div>`+
-    (JUDGE_SUMMARY?`<div class="kv"><span>最近调用</span><span>${esc(JUDGE_SUMMARY.llm_backend==='workbuddy'?'WorkBuddy CLI':'API')} · ${esc(JUDGE_SUMMARY.model||'—')}</span></div>`:'')+
+    (JUDGE_SUMMARY?`<div class="kv"><span>最近调用</span><span>${esc(llmBackendLabel(JUDGE_SUMMARY.llm_backend))} · ${esc(JUDGE_SUMMARY.model||'—')}${JUDGE_SUMMARY.reasoning_effort?' · '+esc(JUDGE_SUMMARY.reasoning_effort):''}</span></div>`:'')+
     (!allReports?`<div class="warn-txt" style="margin-top:5px">仍缺 ${p.total_cases-p.reports_ready} 份报告，请先重试 WB CLI 或手工补齐。</div>`:'')+
     (complete?'<div class="ok-txt" style="margin-top:5px">全部 case 已完成模型 Judge，可以生成下一版 Skill。</div>':'')+
     (action&&!action.enabled&&action.reason&&!complete?`<div class="small mut" style="margin-top:5px">${esc(action.reason)}</div>`:'')+

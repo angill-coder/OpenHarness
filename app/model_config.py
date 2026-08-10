@@ -7,6 +7,19 @@ SUPPORTED_API_MODELS = (
     "gpt-5.6-sol",
 )
 
+SUPPORTED_CODEX_MODELS = (
+    "gpt-5.6-sol",
+)
+
+SUPPORTED_CODEX_REASONING_EFFORTS = (
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra",
+)
+
 SUPPORTED_WB_MODELS = (
     "deepseek-v4-pro-ioa",
     "hy3-ioa",
@@ -38,3 +51,5 @@ SUPPORTED_WB_MODELS = (
 DEFAULT_GENERATION_WB_MODEL = "deepseek-v4-pro-ioa"
 DEFAULT_EVALUATION_WB_MODEL = "claude-opus-4.8"
 DEFAULT_EVALUATION_API_MODEL = "claude-opus-4.8"
+DEFAULT_EVALUATION_CODEX_MODEL = "gpt-5.6-sol"
+DEFAULT_CODEX_REASONING_EFFORT = "medium"

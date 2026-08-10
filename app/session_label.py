@@ -140,6 +140,9 @@ class SessionLabel:
                 ),
                 "llm_backend": (judgment or {}).get("llm_backend"),
                 "model": (judgment or {}).get("model"),
+                "reasoning_effort": (judgment or {}).get(
+                    "reasoning_effort"
+                ),
                 "judge_trace": (judgment or {}).get("judge_trace"),
             }
         if not clean_batch:
@@ -166,6 +169,14 @@ class SessionLabel:
                         item.get("model")
                         for item in clean_batch.values()
                         if item.get("model")
+                    ),
+                    None,
+                ),
+                "reasoning_effort": next(
+                    (
+                        item.get("reasoning_effort")
+                        for item in clean_batch.values()
+                        if item.get("reasoning_effort")
                     ),
                     None,
                 ),

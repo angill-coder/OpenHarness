@@ -206,11 +206,84 @@ class TestLLMClientErrors(unittest.TestCase):
             )
         self.assertIn("不支持的 WorkBuddy 模型", str(ctx.exception))
 
+    def test_codex_backend_uses_model_effort_and_ephemeral_exec(self):
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        def fake_run(command, **kwargs):
+            output_path = Path(
+                command[command.index("--output-last-message") + 1]
+            )
+            output_path.write_text('{"ok": true}', encoding="utf-8")
+            self.assertEqual(kwargs["input"], "judge prompt")
+            return completed
+
+        with mock.patch.object(
+            llm_client,
+            "_discover_codex_command",
+            return_value=("/tmp/codex",),
+        ):
+            with mock.patch.object(
+                llm_client.subprocess,
+                "run",
+                side_effect=fake_run,
+            ) as run:
+                result = llm_client.call_llm(
+                    "judge prompt",
+                    backend="codex",
+                    model="gpt-5.6-sol",
+                    reasoning_effort="medium",
+                    retries=0,
+                )
+        self.assertEqual(result, '{"ok": true}')
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "/tmp/codex")
+        self.assertLess(command.index("--ask-for-approval"), command.index("exec"))
+        self.assertLess(command.index("--model"), command.index("exec"))
+        self.assertIn("--ephemeral", command)
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn("--ignore-rules", command)
+        self.assertEqual(
+            command[command.index("--model") + 1],
+            "gpt-5.6-sol",
+        )
+        self.assertEqual(
+            command[command.index("--config") + 1],
+            'model_reasoning_effort="medium"',
+        )
+        self.assertEqual(command[-1], "-")
+
+    def test_codex_backend_rejects_unknown_model_or_effort(self):
+        with self.assertRaisesRegex(
+            llm_client.LLMClientError,
+            "不支持的 Codex 模型",
+        ):
+            llm_client.call_llm(
+                "prompt",
+                backend="codex",
+                model="unknown-model",
+            )
+        with self.assertRaisesRegex(
+            llm_client.LLMClientError,
+            "不支持的 Codex 推理力度",
+        ):
+            llm_client.call_llm(
+                "prompt",
+                backend="codex",
+                model="gpt-5.6-sol",
+                reasoning_effort="extreme",
+            )
+
 
 class _FailingAdvanceSession:
     id = "advance-llm-error"
 
-    def advance(self, account=None, llm_backend="api", llm_model=None):
+    def advance(
+        self,
+        account=None,
+        llm_backend="api",
+        llm_model=None,
+        llm_reasoning_effort=None,
+    ):
         raise llm_client.LLMClientError("上游请求超时")
 
 
@@ -443,9 +516,20 @@ class TestRedlineGuard(unittest.TestCase):
 
         llm_client.call_llm = fake_call
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(optimizer02._call_rewrite_llm("正文"), "ok")
+            self.assertEqual(
+                optimizer02._call_rewrite_llm(
+                    "正文",
+                    llm_backend="codex",
+                    llm_model="gpt-5.6-sol",
+                    llm_reasoning_effort="high",
+                ),
+                "ok",
+            )
         self.assertEqual(received["timeout_seconds"], "600")
         self.assertEqual(received["retries"], "2")
+        self.assertEqual(received["backend"], "codex")
+        self.assertEqual(received["model"], "gpt-5.6-sol")
+        self.assertEqual(received["reasoning_effort"], "high")
 
 
 def _fake_llm(rewrite_text):

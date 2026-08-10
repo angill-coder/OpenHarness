@@ -12,10 +12,10 @@ API:
   GET  /api/session?id=       -> 当前会话完整状态
   POST /api/data              {id, rows?, use_sample?, use_configured?} -> 导入数据
   POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
-  POST /api/advance           {id, llm_backend?, llm_model?}  -> 生成下一版 skill(optimizer+gate)
+  POST /api/advance           {id, llm_backend?, llm_model?, llm_reasoning_effort?}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
-  POST /api/run_judge_batch   {id, version?, parallel?, judge_strategy?, llm_backend?, llm_model?} -> 并发 Judge 当前版本全部 case
+  POST /api/run_judge_batch   {id, version?, parallel?, judge_strategy?, llm_backend?, llm_model?, llm_reasoning_effort?} -> 并发 Judge 当前版本全部 case
   POST /api/generation/start  {id, idempotency_key?, parallel?, model?} -> 后台调用 WB 并自动批量导入
   GET  /api/generation?id=    -> 查询生成任务
   POST /api/generation/retry  {job_id, parallel?, model?} -> 仅重跑未导入的 case
@@ -50,9 +50,13 @@ from generation_jobs import (  # noqa: E402
     GenerationJobService,
 )
 from model_config import (  # noqa: E402
+    DEFAULT_CODEX_REASONING_EFFORT,
     DEFAULT_EVALUATION_API_MODEL,
+    DEFAULT_EVALUATION_CODEX_MODEL,
     DEFAULT_EVALUATION_WB_MODEL,
     SUPPORTED_API_MODELS,
+    SUPPORTED_CODEX_MODELS,
+    SUPPORTED_CODEX_REASONING_EFFORTS,
     SUPPORTED_WB_MODELS,
 )
 from judge_batch import (  # noqa: E402
@@ -298,11 +302,23 @@ def _llm_selection(payload, purpose):
         or os.environ.get(prefix + "_LLM_BACKEND", "workbuddy")
     )
     model = None
+    reasoning_effort = None
     if backend == llm_client.LLM_BACKEND_WORKBUDDY:
         model = llm_client.normalize_workbuddy_model(
             payload.get("llm_model")
             or os.environ.get(prefix + "_WB_MODEL")
             or DEFAULT_EVALUATION_WB_MODEL
+        )
+    elif backend == llm_client.LLM_BACKEND_CODEX:
+        model = llm_client.normalize_codex_model(
+            payload.get("llm_model")
+            or os.environ.get(prefix + "_CODEX_MODEL")
+            or DEFAULT_EVALUATION_CODEX_MODEL
+        )
+        reasoning_effort = llm_client.normalize_codex_reasoning_effort(
+            payload.get("llm_reasoning_effort")
+            or os.environ.get(prefix + "_CODEX_REASONING_EFFORT")
+            or DEFAULT_CODEX_REASONING_EFFORT
         )
     else:
         model = llm_client.normalize_api_model(
@@ -311,7 +327,7 @@ def _llm_selection(payload, purpose):
             or os.environ.get("ANTHROPIC_JUDGE_MODEL")
             or DEFAULT_EVALUATION_API_MODEL
         )
-    return backend, model
+    return backend, model, reasoning_effort
 
 
 def _judge_summary(
@@ -321,6 +337,7 @@ def _judge_summary(
     dimension_count=0,
     llm_backend="workbuddy",
     llm_model=None,
+    llm_reasoning_effort=None,
     max_retries=DEFAULT_JUDGE_MAX_RETRIES,
 ):
     counts = {
@@ -349,6 +366,7 @@ def _judge_summary(
         "stale_report_cases": counts["stale_report"],
         "llm_backend": llm_backend,
         "model": llm_model or DEFAULT_EVALUATION_API_MODEL,
+        "reasoning_effort": llm_reasoning_effort,
         "parallel": _judge_parallelism(parallel),
         "judge_strategy": strategy,
         "max_retries": normalize_judge_max_retries(max_retries),
@@ -797,6 +815,7 @@ class Handler(BaseHTTPRequestHandler):
                     {"error": "GenerationJobService 尚未初始化"},
                 )
             payload = GENERATION_SERVICE.configuration()
+            codex_config = llm_client.codex_configuration()
             payload.update(
                 {
                     "judge_parallel": _judge_parallelism(),
@@ -812,11 +831,21 @@ class Handler(BaseHTTPRequestHandler):
                             DEFAULT_JUDGE_MAX_RETRIES,
                         )
                     ),
-                    "llm_backends": ["api", "workbuddy"],
+                    "llm_backends": ["api", "workbuddy", "codex"],
                     "evaluation_models": list(SUPPORTED_WB_MODELS),
                     "evaluation_model_default": DEFAULT_EVALUATION_WB_MODEL,
                     "api_models": list(SUPPORTED_API_MODELS),
                     "api_model_default": DEFAULT_EVALUATION_API_MODEL,
+                    "codex_models": list(SUPPORTED_CODEX_MODELS),
+                    "codex_model_default": DEFAULT_EVALUATION_CODEX_MODEL,
+                    "codex_reasoning_efforts": list(
+                        SUPPORTED_CODEX_REASONING_EFFORTS
+                    ),
+                    "codex_reasoning_effort_default": (
+                        DEFAULT_CODEX_REASONING_EFFORT
+                    ),
+                    "codex_cli_ready": codex_config["ready"],
+                    "codex_cli_error": codex_config["error"],
                     "judge_llm_backend": os.environ.get(
                         "OPENHARNESS_JUDGE_LLM_BACKEND",
                         "workbuddy",
@@ -832,6 +861,14 @@ class Handler(BaseHTTPRequestHandler):
                             DEFAULT_EVALUATION_API_MODEL,
                         ),
                     ),
+                    "judge_codex_model": os.environ.get(
+                        "OPENHARNESS_JUDGE_CODEX_MODEL",
+                        DEFAULT_EVALUATION_CODEX_MODEL,
+                    ),
+                    "judge_codex_reasoning_effort": os.environ.get(
+                        "OPENHARNESS_JUDGE_CODEX_REASONING_EFFORT",
+                        DEFAULT_CODEX_REASONING_EFFORT,
+                    ),
                     "optimizer_llm_backend": os.environ.get(
                         "OPENHARNESS_OPTIMIZER_LLM_BACKEND",
                         "workbuddy",
@@ -846,6 +883,14 @@ class Handler(BaseHTTPRequestHandler):
                             "ANTHROPIC_JUDGE_MODEL",
                             DEFAULT_EVALUATION_API_MODEL,
                         ),
+                    ),
+                    "optimizer_codex_model": os.environ.get(
+                        "OPENHARNESS_OPTIMIZER_CODEX_MODEL",
+                        DEFAULT_EVALUATION_CODEX_MODEL,
+                    ),
+                    "optimizer_codex_reasoning_effort": os.environ.get(
+                        "OPENHARNESS_OPTIMIZER_CODEX_REASONING_EFFORT",
+                        DEFAULT_CODEX_REASONING_EFFORT,
                     ),
                 }
             )
@@ -1065,7 +1110,7 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
             try:
-                llm_backend, llm_model = _llm_selection(
+                llm_backend, llm_model, llm_reasoning_effort = _llm_selection(
                     b,
                     "optimizer",
                 )
@@ -1077,6 +1122,7 @@ class Handler(BaseHTTPRequestHandler):
                         account=acct,
                         llm_backend=llm_backend,
                         llm_model=llm_model,
+                        llm_reasoning_effort=llm_reasoning_effort,
                     )
             except llm_client.LLMClientError as exc:
                 return self._send(
@@ -1266,7 +1312,11 @@ class Handler(BaseHTTPRequestHandler):
                         DEFAULT_JUDGE_MAX_RETRIES,
                     )
                 )
-                judge_llm_backend, judge_llm_model = _llm_selection(
+                (
+                    judge_llm_backend,
+                    judge_llm_model,
+                    judge_llm_reasoning_effort,
+                ) = _llm_selection(
                     b,
                     "judge",
                 )
@@ -1345,6 +1395,7 @@ class Handler(BaseHTTPRequestHandler):
                                     judge_dimension_count,
                                     judge_llm_backend,
                                     judge_llm_model,
+                                    judge_llm_reasoning_effort,
                                     judge_max_retries,
                                 ),
                                 "status": "completed",
@@ -1419,6 +1470,9 @@ class Handler(BaseHTTPRequestHandler):
                                         judge_llm_model
                                         or DEFAULT_EVALUATION_API_MODEL
                                     ),
+                                    "reasoning_effort": (
+                                        judge_llm_reasoning_effort
+                                    ),
                                     "judge_trace": item.get("judge_trace"),
                                 }
                             },
@@ -1433,6 +1487,7 @@ class Handler(BaseHTTPRequestHandler):
                         prompt,
                         backend=judge_llm_backend,
                         model=judge_llm_model,
+                        reasoning_effort=judge_llm_reasoning_effort,
                         retries=0,
                     )
 
@@ -1464,6 +1519,7 @@ class Handler(BaseHTTPRequestHandler):
                     judge_dimension_count,
                     judge_llm_backend,
                     judge_llm_model,
+                    judge_llm_reasoning_effort,
                     judge_max_retries,
                 )
                 summary["remaining_cases"] = len(
