@@ -7,7 +7,7 @@ let DIMS=["data_accuracy","completeness","insight","conciseness"];
 let ZH={data_accuracy:"数据准确性",completeness:"完整性",insight:"洞察质量",conciseness:"简洁性"};
 let SID=null, STATE=null;
 let GEN_JOB=null, GEN_CONFIG=null, GEN_POLL=null;
-let JUDGE_SUMMARY=null, JUDGE_RESULTS=[], JUDGE_RUNNING=false;
+let JUDGE_SUMMARY=null, JUDGE_RESULTS=[], JUDGE_RUNNING=false, JUDGE_POLL=null;
 const GEN_TERMINAL_SEEN=new Set();
 
 function toast(m,ms=2600){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';
@@ -25,6 +25,28 @@ async function api(path,method,body){
     throw err;
   }
   return j;
+}
+
+function stopJudgeProgressPoll(){
+  clearTimeout(JUDGE_POLL);
+  JUDGE_POLL=null;
+}
+
+async function pollJudgeProgress(){
+  if(!JUDGE_RUNNING||!SID){stopJudgeProgressPoll();return;}
+  try{
+    const fresh=await api('/api/session?id='+encodeURIComponent(SID),'GET');
+    STATE=fresh;
+    renderJudgeStatus();
+  }catch(e){
+    // A transient refresh error must not cancel the running batch request.
+  }
+  if(JUDGE_RUNNING)JUDGE_POLL=setTimeout(pollJudgeProgress,2000);
+}
+
+function startJudgeProgressPoll(){
+  stopJudgeProgressPoll();
+  JUDGE_POLL=setTimeout(pollJudgeProgress,800);
 }
 // iOA 未登录/身份校验失败: 整页拦截提示(而非吞成普通 toast)
 function authWall(){
@@ -105,6 +127,7 @@ document.getElementById('genBtn').onclick=async()=>{
   const btn=document.getElementById('genBtn');
   const req=document.getElementById('reqInput').value.trim();
   if(!req){toast('请先填写需求描述');return;}
+  const experimentUser=(document.getElementById('userInput')||{}).value||'Zoe';
   const pid=document.getElementById('pidInput').value.trim();
   const optMode=(document.getElementById('optModeSel')||{}).value||'switch_search';
   const v0Strategy=optMode==='llm_rewrite'
@@ -126,6 +149,7 @@ document.getElementById('genBtn').onclick=async()=>{
       requirement:req,
       product_id:pid,
       optimizer_mode:optMode,
+      experiment_user:experimentUser,
       v0_strategy:v0Strategy,
       optimizer_stop:optimizerStop
     });
@@ -201,7 +225,8 @@ document.getElementById('uploadBtn').onclick=async()=>{
 document.getElementById('runJudgeBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0 并导入数据');return;}
   const progress=STATE&&STATE.judge_progress;
-  if(!progress||progress.reports_ready!==progress.total_cases){
+  const judgeable=progress&&progress.judgeable_case_ids||[];
+  if(!progress||!judgeable.length){
     toast('请先生成或补齐当前版本全部 case 的报告');return;
   }
   const parallel=readParallel(
@@ -212,7 +237,7 @@ document.getElementById('runJudgeBtn').onclick=async()=>{
   if(parallel==null)return;
   const llm=readLlmSelection('judge');
   if(!llm)return;
-  JUDGE_RUNNING=true;renderJudgeStatus();
+  JUDGE_RUNNING=true;renderJudgeStatus();startJudgeProgressPoll();
   toast(`正在以并发 ${parallel} Judge ${progress.reports_ready}/${progress.total_cases} 份报告…`,9000);
   try{
     const j=await api('/api/run_judge_batch','POST',{
@@ -229,7 +254,7 @@ document.getElementById('runJudgeBtn').onclick=async()=>{
   }catch(e){
     /* api() 已 toast 错误(如无 key) */
   }finally{
-    JUDGE_RUNNING=false;render();
+    JUDGE_RUNNING=false;stopJudgeProgressPoll();render();
   }
 };
 document.getElementById('rubricSaveBtn').onclick=async()=>{
@@ -380,6 +405,59 @@ document.getElementById('cancelGenerationBtn').onclick=async()=>{
     toast('已请求安全停止；当前 CLI 轮次结束后生效');
   }catch(e){renderGenerationPanel();}
 };
+function progressCard(row){
+  const pct=Math.max(0,Math.min(100,Number(row.pct)||0));
+  const marker=Math.max(2,Math.min(98,pct));
+  return `<div class="job-case"><div class="job-case-main">`+
+    `<span class="status-dot ${esc(row.dot||'')}"></span>`+
+    `<b class="job-case-id" title="${esc(row.case_id)}">${esc(row.case_id)}</b>`+
+    `</div><div class="case-progress-meta">`+
+    `<span class="case-progress-stage">${esc(row.stage)}</span>`+
+    (row.attempts!=null?`<span>${row.attempts} \u6b21</span>`:'')+
+    `<span class="case-progress-percent">${pct}%</span></div>`+
+    `<div class="case-progress-track ${esc(row.track||'')}" role="progressbar" aria-label="${esc(row.case_id+' '+row.stage)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">`+
+    `<span class="case-progress-fill" style="width:${pct}%"></span>`+
+    `<span class="case-progress-marker" style="left:${marker}%"></span></div>`+
+    (row.error?`<div class="job-case-error mut" title="${esc(row.error)}">${esc(row.error).slice(0,180)}</div>`:'')+
+    `</div>`;
+}
+function reportProgressRow(c){
+  const status=(c&&c.status)||'pending';
+  const pctByStatus={pending:0,queued:8,running:45,retrying:38,generated:80,importing:92,imported:100,completed:100};
+  const failed=['failed','retry_exhausted','interrupted','cancelled'].includes(status);
+  const pct=failed?(c&&c.report_size?80:0):(pctByStatus[status]??0);
+  return {case_id:c.case_id,pct,stage:GEN_CASE_STATUS_ZH[status]||status,
+    attempts:c.attempts||0,error:c.error||'',dot:status,
+    track:failed?'failed':pct===100?'done':pct>0?'running':''};
+}
+function renderRunnerCases(){
+  const el=document.getElementById('generationCases');
+  if(!el)return;
+  let rows=(GEN_JOB&&GEN_JOB.cases||[]).map(reportProgressRow);
+  if(!rows.length&&STATE&&STATE.current_eval){
+    rows=STATE.current_eval.map(r=>({case_id:r.case_id,pct:r.report_text?100:0,
+      stage:r.report_text?'\u62a5\u544a\u5df2\u5bfc\u5165':'\u7b49\u5f85\u751f\u6210\u62a5\u544a',
+      dot:r.report_text?'imported':'pending',track:r.report_text?'done':''}));
+  }
+  el.innerHTML=rows.map(progressCard).join('');
+}
+function renderJudgeCases(){
+  const el=document.getElementById('judgeCases');
+  if(!el)return;
+  const p=STATE&&STATE.judge_progress;
+  const missing=new Set(p&&p.missing_report_case_ids||[]);
+  const pending=new Set(p&&p.pending_judge_case_ids||[]);
+  const rows=(STATE&&STATE.current_eval||[]).map(r=>{
+    const hasReport=!missing.has(r.case_id)&&!!r.report_text;
+    const judged=!pending.has(r.case_id)&&!!(r.check_judge&&Object.keys(r.check_judge).length);
+    const pct=judged?100:(JUDGE_RUNNING&&hasReport?50:0);
+    return {case_id:r.case_id,pct,
+      stage:judged?'Judge \u5df2\u5b8c\u6210':!hasReport?'\u7b49\u5f85\u62a5\u544a':JUDGE_RUNNING?'Judge \u6267\u884c\u4e2d':'\u7b49\u5f85 Judge',
+      dot:judged?'completed':JUDGE_RUNNING&&hasReport?'running':'pending',
+      track:judged?'done':JUDGE_RUNNING&&hasReport?'running':''};
+  });
+  el.innerHTML=rows.map(progressCard).join('');
+}
 function renderGenerationPanel(){
   const cfg=document.getElementById('generationConfig');
   const status=document.getElementById('generationStatus');
@@ -480,9 +558,11 @@ function renderGenerationPanel(){
   const advanceAction=STATE&&STATE.actions&&STATE.actions.advance;
   document.getElementById('advanceBtn').disabled=!STATE||!(advanceAction?advanceAction.enabled:STATE.can_advance)||active||JUDGE_RUNNING;
   if(!GEN_JOB){
-    status.innerHTML='<span class="mut">尚未运行。报告导入后，请在下方一键批量 Judge 全部 case。</span>';
-    cases.innerHTML='';return;
+    status.innerHTML='<span class="mut">\u5c1a\u672a\u8fd0\u884c\u62a5\u544a\u751f\u6210\u3002</span>';
+    renderRunnerCases();
+    return;
   }
+
   const total=GEN_JOB.case_count||0, imported=GEN_JOB.imported_count||0;
   const done=(GEN_JOB.cases||[]).filter(x=>x.imported||['retry_exhausted','failed','cancelled'].includes(x.status)).length;
   const pct=total?Math.round(done/total*100):0;
@@ -503,6 +583,7 @@ function renderGenerationPanel(){
     `</div>`+
     (c.error?`<div class="job-case-error mut" title="${esc(c.error)}">${esc(c.error).slice(0,180)}</div>`:'')+
     `</div>`).join('');
+  renderRunnerCases();
 }
 
 // ---------------- 渲染 ----------------
@@ -510,13 +591,11 @@ function render(){
   if(!STATE)return;
   if(STATE.dims)DIMS=STATE.dims;
   if(STATE.dim_zh)ZH=STATE.dim_zh;
-  document.getElementById('backendBadge').textContent='backend: '+STATE.backend;
-  document.getElementById('sessBadge').textContent='会话 '+STATE.session_id+' · '+STATE.product_id;
   const v0StrategyLabel=STATE.v0_strategy==='llm_scratch'
     ?'LLM 从零起草（需求 + Rubric）'
     :'从基础 Skill 开始';
   document.getElementById('genRationale').innerHTML='<b>V0 起草方式：</b>'+esc(v0StrategyLabel)+'<br><b>生成依据：</b><br>'+esc(STATE.gen_rationale||'').replace(/\n/g,'<br>');
-  ['dataCard','rubricCard','skillCard','realRunCard','outputCard'].forEach(id=>document.getElementById(id).classList.add('active'));
+  ['dataCard','rubricCard','skillCard','realRunCard','outputCard','optimizerCard'].forEach(id=>document.getElementById(id).classList.add('active'));
 
   // 版本 pills
   const pills=STATE.versions.map((v,i)=>{
@@ -575,7 +654,7 @@ function render(){
   document.getElementById('skillView').innerHTML=skillBody+
     `<details><summary>查看版本结构策略</summary><pre>${JSON.stringify(cv_structure(),null,1)}</pre></details>`;
 
-  renderCurve(); renderFail(); renderRubric(); renderRubricEditor(); renderHistory(); renderOutputCard(); renderGenerationPanel();
+  renderRubricEditor(); renderOutputCard(); renderGenerationPanel();
 }
 
 function renderOutputCard(){
@@ -623,7 +702,9 @@ function renderJudgeStatus(){
   const el=document.getElementById('judgeStatus');
   const btn=document.getElementById('runJudgeBtn');
   if(!el||!btn)return;
+  renderJudgeCases();
   const p=STATE&&STATE.judge_progress;
+  const judgeable=p&&p.judgeable_case_ids||[];
   const allReports=!!(p&&p.total_cases&&p.reports_ready===p.total_cases);
   const action=STATE&&STATE.actions&&STATE.actions.run_judge;
   const parallelInput=document.getElementById('judgeParallel');
@@ -638,6 +719,7 @@ function renderJudgeStatus(){
   btn.textContent=JUDGE_RUNNING
     ?'批量 Judge 执行中…'
     :(p&&p.judged_cases?'▶ 继续 Judge 未完成 case':'▶ 批量 Judge 全部 case');
+  if(JUDGE_RUNNING&&p)btn.textContent+=' '+p.judged_cases+'/'+p.total_cases;
   if(!p){
     el.innerHTML='<span class="mut">导入数据后显示 Judge 状态。</span>';return;
   }

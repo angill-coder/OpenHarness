@@ -48,12 +48,13 @@ def _atomic_write(path: str, obj: Any):
 
 
 # ---------------- 写 ----------------
-def init_session(sid: str, requirement: str, product_id: str):
+def init_session(sid: str, requirement: str, product_id: str, experiment_user: str = ""):
     d = _ensure(sid)
     meta_path = os.path.join(d, "meta.json")
     if not os.path.exists(meta_path):
         _atomic_write(meta_path, {
             "sid": sid, "requirement": requirement, "product_id": product_id,
+            "experiment_user": str(experiment_user or "").strip(),
             "created_at": _now(),
         })
 

@@ -12,10 +12,13 @@
   header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px}
   header h1{font-size:16px;margin:0;font-weight:600}
   header .badge{font-size:12px;color:var(--mut);background:var(--chip);padding:2px 8px;border-radius:10px}
-  .page-link{display:inline-flex;align-items:center;gap:7px;margin-left:auto;padding:7px 12px;border:1px solid var(--line);
-       border-radius:7px;background:var(--panel2);color:var(--fg);font-size:12px;font-weight:600;text-decoration:none}
-  .page-link:hover{border-color:var(--acc);color:var(--acc)}
-  .wrap{display:grid;grid-template-columns:340px 1fr 380px;gap:0;height:calc(100vh - 51px)}
+  .product-nav{display:flex;align-items:center;gap:6px}
+  .product-nav a{display:inline-flex;align-items:center;height:32px;padding:0 11px;border-radius:7px;color:var(--mut);font-size:12px;font-weight:600;text-decoration:none}
+  .product-nav a:hover,.product-nav a.active{background:var(--panel2);color:var(--fg)}
+  .product-nav a.active{box-shadow:inset 0 0 0 1px var(--line)}
+  #userBadge{margin-left:auto}
+  @media(max-width:720px){header{gap:8px}.product-nav a{padding:0 8px}#userBadge{display:none}}
+  .wrap{display:grid;grid-template-columns:340px minmax(0,1fr);gap:0;height:calc(100vh - 51px)}
   .col{overflow-y:auto;padding:16px}
   .col.left{border-right:1px solid var(--line)}
   .col.right{border-left:1px solid var(--line);background:#12161c}
@@ -54,6 +57,23 @@
   .job-case-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .job-case-state{margin-left:auto;padding-left:8px;white-space:nowrap}
   .job-case-error{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px 0 0 14px}
+  .case-progress-heading{margin-top:10px;color:var(--fg);font-weight:700}
+  .case-progress-meta{display:flex;align-items:center;gap:8px;margin-top:6px;color:var(--mut)}
+  .case-progress-stage{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .case-progress-percent{margin-left:auto;color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}
+  .case-progress-track{position:relative;height:10px;margin-top:5px;border:1px solid #354151;
+       border-radius:999px;background:#11161d;overflow:hidden}
+  .case-progress-fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:999px;
+       background:linear-gradient(90deg,#177ddc,#43a5ff);transition:width .35s ease}
+  .case-progress-marker{position:absolute;top:1px;left:0;width:16px;height:6px;border-radius:999px;
+       background:#d8f0ff;box-shadow:0 0 8px rgba(67,165,255,.9);transform:translateX(-50%);
+       transition:left .35s ease}
+  .case-progress-track.running .case-progress-marker{animation:casePulse 1.1s ease-in-out infinite}
+  .case-progress-track.done .case-progress-fill{background:linear-gradient(90deg,#188b62,#39d98a)}
+  .case-progress-track.done .case-progress-marker{background:#d9ffef;box-shadow:0 0 8px rgba(57,217,138,.8)}
+  .case-progress-track.failed .case-progress-fill{background:linear-gradient(90deg,#963a48,#ff6174)}
+  .case-progress-track.failed .case-progress-marker{background:#ffe1e5;box-shadow:0 0 8px rgba(255,97,116,.8)}
+  @keyframes casePulse{50%{opacity:.38;box-shadow:0 0 2px currentColor}}
   .status-dot{display:inline-block;flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:var(--mut);margin-right:6px}
   .status-dot.running,.status-dot.retrying,.status-dot.importing{background:var(--warn)}
   .status-dot.generated,.status-dot.imported,.status-dot.completed{background:var(--ok)}
@@ -91,10 +111,10 @@
 <body>
 <header>
   <h1>OpenHarness</h1>
-  <span class="badge">Skill 评测与迭代平台</span>
-  <span class="badge" id="backendBadge">backend: -</span>
-  <span class="badge" id="sessBadge">未创建会话</span>
-  <a class="page-link" href="/dashboard/" aria-label="打开实时评测看板">▦ 实时评测看板</a>
+  <nav class="product-nav" aria-label="平台页面">
+    <a class="active" href="/?ui=2">Skill 评测与迭代平台</a>
+    <a href="/dashboard/?ui=2">实时评测看板</a>
+  </nav>
   <span class="badge" id="userBadge">👤 —</span>
 </header>
 
@@ -115,6 +135,12 @@
       <h2><span class="n">1</span>需求描述 → 生成 V0</h2>
       <label>用一段话描述这个 agent 产品要做什么</label>
       <textarea id="reqInput" placeholder="例: 做一个面向高管的经营月报助手, 每月汇总业绩/关键指标/风险, 数据必须准确可回溯, 输出要简洁。"></textarea>
+      <label for="userInput">&#29992;&#25143;</label>
+      <select id="userInput">
+        <option value="Angill">Angill</option>
+        <option value="Sijing">Sijing</option>
+        <option value="Zoe" selected>Zoe</option>
+      </select>
       <label>产品 ID (可选)</label>
       <input id="pidInput" placeholder="report-assistant">
       <label style="margin-top:8px">优化器策略</label>
@@ -179,38 +205,10 @@
     <div class="card">
       <h2>版本演进</h2>
       <div id="versionPills" class="mut small">尚未开始</div>
-      <div id="optimizerLlmControls" class="row" style="align-items:flex-end;margin-top:8px;display:none">
-        <div style="flex:1">
-          <label for="optimizerLlmBackend">Optimizer 模型调用方式</label>
-          <select id="optimizerLlmBackend">
-            <option value="api">API</option>
-            <option value="workbuddy" selected>WorkBuddy CLI</option>
-          </select>
-        </div>
-        <div id="optimizerWbModelWrap" style="flex:1">
-          <label for="optimizerWbModel">Optimizer WB 模型</label>
-          <select id="optimizerWbModel">
-            <option value="claude-opus-4.8">claude-opus-4.8</option>
-          </select>
-        </div>
-        <div id="optimizerApiModelWrap" style="flex:1;display:none">
-          <label for="optimizerApiModel">Optimizer API 模型</label>
-          <input id="optimizerApiModel" list="evaluationApiModels" placeholder="选择或输入模型名">
-        </div>
-        <datalist id="evaluationApiModels">
-          <option value="claude-opus-5"></option>
-          <option value="claude-opus-4.8"></option>
-          <option value="gpt-5.6-sol"></option>
-        </datalist>
-      </div>
-      <div id="advanceBox" class="row" style="margin-top:10px">
-        <button id="advanceBtn" disabled>▶ 生成下一版 skill（optimizer + gate）</button>
-      </div>
-      <div id="advanceMsg" class="small" style="margin-top:8px"></div>
     </div>
 
     <div class="card step" id="skillCard">
-      <h2>当前版本 · Skill</h2>
+      <h2><span class="n">▶</span>当前版本 · Skill</h2>
       <div id="skillView" class="small mut">—</div>
     </div>
 
@@ -236,11 +234,12 @@
         <button class="ghost" id="cancelGenerationBtn" style="display:none">停止</button>
       </div>
       <div id="generationStatus" class="small" style="margin-top:10px"></div>
+      <div class="case-progress-heading small">&#36880; Case &#25253;&#21578;&#29983;&#25104;&#36827;&#24230;</div>
       <div id="generationCases" class="job-case-list small" style="margin-top:8px"></div>
     </div>
 
     <div class="card step" id="outputCard">
-      <h2><span class="n">3</span>报告与批量模型 Judge</h2>
+      <h2><span class="n">▶</span>报告与批量模型 Judge</h2>
       <p class="small mut">WB CLI 会批量导入报告；也可在这里手工补充单个报告。点击一次即可并发 Judge 当前版本全部 case，每个 case 使用独立 Prompt。</p>
       <label>选择 case</label>
       <select id="outCaseSel"></select>
@@ -284,33 +283,49 @@
       </div>
       <p class="small mut" style="margin:7px 0 0">Judge 调用或输出格式失败会自动重试，最多额外 3 次；成功维度会保留，重跑时只补缺失维度。</p>
       <div id="judgeStatus" class="small" style="margin-top:8px"></div>
+      <div class="case-progress-heading small">&#36880; Case Judge &#36827;&#24230;</div>
+      <div id="judgeCases" class="job-case-list small" style="margin-top:8px"></div>
       <div id="checkPanel" class="small" style="margin-top:8px"></div>
     </div>
+    <div class="card step" id="optimizerCard">
+      <h2><span class="n">▶</span>Optimizer · 生成下一版 Skill</h2>
+      <p class="small mut">当前版本全部 Case 完成 Judge 后，调用 Optimizer 生成下一版 Skill，并执行 Gate 判定。</p>
+      <div id="optimizerLlmControls" class="row" style="align-items:flex-end;margin-top:8px;display:none">
+        <div style="flex:1">
+          <label for="optimizerLlmBackend">Optimizer 模型调用方式</label>
+          <select id="optimizerLlmBackend">
+            <option value="api">API</option>
+            <option value="workbuddy" selected>WorkBuddy CLI</option>
+          </select>
+        </div>
+        <div id="optimizerWbModelWrap" style="flex:1">
+          <label for="optimizerWbModel">Optimizer WB 模型</label>
+          <select id="optimizerWbModel">
+            <option value="claude-opus-4.8">claude-opus-4.8</option>
+          </select>
+        </div>
+        <div id="optimizerApiModelWrap" style="flex:1;display:none">
+          <label for="optimizerApiModel">Optimizer API 模型</label>
+          <input id="optimizerApiModel" list="evaluationApiModels" placeholder="选择或输入模型名">
+        </div>
+        <datalist id="evaluationApiModels">
+          <option value="claude-opus-5"></option>
+          <option value="claude-opus-4.8"></option>
+          <option value="gpt-5.6-sol"></option>
+        </datalist>
+      </div>
+      <div id="advanceBox" class="row" style="margin-top:10px">
+        <button id="advanceBtn" disabled>▶ 生成下一版 skill（optimizer + gate）</button>
+      </div>
+      <div id="advanceMsg" class="small" style="margin-top:8px"></div>
+    </div>
+
   </div>
 
-  <!-- 右列: 看板 -->
-  <div class="col right">
-    <div class="card">
-      <h2>分数曲线（每版）</h2>
-      <div id="curveView" class="small mut">—</div>
-    </div>
-    <div class="card">
-      <h2>失败模式</h2>
-      <div id="failView" class="small mut">—</div>
-    </div>
-    <div class="card">
-      <h2>当前 Rubric</h2>
-      <div id="rubricView" class="small mut">—</div>
-    </div>
-    <div class="card">
-      <h2>操作历史（已落盘）</h2>
-      <div id="historyView" class="small mut">—</div>
-    </div>
-  </div>
 </div>
 
 <div id="toast" class="toast" style="display:none"></div>
 
-<script src="/app.js"></script>
+<script src="/app.js?rev=2"></script>
 </body>
 </html>

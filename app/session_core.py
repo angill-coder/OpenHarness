@@ -91,10 +91,12 @@ class SessionCore:
         optimizer_mode="switch_search",
         optimizer_stop=None,
         v0_strategy="base_skill",
+        experiment_user="",
     ):
         self.id = sid
         self.requirement = requirement
         self.product_id = product_id
+        self.experiment_user = str(experiment_user or "").strip()
         self.optimizer_mode = optimizer_mode or "switch_search"
         self.v0_strategy = v0_strategy or "base_skill"
         self.optimizer_stop = _normalize_optimizer_stop(optimizer_stop)
@@ -140,9 +142,10 @@ class SessionCore:
 
         if not _restoring:
             # 新建会话: 写 meta + created 事件 + 首个快照
-            persist.init_session(sid, requirement, product_id)
+            persist.init_session(sid, requirement, product_id, self.experiment_user)
             persist.append_event(sid, "created", {
                 "product_id": product_id, "detected": self.detected,
+                "experiment_user": self.experiment_user,
                 "optimizer_mode": self.optimizer_mode,
                 "v0_strategy": self.v0_strategy,
                 "rubric_version": self.rubric["version"],
@@ -432,6 +435,7 @@ class SessionCore:
         return {
             "id": self.id, "requirement": self.requirement, "product_id": self.product_id,
             "optimizer_mode": getattr(self, "optimizer_mode", "switch_search"),
+            "experiment_user": getattr(self, "experiment_user", ""),
             "v0_strategy": getattr(self, "v0_strategy", "base_skill"),
             "optimizer_stop": getattr(
                 self,
@@ -473,6 +477,7 @@ class SessionCore:
         self.requirement = snap["requirement"]
         self.product_id = snap["product_id"]
         self.optimizer_mode = snap.get("optimizer_mode", "switch_search")
+        self.experiment_user = str(snap.get("experiment_user") or "").strip()
         self.v0_strategy = snap.get("v0_strategy", "base_skill")
         self.optimizer_stop = _normalize_optimizer_stop(
             snap.get("optimizer_stop")
@@ -590,6 +595,7 @@ class SessionCore:
             "judged_cases": len(judged),
             "missing_report_case_ids": sorted(case_ids - reports_ready),
             "pending_judge_case_ids": sorted(case_ids - judged),
+            "judgeable_case_ids": sorted(reports_ready - judged),
         }
         version_status, actions = self._workflow_state(
             cur,
@@ -610,6 +616,7 @@ class SessionCore:
             "requirement": self.requirement,
             "product_id": self.product_id,
             "account": account,
+            "experiment_user": getattr(self, "experiment_user", ""),
             "backend": self.backend.name,
             "detected": self.detected,
             "gen_rationale": self.gen_rationale,
@@ -773,11 +780,12 @@ class SessionCore:
         generation_reason = None
         judge_reason = None
         advance_reason = None
+        judgeable = reports_ready - judged
         if not case_ids:
             generation_reason = "尚未导入 case"
         elif reports_ready == case_ids:
             generation_reason = "当前版本已有完整报告"
-        if reports_ready != case_ids:
+        if not judgeable and reports_ready != case_ids:
             judge_reason = "尚缺 %d 份报告" % missing_reports
         elif requires_model_judge and judged == case_ids:
             judge_reason = "当前版本已完成全部 Judge"
@@ -799,7 +807,7 @@ class SessionCore:
             "run_judge": {
                 "enabled": (
                     bool(case_ids)
-                    and reports_ready == case_ids
+                    and bool(judgeable)
                     and (
                         not requires_model_judge
                         or judged != case_ids
