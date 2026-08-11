@@ -189,6 +189,7 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 | `GET /api/session?id=` | 当前会话完整状态 |
 | `POST /api/data` `{id, rows? / use_sample?}` | 导入数据 |
 | `POST /api/rubric` `{id, weights?, target?}` | 编辑 rubric（存新版本）|
+| `POST /api/rubric/import` `{id, rubric, filename?}` | 校验并把完整 rubric JSON 导入当前 Session，不覆盖默认文件 |
 | `POST /api/advance` `{id}` | 全部 case 模型 Judge 完成后生成下一版 skill |
 | `POST /api/import_output` `{id, case_id, report_text, version?}` | 存平台跑出的真实报告文本 |
 | `POST /api/import_judgment` `{id, case_id, scores:{dim:score}, reasoning?, version?}` | 存平台 LLM-judge 六维分（覆盖 mock）|
@@ -203,6 +204,8 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 | `GET /api/sessions` | 列出所有已恢复会话 |
 
 ## 说明与边界（v0 演示范围）
+
+新 Session 默认读取 `harness/artifacts/` 下当前产品的 Rubric。WebUI 可选择本地 `.json` 文件导入到当前 Session，不限制导入 Rubric 的 `product` 与 `Session.product_id` 一致；浏览器上传 JSON 内容，后端不读取客户端路径。导入后评分维度、Judge 模式和 backend 跟随 Rubric 自身，版本号取文件中的 `version`；Rubric 与来源文件名一起冻结进该 Session，默认文件、其他 Session 和历史 Session 均不受影响。
 
 - **落盘持久化**：需求描述、每一版 skill/rubric、报告和模型 Judge 结果都落盘，重启自动恢复（见下）。
 - **离线确定性**：mock 后端的输出质量由 skill 的 directive 决定，judge 按 rubric 锚点对照 human report 打分，所以"打开正确 directive → 分数上升"是 rubric 的必然而非脚本。算数字型走 `MockBackend`，调研洞察型走 `ResearchMockBackend`（吐报告文本+signals）。

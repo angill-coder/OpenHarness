@@ -12,6 +12,7 @@ API:
   GET  /api/session?id=       -> 当前会话完整状态
   POST /api/data              {id, rows?, use_sample?, use_configured?} -> 导入数据
   POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
+  POST /api/rubric/import     {id, rubric, filename?}  -> 导入 rubric 到当前会话
   POST /api/advance           {id, llm_backend?, llm_model?, llm_reasoning_effort?}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
@@ -1089,6 +1090,35 @@ class Handler(BaseHTTPRequestHandler):
                     {k: b[k] for k in ("weights", "target") if k in b},
                     account=acct,
                 )
+            return self._send(200, result)
+
+        if u.path == "/api/rubric/import":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            if _active_judge(s.id):
+                return self._send(
+                    409,
+                    {"error": "批量 Judge 进行中，暂不能导入 Rubric"},
+                )
+            active = _active_generation(s.id)
+            if active:
+                return self._send(
+                    409,
+                    {
+                        "error": "真实报告生成中，暂不能导入 Rubric",
+                        "job_id": active.job_id,
+                    },
+                )
+            try:
+                with _session_lock(s.id):
+                    result = s.import_rubric(
+                        b.get("rubric"),
+                        filename=b.get("filename"),
+                        account=acct,
+                    )
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
             return self._send(200, result)
 
         if u.path == "/api/advance":

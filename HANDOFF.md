@@ -103,7 +103,7 @@
 - 产出的报告 → app 第4步「导入报告文本」+ LLM-judge 打分「导入六维评分」→ 平台评测。
 
 ## 5. ⚠️ 致命坑（务必记住）
-1. **改 rubric / 会话 state.json 后必须重启 server** —— 会话是 server 启动时读进内存的，`/api/session` 返回内存态。改磁盘不重启看不到。标准动作：改文件 →`Ctrl+C`→`python3 server.py`→浏览器刷新。（页面内「编辑Rubric」按钮改权重是例外，走内存直改+落盘。）
+1. **改 rubric / 会话 state.json 后必须重启 server** —— 会话是 server 启动时读进内存的，`/api/session` 返回内存态。改磁盘不重启看不到。标准动作：改文件 →`Ctrl+C`→`python3 server.py`→浏览器刷新。（页面内「编辑Rubric」按钮改权重，以及“导入 Rubric JSON”是例外，均走内存直改+落盘。）导入只替换并冻结当前 Session，不限制 Rubric `product` 与 `Session.product_id` 一致；评分维度、Judge 模式和 backend 跟随导入 Rubric，默认母本与其他 Session 不受影响。
 2. **改 index.html 的 JS 后先语法检查**（曾因误删函数头导致整页 JS 崩、按钮全失效）：
    `python3 -c "import re;open('/tmp/c.js','w').write(re.search(r'<script>(.*)</script>',open('app/index.html').read(),re.S).group(1))" && node --check /tmp/c.js`
 3. **mock vs recorded 泾渭分明**：优化器(advance)需要 mock signals（directive 驱动）才能聚类失败→提议；**recorded 报告 signals 为空→优化器直接"收敛"**。所以：跑优化器用"只有数据集、没贴报告"的会话（research-run）；校准用"贴了真实报告+judge分"的会话（research-calib）+ 用户人工分。
