@@ -468,6 +468,11 @@ class DashboardDataContractTest(unittest.TestCase):
         self.assertIn("/session-summary?session=", loader)
         self.assertNotIn("files.has('judgments.jsonl')", loader)
         self.assertIn("refreshMs: 2 * 1000", loader)
+        self.assertNotIn("function scoreRecord", loader)
+        self.assertNotIn("function normalizeJudgment", loader)
+        self.assertIn("judgment.scoring_status !== 'scored'", loader)
+        self.assertIn("judgment.scores || {}", loader)
+        self.assertIn("judgment.overall ?? 0", loader)
         self.assertIn("const explicitJudge =", loader)
         self.assertIn("judgeBasis", loader)
         self.assertIn("judge === 'v3' ? 'source' : 'groundtruth'", loader)
@@ -792,6 +797,28 @@ class DashboardDataContractTest(unittest.TestCase):
         self.assertIn(".data-quality-button", theme)
         self.assertIn(".quality-score-card", theme)
 
+    def test_dashboard_scoring_rejects_stale_rubric(self):
+        rubric = {
+            "dimensions": [{
+                "name": "quality",
+                "weight": 1.0,
+                "checks": [{"id": "Q1"}],
+            }]
+        }
+        rows = dashboard_api._score_summary_judgments(
+            [{
+                "version": "v1",
+                "case_id": "case-1",
+                "checks": {"Q1": 1.0},
+                "rubric_sha256": "stale",
+            }],
+            rubric,
+        )
+
+        self.assertEqual("stale_rubric", rows[0]["scoring_status"])
+        self.assertNotIn("scores", rows[0])
+        self.assertNotIn("overall", rows[0])
+
     def test_session_summary_is_compact_cached_and_check_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             sessions = Path(tmp) / "sessions"
@@ -804,7 +831,12 @@ class DashboardDataContractTest(unittest.TestCase):
             (session / "state.json").write_text(json.dumps({
                 "id": "exp-1",
                 "experiment_user": "Zoe",
-                "rubric": {"dimensions": [{"name": "quality", "checks": []}]},
+                "rubric": {"dimensions": [{
+                    "name": "quality",
+                    "weight": 1.0,
+                    "hard_floor": 3,
+                    "checks": [{"id": "a", "redline": True}],
+                }]},
                 "versions": [{"skill": {
                     "version": "v1", "parent_version": None,
                     "instructions": {"prose": "x" * 10000},
@@ -865,6 +897,14 @@ class DashboardDataContractTest(unittest.TestCase):
             )
             self.assertEqual("judge-model", first["judgments"][0]["model"])
             self.assertEqual("workbuddy", first["judgments"][0]["llm_backend"])
+            self.assertEqual({"quality": 5.0}, first["judgments"][0]["scores"])
+            self.assertEqual(5.0, first["judgments"][0]["overall"])
+            self.assertEqual([], first["judgments"][0]["redline_checks"])
+            self.assertFalse(first["judgments"][0]["case_failed_gate"])
+            self.assertEqual(
+                "harness/judge.py", first["judgments"][0]["score_source"]
+            )
+            self.assertEqual("scored", first["judgments"][0]["scoring_status"])
             self.assertEqual(1, len(first["judgments"]))
             self.assertEqual(
                 "optimizer-model", first["runtime_models"]["optimizer"]["model"]

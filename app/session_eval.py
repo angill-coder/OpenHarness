@@ -140,7 +140,6 @@ class SessionEval:
         outs = self.report_outputs.get(version, {})
         juds = self.report_judgments.get(version, {})
         jchecks = self.judge_checks.get(version, {})
-        floor = judge_mod._hard_floor(self.rubric, "traceability")
         for r in recs:
             rt = outs.get(r.case_id)
             if rt is not None:
@@ -149,9 +148,13 @@ class SessionEval:
             # judge 分:逐 check 派生 > 旧 import_judgment > mock
             jc = (jchecks.get(r.case_id) or {}).get("checks")
             jv = juds.get(r.case_id)
+            scored = None
             if jc:
                 r.judge_checks = dict(jc)
-                r.scores = judge_mod.dim_from_checks(jc, self.rubric)
+                scored = judge_mod.score_check_judgment(
+                    jc, self.rubric
+                )
+                r.scores = scored["scores"]
                 r.judge_reasoning = (jchecks.get(r.case_id) or {}).get("reasoning", {})
                 r.score_source = "recorded"
             elif jv is not None:
@@ -166,10 +169,37 @@ class SessionEval:
             else:
                 r.score_source = "mock"
             if r.score_source == "recorded":
-                tr = r.scores.get("traceability")
-                r.case_failed_gate = floor is not None and tr is not None and tr < floor
-                if r.case_failed_gate and not any(str(f).startswith("RED_LINE") for f in r.flagged):
-                    r.flagged.append("RED_LINE:traceability<%d" % floor)
+                if scored is not None:
+                    r.case_failed_gate = scored["case_failed_gate"]
+                    for dimension_name in scored["hard_floor_failures"]:
+                        floor = judge_mod._hard_floor(
+                            self.rubric, dimension_name
+                        )
+                        flag = "RED_LINE:%s<%s" % (
+                            dimension_name, floor
+                        )
+                        if flag not in r.flagged:
+                            r.flagged.append(flag)
+                else:
+                    floor = judge_mod._hard_floor(
+                        self.rubric, "traceability"
+                    )
+                    tr = r.scores.get("traceability")
+                    r.case_failed_gate = (
+                        floor is not None
+                        and tr is not None
+                        and tr < floor
+                    )
+                    if (
+                        r.case_failed_gate
+                        and not any(
+                            str(flag).startswith("RED_LINE")
+                            for flag in r.flagged
+                        )
+                    ):
+                        r.flagged.append(
+                            "RED_LINE:traceability<%s" % floor
+                        )
 
     def _rec_view(self, r: EvalRecord) -> Dict[str, Any]:
         ver = self._current()["version"]
