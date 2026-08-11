@@ -243,35 +243,6 @@
     return Number.isFinite(parsed) ? parsed : Number(bundle.meta.created_at || 0);
   }
 
-  function scoreRecord(checks, dimensions) {
-    let weighted = 0;
-    let weightTotal = 0;
-    let red = 0;
-    const dims = dimensions.map(dimension => {
-      const values = dimension.checks.map(check => Number(checks[check.id] ?? 0));
-      const score = 1 + 4 * (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0);
-      weighted += score * dimension.weight;
-      weightTotal += dimension.weight;
-      red += dimension.checks.filter(check => check.redline && Number(checks[check.id] ?? 0) < 1).length;
-      return Number(score.toFixed(4));
-    });
-    return { dims, total: Number((weightTotal ? weighted / weightTotal : 0).toFixed(4)), red };
-  }
-
-  function normalizeJudgment(row, dimensions) {
-    if (row.checks) return { checks: row.checks, reasoning: row.reasoning || {} };
-    const checks = {};
-    const reasoning = {};
-    dimensions.forEach(dimension => {
-      const rawScore = Number(row.scores?.[dimension.id] ?? 1);
-      const normalized = Math.max(0, Math.min(1, (rawScore - 1) / 4));
-      dimension.checks.forEach(check => {
-        checks[check.id] = normalized;
-        reasoning[check.id] = row.reasoning?.[dimension.id] || '该历史记录仅保存维度级 Judge 理由。';
-      });
-    });
-    return { checks, reasoning };
-  }
 
   function versionItems(state) {
     return (state.versions || []).map(entry => entry.skill || entry).filter(skill => skill?.version);
@@ -459,15 +430,23 @@
         };
       });
       judgmentMap.forEach((judgment, key) => {
+        if (judgment.scoring_status !== 'scored') return;
         const output = outputMap.get(key) || {};
-        const normalized = normalizeJudgment(judgment, localDimensions);
-        const localScored = scoreRecord(normalized.checks, localDimensions);
+        const localScores = judgment.scores || {};
+        const localScored = {
+          dims: localDimensions.map(dimension => Number(localScores[dimension.id] ?? 0)),
+          total: Number(judgment.overall ?? 0),
+          red: Array.isArray(judgment.redline_checks) ? judgment.redline_checks.length : 0,
+          caseFailedGate: Boolean(judgment.case_failed_gate),
+        };
         const scored = Object.assign({}, localScored, {
           dims: dimensions.map(dimension => localScored.dims[localDimensionIndex.get(dimension.id)] ?? 0),
         });
         records[`${bundle.sessionId}|${key}`] = Object.assign({}, scored, {
-          checks: normalized.checks,
-          reasoning: normalized.reasoning,
+          checks: judgment.checks || {},
+          reasoning: judgment.reasoning || {},
+          scoreSource: judgment.score_source || '',
+          scoringStatus: judgment.scoring_status,
           report: output.report_text || '',
           generationId: output.generation_id || '',
           reportSha256: judgment.report_sha256 || null,

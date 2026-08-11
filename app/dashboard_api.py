@@ -7,7 +7,15 @@ import json
 import os
 import re
 from pathlib import Path
+import sys
 import threading
+
+
+HARNESS = Path(__file__).resolve().parents[1] / "harness"
+if str(HARNESS) not in sys.path:
+    sys.path.insert(0, str(HARNESS))
+
+import judge as judge_mod  # noqa: E402
 
 
 SESSION_FILES = {
@@ -834,13 +842,76 @@ def _summary_runtime_models(
     return result
 
 
+def _json_sha256(value: object) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _score_summary_judgments(
+    judgments: list[dict[str, object]],
+    rubric: dict[str, object],
+) -> list[dict[str, object]]:
+    """Add score fields derived by the authoritative harness Judge rules."""
+    current_rubric_sha256 = _json_sha256(rubric)
+    scored_rows = []
+    for source in judgments:
+        row = dict(source)
+        if row.get("invalidated"):
+            scored_rows.append(row)
+            continue
+
+        checks = row.get("checks")
+        if not isinstance(checks, dict) or not checks:
+            row["scoring_status"] = "missing_checks"
+            scored_rows.append(row)
+            continue
+
+        recorded_rubric_sha256 = str(
+            row.get("rubric_sha256") or ""
+        ).strip()
+        if (
+            recorded_rubric_sha256
+            and recorded_rubric_sha256 != current_rubric_sha256
+        ):
+            row.update({
+                "scoring_status": "stale_rubric",
+                "current_rubric_sha256": current_rubric_sha256,
+            })
+            scored_rows.append(row)
+            continue
+
+        try:
+            row.update(
+                judge_mod.score_check_judgment(checks, rubric)
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            row.update({
+                "scoring_status": "invalid_checks",
+                "scoring_error": str(exc),
+            })
+        else:
+            row.update({
+                "scoring_status": "scored",
+                "score_source": "harness/judge.py",
+                "current_rubric_sha256": current_rubric_sha256,
+            })
+        scored_rows.append(row)
+    return scored_rows
+
+
 def _summary_judgments(path: Path) -> list[dict[str, object]]:
     if not path.is_file():
         return []
     rows: list[dict[str, object]] = []
     allowed = {
-        "version", "case_id", "checks", "invalidated", "reason", "scores",
+        "version", "case_id", "checks", "invalidated", "reason",
         "ts", "llm_backend", "model", "reasoning_effort",
+        "report_sha256", "rubric_sha256",
     }
     with path.open("rb") as stream:
         for raw in stream:
@@ -1018,7 +1089,10 @@ def session_summary_document(
             for item in compact_state.get("versions", [])
             if isinstance(item, dict) and item.get("version")
         }
-    judgments = _summary_judgments(judgment_path)
+    judgments = _score_summary_judgments(
+        _summary_judgments(judgment_path),
+        state.get("rubric") if isinstance(state.get("rubric"), dict) else {},
+    )
     runtime_models = _summary_runtime_models(
         events_path, version_case_ids, state=state, judgments=judgments,
     )
