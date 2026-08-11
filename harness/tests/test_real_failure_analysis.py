@@ -49,7 +49,7 @@ class RealFailureAnalysisTest(unittest.TestCase):
             self.rubric,
         )
 
-        self.assertEqual(failures[0]["pattern_id"], "trace_fabrication")
+        self.assertEqual(failures[0]["pattern_id"], "trace_faithfulness")
         self.assertEqual(failures[0]["hit_count"], 1)
         self.assertEqual(
             failures[0]["directive_hint"],
@@ -66,6 +66,33 @@ class RealFailureAnalysisTest(unittest.TestCase):
             ),
             [],
         )
+
+    def test_research_rubric_v23_has_compact_stable_check_set(self):
+        expected_by_dimension = {
+            "traceability": ["T1", "T2", "T3", "T4", "T5", "T6"],
+            "structure": ["S1", "S4", "S5"],
+            "narrative": ["N2", "N4", "N5"],
+            "insight": ["I1", "I2", "I3", "I4"],
+            "coverage": ["V1", "V2", "V3"],
+            "expression": ["E1", "E2", "E3", "E4", "E5", "E6"],
+        }
+        actual_by_dimension = {
+            dimension["name"]: [
+                check["id"] for check in dimension.get("checks", [])
+            ]
+            for dimension in self.rubric["dimensions"]
+        }
+        redlines = {
+            check["id"]
+            for dimension in self.rubric["dimensions"]
+            for check in dimension.get("checks", [])
+            if check.get("redline")
+        }
+
+        self.assertEqual(self.rubric["version"], "v2.3")
+        self.assertEqual(actual_by_dimension, expected_by_dimension)
+        self.assertEqual(len(self.check_ids), 25)
+        self.assertEqual(redlines, {"T1", "T2", "T3", "T5", "E5"})
 
     def test_missing_mapping_fails_validation_and_analysis(self):
         rubric = copy.deepcopy(self.rubric)

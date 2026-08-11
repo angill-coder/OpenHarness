@@ -1,7 +1,7 @@
 {
   "product": "research_insight",
-  "version": "v2.2",
-  "_note": "v2.2 实验 rubric：36 条 checks，来源为 2026-08-07/08 Judge Rubric 讨论收敛稿。仅用于独立实验沙箱。",
+  "version": "v2.3",
+  "_note": "v2.3 精简 rubric：25 条 checks。在 v2.2 基础上合并高度重叠项，并将 benchmark 专用噪声检查移出主 rubric。",
   "dimensions": [
     {
       "name": "traceability",
@@ -76,23 +76,20 @@
       "weight": 0.15,
       "hard_floor": null,
       "is_reverse": false,
-      "criteria": "摘要数量、内容性质和排序清晰；摘要与正文对应；正文结论先行；章节 MECE。",
+      "criteria": "摘要简洁、结论化并按重要性排序；摘要与正文对应；各章通过标题或首句结论先行。",
       "anchors": {
-        "5": "摘要不超过 3 条且均为按重要性排序的核心结论；正文逐项展开摘要，每章结论先行，章节 MECE。",
-        "4": "结构基本达标，仅有一处轻微排序、对应或交叉问题。",
-        "3": "具备摘要和正文层级，但摘要含背景、排序不当、正文铺陈在先或章节有明显交叉。",
+        "5": "摘要不超过 3 条且均为按重要性排序的核心结论；正文逐项展开摘要，各章通过标题或首句先给中心判断。",
+        "4": "结构基本达标，仅有一处轻微摘要质量、对应或结论位置问题。",
+        "3": "具备摘要和正文层级，但摘要含背景、排序不当，或多处章节铺陈在先。",
         "2": "摘要与正文两张皮、摘要主要是背景，或正文缺少清晰章节逻辑。",
         "1": "无有效结构，接近流水账。"
       },
       "positive_example": "摘要 3 条以内，先写最影响决策的判断；正文按相同顺序逐项展开。",
       "negative_example": "摘要介绍研究方法，正文另起一套互不对应的主题。",
       "checks": [
-        {"id": "S1", "label": "摘要 bullet 不超过 3 条", "desc": "摘要 bullet 数量不超过 3 条。", "effect": "超过 3 条时降档", "optimizer": {"pattern_id": "struct_summary_count", "directive_hint": "summary_format", "priority": 20}},
-        {"id": "S2", "label": "摘要直接表达结论", "desc": "摘要不是背景、过程、方法或材料说明；每条均能独立表达核心判断。", "effect": "摘要以铺陈为主时降档", "optimizer": {"pattern_id": "struct_summary_conclusion", "directive_hint": "summary_format", "priority": 21}},
-        {"id": "S3", "label": "摘要按重要性排序", "desc": "最重要、最影响管理层决策的结论排在前面。", "effect": "明显次序失当时降档", "optimizer": {"pattern_id": "struct_summary_priority", "directive_hint": "summary_format", "priority": 22}},
+        {"id": "S1", "label": "摘要质量", "desc": "摘要不超过 3 条 bullet；每条直接表达能够独立成立的核心判断，不写成背景、过程、方法或材料说明；按对管理层决策的重要性排序。", "effect": "摘要超出 3 条、以铺陈为主或重要性次序明显失当时降档", "optimizer": {"pattern_id": "struct_summary_quality", "directive_hint": "summary_format", "priority": 20}},
         {"id": "S4", "label": "摘要与正文对应", "desc": "正文能够逐项展开摘要中的核心结论，不出现摘要与正文“两张皮”。", "effect": "核心结论无法对应时降档", "optimizer": {"pattern_id": "struct_summary_body", "directive_hint": "summary_format", "priority": 23}},
-        {"id": "S5", "label": "正文结论先行", "desc": "每个章节先给中心论点，再提供事实、数据、案例等支撑。", "effect": "多处支撑先于论点时降档", "optimizer": {"pattern_id": "struct_pyramid", "directive_hint": "pyramid_body", "priority": 24}},
-        {"id": "S6", "label": "章节之间 MECE", "desc": "章节之间不重复、不遗漏、不交叉。", "effect": "明显重复、遗漏或交叉时降档", "optimizer": {"pattern_id": "struct_mece", "directive_hint": "mece_sections", "priority": 25}}
+        {"id": "S5", "label": "章节结论先行", "desc": "每个章节通过标题或章节首句明确表达中心判断，再提供事实、数据、案例等支撑；标题可以简短，但不能使读者无法识别本章结论。", "effect": "多处章节需读完支撑材料后才能识别中心判断时降档", "optimizer": {"pattern_id": "struct_pyramid", "directive_hint": "pyramid_body", "priority": 24}}
       ]
     },
     {
@@ -102,20 +99,18 @@
       "weight": 0.12,
       "hard_floor": null,
       "is_reverse": false,
-      "criteria": "标题表达判断；全文围绕明确问题；章节自然推进；概念口径一致；关键发现呈现真实张力并回答 so what。",
+      "criteria": "全文围绕明确问题并自然推进；概念口径一致；关键发现呈现真实张力并回答 so what。",
       "anchors": {
-        "5": "标题直接表达各章判断；一条主线贯穿全文；章节因果、递进或分析步骤衔接自然；概念口径稳定；真实差异或约束被转化为明确决策含义。",
-        "4": "主线和推进清楚，仅有一处标题、衔接或决策含义略弱。",
-        "3": "能够读懂，但章节偏并列拼接，标题多为主题词，或关键发现缺少 so what。",
+        "5": "一条主线贯穿全文；章节因果、递进或分析步骤衔接自然；概念口径稳定；真实差异或约束被转化为明确决策含义。",
+        "4": "主线和推进清楚，仅有一处衔接或决策含义略弱。",
+        "3": "能够读懂，但章节偏并列拼接，或关键发现缺少 so what。",
         "2": "故事线明显断裂、概念自相矛盾，或结论堆叠而无主线。",
         "1": "逻辑混乱，无法复述报告在回答什么问题。"
       },
-      "positive_example": "章节标题先给判断，再按变化—原因—约束—决策含义递进。",
-      "negative_example": "章节仅以“用户结构”“原因分析”命名，各段互相并列且不说明对决策意味着什么。",
+      "positive_example": "全文围绕一个决策问题，按变化—原因—约束—决策含义递进。",
+      "negative_example": "各段互相并列，无法复述主线，也不说明对决策意味着什么。",
       "checks": [
-        {"id": "N1", "label": "标题即结论", "desc": "每章标题为表达判断或观点的完整陈述句或议论句；不使用纯名词短语，也不使用只提问、不表达判断的疑问句。", "effect": "多处标题不传递判断时降档", "optimizer": {"pattern_id": "narr_conclusion_titles", "directive_hint": "ensure_narrative_flow", "priority": 30}},
-        {"id": "N2", "label": "主线聚焦", "desc": "全文围绕一个明确的研究或决策问题展开，读者能够清楚复述报告主线。", "effect": "主线分散或无法复述时降档", "optimizer": {"pattern_id": "narr_focus", "directive_hint": "ensure_narrative_flow", "priority": 31}},
-        {"id": "N3", "label": "论点自然推进", "desc": "章节之间存在因果、递进或分析步骤上的承接，而不是若干结论的并列拼接。", "effect": "并列拼接、缺少推进时降档", "optimizer": {"pattern_id": "narr_progression", "directive_hint": "ensure_narrative_flow", "priority": 32}},
+        {"id": "N2", "label": "主线与论证推进", "desc": "全文围绕一个明确的研究或决策问题展开，读者能够清楚复述报告主线；章节之间形成因果、递进或分析步骤上的承接，而不是若干结论的并列拼接。", "effect": "主线分散、无法复述或章节并列拼接缺少推进时降档", "optimizer": {"pattern_id": "narr_focus_progression", "directive_hint": "ensure_narrative_flow", "priority": 31}},
         {"id": "N4", "label": "概念与口径前后一致", "desc": "同一概念、指标、人群、统计口径和时间范围在全文含义稳定；发生变化时明确说明。", "effect": "概念或口径漂移时降档", "optimizer": {"pattern_id": "narr_drift", "directive_hint": "concept_consistency", "priority": 33}},
         {"id": "N5", "label": "冲突呈现与决策含义", "desc": "关键发现应识别并呈现对决策有意义的差异、矛盾、反常、取舍或约束，并说明它改变了什么判断、为什么值得关注、对管理层意味着什么。素材不存在真实冲突时不得人为制造，但仍应说明核心发现的决策含义。", "effect": "关键发现缺少真实张力或 so what 时降档", "optimizer": {"pattern_id": "narr_tension_so_what", "directive_hint": "ensure_narrative_flow", "priority": 34}}
       ]
@@ -127,12 +122,12 @@
       "weight": 0.22,
       "hard_floor": null,
       "is_reverse": false,
-      "criteria": "从素材提炼规律；形成有效归因、校准后的趋势/风险判断及与证据和机制闭环的建议；隔离噪声并验证异常。",
+      "criteria": "从素材提炼规律；形成有效归因、经过异常校验和边界校准的趋势/风险判断，以及与证据和机制闭环的建议。",
       "anchors": {
-        "5": "案例被提炼成规律；归因具有解释增量；趋势和风险判断经过校准且不越界；建议与问题、证据和机制闭环；噪声隔离、异常被验证。",
+        "5": "案例被提炼成规律；归因具有解释增量；趋势和风险判断经过异常验证与边界校准且不越界；建议与问题、证据和机制闭环。",
         "4": "洞察完整，仅一项支撑、机制解释或行动具体度略弱。",
         "3": "存在判断但偏表面，案例仍有罗列，或趋势、建议与证据的连接不充分。",
-        "2": "基本复述素材、明显越界外推、大量引噪，或建议与前文脱节。",
+        "2": "基本复述素材、明显越界外推、把异常直接当趋势，或建议与前文脱节。",
         "1": "纯素材罗列，无有效判断或洞察。"
       },
       "positive_example": "从多个案例抽象共同机制，说明该机制为何导致当前结果，并据此给出可执行、可回溯的建议。",
@@ -140,10 +135,8 @@
       "checks": [
         {"id": "I1", "label": "提炼成规律", "desc": "从案例和素材中抽象出模式、共性或规律，不能停留在逐条罗列。", "effect": "主要为案例罗列时降档", "optimizer": {"pattern_id": "insight_listing", "directive_hint": "abstract_cases", "priority": 40}},
         {"id": "I2", "label": "归因/机制洞察有效", "desc": "任务需要解释为什么时，形成具有解释增量的原因或作用机制判断，而不是复述现象；归因需有素材支撑。", "effect": "仅复述现象或无据归因时降档", "optimizer": {"pattern_id": "insight_attribution", "directive_hint": "require_insight_triplet", "priority": 41}},
-        {"id": "I3", "label": "趋势/风险洞察有效", "desc": "任务涉及时间变化、未来判断或潜在风险时，形成有决策价值且经过校准的判断；必要时标注置信程度，不把短期、局部或异常现象外推为未来必然。", "effect": "趋势价值弱、置信度失配或越界外推时降档", "optimizer": {"pattern_id": "insight_trend_risk", "directive_hint": "mark_extrapolation_confidence", "priority": 42}},
-        {"id": "I4", "label": "建议洞察有效", "desc": "建议针对已识别的问题、原因或机制，能够回溯到前文证据或案例，并说明为什么该动作能起作用；方向明确、可执行，不从现象直接跳到无支撑方案，也不使用“继续关注、加强重视”等空泛表达。", "effect": "建议空泛、与证据或机制脱节时降档", "optimizer": {"pattern_id": "insight_recommendation", "directive_hint": "require_insight_triplet", "priority": 43}},
-        {"id": "I5", "label": "噪声隔离", "desc": "不将 noise_source_ids 中的噪声片段作为有效证据或结论依据。", "effect": "引用噪声充数时降档", "optimizer": {"pattern_id": "insight_noise", "directive_hint": "drop_noise", "priority": 44}},
-        {"id": "I6", "label": "异常交叉验证", "desc": "对一次性异常或离群点进行交叉验证或情境解释，不能直接当作趋势或归因。", "effect": "把异常直接当趋势或原因时降档", "optimizer": {"pattern_id": "insight_outlier", "directive_hint": "crosscheck_outliers", "priority": 45}}
+        {"id": "I3", "label": "趋势与风险判断校准", "desc": "任务涉及时间变化、未来判断或潜在风险时，形成有决策价值且经过校准的判断；必要时标注置信程度。一次性异常或离群点需经过交叉验证或情境解释，不把短期、局部或异常现象直接当作趋势、归因或未来必然。", "effect": "异常未经验证、置信度失配或越界外推时降档", "optimizer": {"pattern_id": "insight_trend_risk", "directive_hint": "mark_extrapolation_confidence", "priority": 42}},
+        {"id": "I4", "label": "建议洞察有效", "desc": "建议针对已识别的问题、原因或机制，能够回溯到前文证据或案例，并说明为什么该动作能起作用；方向明确、可执行，不从现象直接跳到无支撑方案，也不使用“继续关注、加强重视”等空泛表达。", "effect": "建议空泛、与证据或机制脱节时降档", "optimizer": {"pattern_id": "insight_recommendation", "directive_hint": "require_insight_triplet", "priority": 43}}
       ]
     },
     {
@@ -153,7 +146,7 @@
       "weight": 0.08,
       "hard_floor": null,
       "is_reverse": false,
-      "criteria": "素材可支持的问题全部回答；必需段落和关键 Claim 齐全；分析深度与问题重要性匹配。",
+      "criteria": "素材可支持的问题全部回答且分析深度与重要性匹配；必需段落和关键 Claim 齐全。",
       "anchors": {
         "5": "可答问题全部回答；必需段落实质完整；关键 Claim 无遗漏；重点内容获得匹配其重要性的分析。",
         "4": "主体覆盖完整，仅有一项次要内容略浅或次要 Claim 未展开。",
@@ -164,10 +157,9 @@
       "positive_example": "所有可答 key question 和关键 Claim 均被覆盖，重点问题得到更深入分析。",
       "negative_example": "次要背景展开过多，核心决策问题只用一句带过。",
       "checks": [
-        {"id": "V1", "label": "可答问题全答", "desc": "key_questions 中素材能够支持回答的问题均已回答；不可回答的问题不算遗漏。", "effect": "漏答可答问题时降档", "optimizer": {"pattern_id": "cover_questions", "directive_hint": "cover_key_claims", "priority": 50}},
+        {"id": "V1", "label": "关键问题覆盖与深度", "desc": "key_questions 中素材能够支持回答的问题均已回答，不可回答的问题不算遗漏；重要问题获得与其决策重要性相匹配的分析，不出现关键内容浅尝辄止、次要内容过度展开或整体覆盖失衡。", "effect": "漏答可答问题或内容资源分配明显失衡时降档", "optimizer": {"pattern_id": "cover_questions_depth", "directive_hint": "cover_key_claims", "priority": 50}},
         {"id": "V2", "label": "必需段落齐", "desc": "required_sections 指定的交付模块全部存在，并且包含实质内容。", "effect": "缺少必需段落或内容空泛时降档", "optimizer": {"pattern_id": "cover_sections", "directive_hint": "mece_sections", "priority": 51}},
-        {"id": "V3", "label": "关键 Claim 无遗漏", "desc": "key_claim_ids 中指定的关键事实或结论均在报告中得到覆盖。", "effect": "遗漏关键 Claim 时降档", "optimizer": {"pattern_id": "cover_claims", "directive_hint": "cover_key_claims", "priority": 52}},
-        {"id": "V4", "label": "内容覆盖均衡", "desc": "重要问题获得与其重要性相匹配的分析，不出现关键内容浅尝辄止、次要内容过度展开或整体覆盖失衡。", "effect": "内容资源分配明显失衡时降档", "optimizer": {"pattern_id": "cover_balance", "directive_hint": "cover_key_claims", "priority": 53}}
+        {"id": "V3", "label": "关键 Claim 无遗漏", "desc": "key_claim_ids 中指定的关键事实或结论均在报告中得到覆盖。", "effect": "遗漏关键 Claim 时降档", "optimizer": {"pattern_id": "cover_claims", "directive_hint": "cover_key_claims", "priority": 52}}
       ]
     },
     {
@@ -177,7 +169,7 @@
       "weight": 0.15,
       "hard_floor": null,
       "is_reverse": true,
-      "criteria": "面向高管精炼去重；关键内容结构化呈现；图表规范、完整且自解释；长度和段落密度适配受众；终稿语言严谨易懂；遵守风格禁令。",
+      "criteria": "面向高管精炼且易扫读；关键内容结构化呈现；图表规范、完整且自解释；长度适配用户预算；终稿语言严谨易懂；遵守风格禁令。",
       "anchors": {
         "5": "表达精炼无重复；关键数据和对比被结构化呈现；图表规范完整且自解释；长度、段落和 bullet 层级适配高管扫读；术语清楚；无中间态措辞和违禁风格。",
         "4": "总体精炼易读，仅有一处轻微重复、表图缺项、长段或术语解释不足。",
@@ -188,15 +180,12 @@
       "positive_example": "同类单位放在表头，正文用短 bullet 呈现结论—证据—含义，必要的不确定性转译为决策边界。",
       "negative_example": "每个单元格重复单位；正文连续长段；保留“待复算、单一信源待验证”等工作流标签。",
       "checks": [
-        {"id": "E1", "label": "表达精炼与去重", "desc": "直接表达对决策有价值的结论，避免铺垫和无信息增量重复。相同主体、背景、限定条件、口径或单位在不影响理解时合并表达；摘要与正文可重申核心结论，但正文必须增加证据、分析或机制。", "effect": "多处无效重复或大段复制时降档", "optimizer": {"pattern_id": "expr_concise_dedup", "directive_hint": "require_rigorous_wording", "priority": 60}},
+        {"id": "E1", "label": "精炼与可扫读性", "desc": "直接表达对决策有价值的结论，避免铺垫和无信息增量重复；相同主体、背景、限定条件、口径或单位在不影响理解时合并表达。每个段落或 bullet 原则上承载一个核心意思，并列、递进或多层信息应拆分呈现，不用 bullet 形式包装长段；摘要与正文可重申核心结论，但正文必须增加证据、分析或机制。若只有 Markdown 而无最终版式，以一段一意、明显并列信息是否拆分及是否出现 4 句以上分析长段作为替代判据。", "effect": "多处无效重复、核心长段或明显可拆信息未分层时降档", "optimizer": {"pattern_id": "expr_concise_scannable", "directive_hint": "require_rigorous_wording", "priority": 60}},
         {"id": "E2", "label": "结构化呈现（表/图）", "desc": "关键数据和多组对比应使用 Markdown 表格或清晰图示呈现，不能埋在长段文字中。", "effect": "明显该表不表、该图不图时降档", "optimizer": {"pattern_id": "expr_nochart", "directive_hint": "require_charts", "priority": 61}},
-        {"id": "E3", "label": "图表规范与自解释性", "desc": "已使用的图表具有清晰标题、必要编号、单位、坐标轴/图例和必要注释；读者无需反复回看正文即可理解指标、比较对象和时间范围。同类单位集中放在标题、表头、列名或坐标轴；混合单位分别标清。数值真实性、转述忠实和统计口径分别由 T1/T2/T6 判断。", "effect": "图表形式不规范或无法独立理解时降档", "optimizer": {"pattern_id": "expr_chart_spec", "directive_hint": "require_charts", "priority": 62}},
+        {"id": "E3", "label": "表图规范、完整与自解释性", "desc": "已使用的表图具有清晰标题、必要编号、单位、坐标轴/图例和必要注释，包含完成分析或比较所需的关键对象、指标、时间和数值；读者无需反复回看正文即可理解。同类单位集中放在标题、表头、列名或坐标轴，混合单位分别标清；关键单元格不无说明留空，数据不可得时以“未采集、不适用”等状态及必要原因标注，可比对象采用一致字段和口径。数值真实性、转述忠实和统计口径分别由 T1/T2/T6 判断。", "effect": "表图关键缺项、空值无解释、形式不规范或无法独立理解时降档", "optimizer": {"pattern_id": "expr_chart_quality", "directive_hint": "require_charts", "priority": 62}},
         {"id": "E4", "label": "遵守用户篇幅预算", "desc": "以用户在开场确认的页数或字数要求为准；用户给页数时按 1 页不超过约 1000 个中文可见字符折算，表格单元格文字计入，Markdown 标记和空白不计；用户未指定时默认 3 页以内 / 3000 字以内。篇幅是上限，不要求凑满；过短造成的内容遗漏由覆盖度判断，不在本 check 重复扣分。", "effect": "明显超过用户篇幅上限或通过注水凑篇幅时降档", "optimizer": {"pattern_id": "expr_length", "directive_hint": "match_exec_length", "priority": 63}},
         {"id": "E5", "label": "风格禁令", "desc": "禁用“不是……而是……”句式；禁止堆砌“数据驱动、闭环、赋能、范式重构”等无具体信息的空话。专业语境中的必要术语不因关键词机械判错。", "effect": "miss=红线，维度 2 分封顶", "redline": true, "optimizer": {"pattern_id": "expr_bushi", "directive_hint": "ban_bushi_ershi", "priority": 4}},
-        {"id": "E6", "label": "终稿化与措辞严谨", "desc": "结论、限定条件、适用范围、百分比、区间、频率、指代词和内外部归属表达无歧义。最终汇报不直接暴露“待复算、单一信源待验证、素材不足以恢复统一口径、证据不足建议补充研究”等中间分析或工作流标签；对决策有影响的不确定性应转译为能够/不能得出的结论、决策影响及具体验证动作，低价值过程说明删除或移至附注。", "effect": "歧义或中间态表达明显影响终稿质量时降档", "optimizer": {"pattern_id": "expr_final_language", "directive_hint": "require_rigorous_wording", "priority": 64}},
-        {"id": "E7", "label": "可读性", "desc": "首次出现的专业术语、缩写、组织特有称谓和“内部”类相对指称给出定义或明确归属，确保第一次阅读的非专业读者能够理解。", "effect": "关键术语或指称无法理解时降档", "optimizer": {"pattern_id": "expr_readability", "directive_hint": "require_rigorous_wording", "priority": 65}},
-        {"id": "E8", "label": "表图内容完整性", "desc": "表图包含完成分析或比较所需的关键对象、指标、时间、单位和数值。关键单元格不无说明留空；数据不可得时，以“未采集、不适用”等状态及必要原因显式标注；可比对象采用一致字段和口径。", "effect": "关键缺项、空值无解释或不对称展示导致误读时降档", "optimizer": {"pattern_id": "expr_chart_completeness", "directive_hint": "require_charts", "priority": 66}},
-        {"id": "E9", "label": "短段落与层级化表达", "desc": "分析正文保持短段落和高可扫读性：每个段落或 bullet 原则上承载一个核心意思；并列、递进或多层信息拆成并列或多层 bullet，不用 bullet 符号形式化包装长段。若只有 Markdown 而无最终版式，以是否一段一意、明显并列信息是否拆分及是否出现 4 句以上分析长段作为替代判据；直接引语、图注和必要合规文字不机械判错。", "effect": "多个核心长段或明显可拆信息未分层时降档", "optimizer": {"pattern_id": "expr_short_hierarchy", "directive_hint": "require_rigorous_wording", "priority": 67}}
+        {"id": "E6", "label": "终稿化、严谨与可理解性", "desc": "结论、限定条件、适用范围、百分比、区间、频率、指代词和内外部归属表达无歧义；首次出现的专业术语、缩写、组织特有称谓和“内部”类相对指称给出定义或明确归属。最终汇报不直接暴露“待复算、单一信源待验证、素材不足以恢复统一口径、证据不足建议补充研究”等中间分析或工作流标签；对决策有影响的不确定性应转译为能够和不能得出的结论、决策影响及具体验证动作，低价值过程说明删除或移至附注。", "effect": "歧义、关键术语无法理解或中间态表达明显影响终稿质量时降档", "optimizer": {"pattern_id": "expr_final_readable", "directive_hint": "require_rigorous_wording", "priority": 64}}
       ]
     }
   ],

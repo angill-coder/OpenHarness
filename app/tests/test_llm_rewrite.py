@@ -408,7 +408,7 @@ class TestFreeformCompile(unittest.TestCase):
         self.assertIn("本会话任务契约（冻结", txt)
         self.assertIn("材料重点分布", txt)
         self.assertIn("报告篇幅", txt)
-        self.assertIn("报告结构（面向高管，三部分", txt)   # 结构层保留
+        self.assertIn("固定交付结构", txt)                 # 结构层保留
         self.assertIn("OPENHARNESS_DIRECTIVES", txt)      # manifest 保留
         self.assertIn("OPENHARNESS_VERSION_RULES_START", txt)
 
@@ -457,7 +457,8 @@ class TestFreeformCompile(unittest.TestCase):
             )
         skill = SkillArtifact.from_dict(gen["skill"])
         self.assertEqual(skill.instructions["v0_strategy"], "base_skill")
-        self.assertIn("可回溯性（生命线）", skill.instructions["prose"])
+        self.assertIn("先建立证据底稿", skill.instructions["prose"])
+        self.assertIn("五条不可突破的红线", skill.instructions["prose"])
 
     def test_v0_strategy_survives_snapshot_restore(self):
         draft = "## 从零规则\n1. 所有事实与结论必须有素材支持。"
