@@ -320,6 +320,38 @@ document.getElementById('rubricSaveBtn').onclick=async()=>{
   const ov=document.querySelector('#rubricEditor input.tgt-overall'); if(ov)target.overall=parseFloat(ov.value)||0;
   const j=await api('/api/rubric','POST',{id:SID,weights,target}); STATE=j; render(); toast('rubric 已更新为 '+j.rubric.version);
 };
+document.getElementById('rubricFileInput').onchange=async()=>{
+  const input=document.getElementById('rubricFileInput');
+  const file=input.files[0];
+  if(!file)return;
+  if(!STATE||!SID){
+    toast('请先生成或打开一个 Session');input.value='';return;
+  }
+  if(!file.name.toLowerCase().endsWith('.json')){
+    toast('Rubric 文件必须是 .json');input.value='';return;
+  }
+  const info=document.getElementById('rubricImportInfo');
+  info.textContent=file.name+' · 正在导入…';
+  let rubric;
+  try{
+    rubric=JSON.parse(await file.text());
+  }catch(e){
+    toast('Rubric JSON 无法解析');
+    info.textContent=file.name+' · 导入失败';input.value='';return;
+  }
+  input.disabled=true;
+  try{
+    const j=await api('/api/rubric/import','POST',{
+      id:SID,filename:file.name,rubric
+    });
+    STATE=j;render();
+    toast('已导入 Rubric '+j.rubric.version);
+  }catch(e){
+    info.textContent=file.name+' · 导入失败';
+  }finally{
+    input.disabled=false;input.value='';
+  }
+};
 
 // ---- 推进下一版 ----
 document.getElementById('advanceBtn').onclick=async()=>{
@@ -853,9 +885,9 @@ function renderFail(){
 function rubricDimsHtml(rb){
   // 六维展开(判据 + 目标 + 检查点), 左/中/右三处复用
   return rb.dimensions.map(d=>`<div style="margin:6px 0">
-      <div class="kv"><span>${d.name_zh} ${d.is_reverse?'<span class="chip">反向</span>':''}</span><span>权重 ${d.weight}${d.hard_floor?' · 红线<'+d.hard_floor:''}${rb.target&&rb.target[d.name]!=null?' · <b class="ok-txt">目标≥'+rb.target[d.name]+'</b>':''}</span></div>
-      <div class="small mut" title="${(d.criteria||'').replace(/"/g,'')}">${d.criteria}</div>
-      ${d.checks?'<div class="small" style="margin:4px 0 2px 8px">'+d.checks.map(c=>`<div class="kv" title="${(c.desc||'').replace(/"/g,'')}"><span>· ${c.label}${c.redline?' <span class="flag">红线</span>':''}</span><span class="mut">${c.effect||''}</span></div>`).join('')+'</div>':''}
+      <div class="kv"><span>${esc(d.name_zh)} ${d.is_reverse?'<span class="chip">反向</span>':''}</span><span>权重 ${esc(d.weight)}${d.hard_floor?' · 红线&lt;'+esc(d.hard_floor):''}${rb.target&&rb.target[d.name]!=null?' · <b class="ok-txt">目标≥'+esc(rb.target[d.name])+'</b>':''}</span></div>
+      <div class="small mut" title="${esc(d.criteria||'')}">${esc(d.criteria||'')}</div>
+      ${d.checks?'<div class="small" style="margin:4px 0 2px 8px">'+d.checks.map(c=>`<div class="kv" title="${esc(c.desc||'')}"><span>· ${esc(c.label)}${c.redline?' <span class="flag">红线</span>':''}</span><span class="mut">${esc(c.effect||'')}</span></div>`).join('')+'</div>':''}
     </div>`).join('');
 }
 
@@ -869,16 +901,20 @@ function renderRubric(){
 
 function renderRubricEditor(){
   const rb=STATE.rubric; const el=document.getElementById('rubricEditor');
-  el.innerHTML=rb.dimensions.map(d=>`<div class="row"><span style="flex:1">${d.name_zh}</span>
-     <input class="w" data-dim="${d.name}" value="${d.weight}" style="width:70px" type="number" step="0.05" min="0" max="1"></div>`).join('')+
+  el.innerHTML=rb.dimensions.map(d=>`<div class="row"><span style="flex:1">${esc(d.name_zh)}</span>
+     <input class="w" data-dim="${esc(d.name)}" value="${esc(d.weight)}" style="width:70px" type="number" step="0.05" min="0" max="1"></div>`).join('')+
      `<div class="row" style="margin-top:6px"><span style="flex:1">overall 目标</span>
-     <input class="tgt-overall" value="${rb.target.overall}" style="width:70px" type="number" step="0.1"></div>`;
-  document.getElementById('rubricVer').textContent='当前：'+rb.version;
+     <input class="tgt-overall" value="${esc(rb.target.overall)}" style="width:70px" type="number" step="0.1"></div>`;
+  const source=STATE.rubric_source||{};
+  document.getElementById('rubricVer').textContent='当前版本：'+rb.version;
+  document.getElementById('rubricImportInfo').textContent=source.filename
+    ?source.filename+' · '+rb.version
+    :(source.kind==='session_snapshot'?'历史 Session · ':'默认 · ')+rb.version;
   const erb=document.getElementById('editorRubricBody'); if(erb)erb.innerHTML=rubricDimsHtml(rb);
 }
 
 const EV_ZH={created:"生成 V0",import_data:"导入数据",
-  edit_rubric:"编辑 rubric",version_adopted:"采纳新版",version_rejected:"版本被拒",
+  edit_rubric:"编辑 rubric",import_rubric:"导入 rubric",version_adopted:"采纳新版",version_rejected:"版本被拒",
   converged:"收敛/平台期",import_output:"导入报告文本",import_judgment:"导入LLM评分",
   generation_import:"WB 批量导入",run_judge_batch:"批量模型 Judge"};
 // ---- 打开已有会话 ----

@@ -114,6 +114,15 @@ class SessionCore:
         self.rubric = gen["rubric"]
         generator_mod.hydrate_research_optimizer_metadata(self.rubric)
         clustering_mod.validate_optimizer_mappings(self.rubric)
+        self.rubric_source = {
+            "kind": "default",
+            "filename": (
+                "rubric_research.json"
+                if self.rubric.get("product") == "research_insight"
+                else "rubric.json"
+            ),
+            "version": self.rubric.get("version"),
+        }
         self.gen_rationale = gen["rationale"]
         self.detected = gen["detected"]
         self.dims, self.dim_zh = _dims_from_rubric(self.rubric)
@@ -448,7 +457,9 @@ class SessionCore:
                 _new_optimization_progress(),
             ),
             "pending_idx": getattr(self, "pending_idx", None),
-            "rubric": self.rubric, "gen_rationale": self.gen_rationale, "detected": self.detected,
+            "rubric": self.rubric,
+            "rubric_source": self.rubric_source,
+            "gen_rationale": self.gen_rationale, "detected": self.detected,
             "current_idx": self.current_idx,
             "opt_history": self.opt_history,
             "cases": self.cases,
@@ -492,6 +503,11 @@ class SessionCore:
             snap["rubric"]
         )
         clustering_mod.validate_optimizer_mappings(self.rubric)
+        self.rubric_source = snap.get("rubric_source") or {
+            "kind": "session_snapshot",
+            "filename": None,
+            "version": self.rubric.get("version"),
+        }
         self.gen_rationale = snap.get("gen_rationale", "")
         self.detected = snap.get("detected", {})
         self.dims, self.dim_zh = _dims_from_rubric(self.rubric)
@@ -624,6 +640,7 @@ class SessionCore:
             "splits": self._split_counts(),
             "current_version": cur["version"],
             "rubric": self.rubric,
+            "rubric_source": self.rubric_source,
             "versions": [self._version_view(v) for v in self.versions],
             "curve": [
                 {
