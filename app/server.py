@@ -459,6 +459,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, location, code=308):
+        self.send_response(code)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _dashboard_dataset_path(self, session_id=None):
         configured = None
         if GENERATION_SERVICE is not None:
@@ -535,7 +541,10 @@ class Handler(BaseHTTPRequestHandler):
             path = os.path.join(HERE, "app.js")
             with open(path, encoding="utf-8") as f:
                 return self._send(200, f.read(), "text/javascript; charset=utf-8")
-        if u.path in ("/dashboard", "/dashboard/"):
+        if u.path == "/dashboard":
+            query = "?" + u.query if u.query else ""
+            return self._redirect("/dashboard/" + query)
+        if u.path == "/dashboard/":
             return self._send_file(
                 Path(HERE) / "dashboard" / "experiment-evaluation-tree.html"
             )
