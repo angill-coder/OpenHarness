@@ -141,6 +141,6 @@ v5 修复了 v3 的 3 个红线 case，但新增了 2 个不同的红线 case：
 - 自动流程日志：`app/sessions/v22-api-gpt56-opus5-one-loop/automation.jsonl`
 - 120 份逐 check Judge：`app/sessions/v22-api-gpt56-opus5-one-loop/check_judgments.jsonl`
 - 120 份报告：`app/sessions/v22-api-gpt56-opus5-one-loop/outputs.jsonl`
-- v2.2/v2.3 Rubric 系列：`harness/artifacts/v2_rubric_research.json`（默认 `rubric_research.json` 保持原版）
+- v2.2/v2.3 Rubric 系列：以对应实验 Session `state.json` 中冻结的 Rubric 为准；仓库默认文件后续已升级，不能反推历史实验口径。
 
 WebUI 保持运行于 `http://127.0.0.1:18768/`，可直接查看会话 `v22-api-gpt56-opus5-one-loop`。

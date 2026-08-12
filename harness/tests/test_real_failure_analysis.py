@@ -26,7 +26,7 @@ class RealFailureAnalysisTest(unittest.TestCase):
             (
                 HARNESS
                 / "artifacts"
-                / "v2_rubric_research.json"
+                / "rubric_research.json"
             ).read_text(encoding="utf-8")
         )
         cls.check_ids = [
@@ -67,11 +67,11 @@ class RealFailureAnalysisTest(unittest.TestCase):
             [],
         )
 
-    def test_research_rubric_v23_has_compact_stable_check_set(self):
+    def test_research_rubric_v24_has_compact_stable_check_set(self):
         expected_by_dimension = {
             "traceability": ["T1", "T2", "T3", "T4", "T5", "T6"],
-            "structure": ["S1", "S4", "S5"],
-            "narrative": ["N2", "N4", "N5"],
+            "structure": ["S1", "S2", "S3"],
+            "narrative": ["N1", "N2", "N3"],
             "insight": ["I1", "I2", "I3", "I4"],
             "coverage": ["V1", "V2", "V3"],
             "expression": ["E1", "E2", "E3", "E4", "E5", "E6"],
@@ -89,21 +89,21 @@ class RealFailureAnalysisTest(unittest.TestCase):
             if check.get("redline")
         }
 
-        self.assertEqual(self.rubric["version"], "v2.3")
+        self.assertEqual(self.rubric["version"], "v2.4")
         self.assertEqual(actual_by_dimension, expected_by_dimension)
         self.assertEqual(len(self.check_ids), 25)
         self.assertEqual(redlines, {"T1", "T2", "T3", "T5", "E5"})
 
-    def test_v23_does_not_replace_default_research_rubric(self):
-        default_rubric = json.loads(
+    def test_v1_archive_is_preserved_separately(self):
+        archived_rubric = json.loads(
             (
                 HARNESS
                 / "artifacts"
-                / "rubric_research.json"
+                / "v1_rubric_research.json"
             ).read_text(encoding="utf-8")
         )
-        self.assertEqual(default_rubric["version"], "v0")
-        self.assertNotEqual(default_rubric, self.rubric)
+        self.assertEqual(archived_rubric["version"], "v1")
+        self.assertNotEqual(archived_rubric, self.rubric)
 
     def test_missing_mapping_fails_validation_and_analysis(self):
         rubric = copy.deepcopy(self.rubric)

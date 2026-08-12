@@ -34,9 +34,9 @@ from skill_compiler import compile_session_skill  # noqa: E402
 BASE_SKILL = APP.parent / "skills" / "research-report"
 
 
-def _load_v2_rubric():
+def _load_research_rubric():
     return json.loads(
-        (HARNESS / "artifacts" / "v2_rubric_research.json").read_text(
+        (HARNESS / "artifacts" / "rubric_research.json").read_text(
             encoding="utf-8"
         )
     )
@@ -439,7 +439,7 @@ class TestFreeformCompile(unittest.TestCase):
         with mock.patch.object(
             generator_mod,
             "_build_rubric_research",
-            side_effect=_load_v2_rubric,
+            side_effect=_load_research_rubric,
         ), mock.patch.object(llm_client, "call_llm", side_effect=fake_call):
             gen = generator_mod.generate_v0(
                 "面向总裁分析用户增长，所有数据必须可追溯",
@@ -485,7 +485,7 @@ class TestFreeformCompile(unittest.TestCase):
                 with mock.patch.object(
                     generator_mod,
                     "_build_rubric_research",
-                    side_effect=_load_v2_rubric,
+                    side_effect=_load_research_rubric,
                 ), mock.patch.object(
                     llm_client,
                     "call_llm",
@@ -511,7 +511,7 @@ class TestFreeformCompile(unittest.TestCase):
 
 class TestRedlineGuard(unittest.TestCase):
     def setUp(self):
-        self.rubric = _load_v2_rubric()
+        self.rubric = _load_research_rubric()
         self._orig = llm_client.call_llm
 
     def tearDown(self):
