@@ -247,3 +247,41 @@ def dim_from_checks(check_scores: Dict[str, float], rubric: Dict[str, Any]) -> D
             3,
         )
     return out
+
+
+def score_check_judgment(
+    check_scores: Dict[str, float],
+    rubric: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Derive the authoritative score view for one check-based judgment.
+
+    Raw check scores remain the durable Judge output. Dimension scores,
+    overall, red-line hits, and hard-floor gate failures are derived here so
+    every backend consumer uses one scoring implementation.
+    """
+    scores = dim_from_checks(check_scores, rubric)
+    redline_checks = []
+    hard_floor_failures = []
+
+    for dimension in rubric.get("dimensions", []):
+        for check in dimension.get("checks") or []:
+            value = check_scores.get(check.get("id"))
+            if (
+                check.get("redline")
+                and value is not None
+                and float(value) <= 0
+            ):
+                redline_checks.append(str(check["id"]))
+
+        floor = dimension.get("hard_floor")
+        score = scores.get(dimension.get("name"))
+        if floor is not None and score is not None and score < float(floor):
+            hard_floor_failures.append(str(dimension["name"]))
+
+    return {
+        "scores": scores,
+        "overall": overall(scores, rubric),
+        "redline_checks": redline_checks,
+        "hard_floor_failures": hard_floor_failures,
+        "case_failed_gate": bool(hard_floor_failures),
+    }

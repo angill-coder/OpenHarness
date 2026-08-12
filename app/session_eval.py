@@ -26,11 +26,115 @@ import runner as runner_mod                         # noqa: E402
 import judge as judge_mod                           # noqa: E402
 import clustering as clustering_mod                 # noqa: E402
 import optimizer as optimizer_mod                   # noqa: E402
+import backend as backend_mod                       # noqa: E402
 from workbuddy_batch.dataset import openharness_rows  # noqa: E402
 
 import persistence as persist                        # noqa: E402
 import optimizer_registry                            # noqa: E402
 import optimizer_pipeline                            # noqa: E402
+
+
+def _number(value, field):
+    if isinstance(value, bool):
+        raise ValueError("%s 必须是数字" % field)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError("%s 必须是数字" % field)
+
+
+def normalize_imported_rubric(payload: Dict[str, Any]):
+    """校验浏览器上传的完整 Rubric，并返回可安全装载的深拷贝。"""
+    if not isinstance(payload, dict):
+        raise ValueError("Rubric JSON 顶层必须是对象")
+    rb = copy.deepcopy(payload)
+    version = rb.get("version")
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError("Rubric 缺少非空 version")
+    rb["version"] = version.strip()
+
+    product = rb.get("product")
+    if not isinstance(product, str) or not product.strip():
+        raise ValueError("Rubric 缺少非空 product")
+
+    dimensions = rb.get("dimensions")
+    if not isinstance(dimensions, list) or not dimensions:
+        raise ValueError("Rubric dimensions 必须是非空数组")
+    dim_names = set()
+    check_ids = set()
+    weight_sum = 0.0
+    for index, dimension in enumerate(dimensions, 1):
+        if not isinstance(dimension, dict):
+            raise ValueError("第 %d 个 dimension 必须是对象" % index)
+        name = dimension.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("第 %d 个 dimension 缺少非空 name" % index)
+        name = name.strip()
+        if name in dim_names:
+            raise ValueError("dimension name 重复：%s" % name)
+        dim_names.add(name)
+        dimension["name"] = name
+        dimension.setdefault("name_zh", name)
+        dimension.setdefault("criteria", "")
+        dimension.setdefault("anchors", {})
+        dimension.setdefault("hard_floor", None)
+        dimension.setdefault("is_reverse", False)
+        weight = _number(dimension.get("weight"), "%s.weight" % name)
+        if weight < 0:
+            raise ValueError("%s.weight 不能小于 0" % name)
+        dimension["weight"] = weight
+        weight_sum += weight
+
+        checks = dimension.get("checks", [])
+        if product == "research_insight" and not checks:
+            raise ValueError("研究型 Rubric 的 %s 缺少 checks" % name)
+        if not isinstance(checks, list):
+            raise ValueError("%s.checks 必须是数组" % name)
+        for check_index, check in enumerate(checks, 1):
+            if not isinstance(check, dict):
+                raise ValueError(
+                    "%s 的第 %d 个 check 必须是对象" % (name, check_index)
+                )
+            check_id = check.get("id")
+            if not isinstance(check_id, str) or not check_id.strip():
+                raise ValueError("%s 的 check 缺少非空 id" % name)
+            check_id = check_id.strip()
+            if check_id in check_ids:
+                raise ValueError("check id 重复：%s" % check_id)
+            check_ids.add(check_id)
+            check["id"] = check_id
+            check.setdefault("label", check_id)
+            check.setdefault("desc", "")
+            check.setdefault("effect", "")
+            check.setdefault("redline", False)
+
+    if abs(weight_sum - 1.0) > 0.01:
+        raise ValueError(
+            "Rubric 维度权重之和必须为 1，当前为 %.4f" % weight_sum
+        )
+
+    target = rb.get("target")
+    if not isinstance(target, dict):
+        raise ValueError("Rubric target 必须是对象")
+    for key in list(dim_names) + ["overall"]:
+        if key not in target:
+            raise ValueError("Rubric target 缺少 %s" % key)
+        value = _number(target[key], "target.%s" % key)
+        if not 1.0 <= value <= 5.0:
+            raise ValueError("target.%s 必须在 1–5 之间" % key)
+        target[key] = value
+    if not isinstance(rb.get("gates"), list):
+        raise ValueError("Rubric gates 必须是数组")
+
+    if product == "research_insight":
+        for dimension in rb["dimensions"]:
+            for check in dimension.get("checks", []):
+                # 兼容 optimizer 元数据契约建立前的历史 Rubric。不能按
+                # check id 套用当前母本映射：不同版本的同名 id 可能已改义。
+                # 历史 check 仍参与评分，但不会在失败聚类中驱动 Skill 优化。
+                check.setdefault("optimizer", None)
+    clustering_mod.validate_optimizer_mappings(rb)
+    return rb
 
 
 class SessionEval:
@@ -140,7 +244,6 @@ class SessionEval:
         outs = self.report_outputs.get(version, {})
         juds = self.report_judgments.get(version, {})
         jchecks = self.judge_checks.get(version, {})
-        floor = judge_mod._hard_floor(self.rubric, "traceability")
         for r in recs:
             rt = outs.get(r.case_id)
             if rt is not None:
@@ -149,9 +252,13 @@ class SessionEval:
             # judge 分:逐 check 派生 > 旧 import_judgment > mock
             jc = (jchecks.get(r.case_id) or {}).get("checks")
             jv = juds.get(r.case_id)
+            scored = None
             if jc:
                 r.judge_checks = dict(jc)
-                r.scores = judge_mod.dim_from_checks(jc, self.rubric)
+                scored = judge_mod.score_check_judgment(
+                    jc, self.rubric
+                )
+                r.scores = scored["scores"]
                 r.judge_reasoning = (jchecks.get(r.case_id) or {}).get("reasoning", {})
                 r.score_source = "recorded"
             elif jv is not None:
@@ -166,10 +273,37 @@ class SessionEval:
             else:
                 r.score_source = "mock"
             if r.score_source == "recorded":
-                tr = r.scores.get("traceability")
-                r.case_failed_gate = floor is not None and tr is not None and tr < floor
-                if r.case_failed_gate and not any(str(f).startswith("RED_LINE") for f in r.flagged):
-                    r.flagged.append("RED_LINE:traceability<%d" % floor)
+                if scored is not None:
+                    r.case_failed_gate = scored["case_failed_gate"]
+                    for dimension_name in scored["hard_floor_failures"]:
+                        floor = judge_mod._hard_floor(
+                            self.rubric, dimension_name
+                        )
+                        flag = "RED_LINE:%s<%s" % (
+                            dimension_name, floor
+                        )
+                        if flag not in r.flagged:
+                            r.flagged.append(flag)
+                else:
+                    floor = judge_mod._hard_floor(
+                        self.rubric, "traceability"
+                    )
+                    tr = r.scores.get("traceability")
+                    r.case_failed_gate = (
+                        floor is not None
+                        and tr is not None
+                        and tr < floor
+                    )
+                    if (
+                        r.case_failed_gate
+                        and not any(
+                            str(flag).startswith("RED_LINE")
+                            for flag in r.flagged
+                        )
+                    ):
+                        r.flagged.append(
+                            "RED_LINE:traceability<%s" % floor
+                        )
 
     def _rec_view(self, r: EvalRecord) -> Dict[str, Any]:
         ver = self._current()["version"]
@@ -231,6 +365,11 @@ class SessionEval:
             n = 1
         rb["version"] = "r%d" % n
         self.rubric = rb
+        self.rubric_source = {
+            "kind": "edited",
+            "filename": self.rubric_source.get("filename"),
+            "version": rb["version"],
+        }
         clustering_mod.validate_optimizer_mappings(self.rubric)
         current_version = self._current()["version"]
         self._invalidate_judge_checks(
@@ -246,6 +385,45 @@ class SessionEval:
         r = self.evaluate(account)
         self._save()
         return r
+
+    def import_rubric(self, payload: Dict[str, Any], filename=None, account=None):
+        """导入完整 Rubric 到当前 Session；不修改仓库默认 Rubric 文件。"""
+        rb = normalize_imported_rubric(payload)
+        safe_filename = os.path.basename(str(filename or "").strip()) or None
+        if safe_filename and not safe_filename.lower().endswith(".json"):
+            raise ValueError("Rubric 文件名必须以 .json 结尾")
+
+        self.rubric = rb
+        self.rubric_source = {
+            "kind": "imported",
+            "filename": safe_filename,
+            "version": rb["version"],
+        }
+        self.dims = [d["name"] for d in rb["dimensions"]]
+        self.dim_zh = {
+            d["name"]: d.get("name_zh", d["name"])
+            for d in rb["dimensions"]
+        }
+        # Session.product_id 只标识会话/Skill；评分执行方式跟随导入 Rubric。
+        self.backend = backend_mod.get_backend(product_id=rb.get("product"))
+        current_version = self._current()["version"]
+        self._invalidate_judge_checks(
+            current_version,
+            list(self.judge_checks.get(current_version, {})),
+            "rubric_imported",
+        )
+        persist.append_event(self.id, "import_rubric", {
+            "version": rb["version"],
+            "filename": safe_filename,
+            "dimensions": len(rb["dimensions"]),
+            "checks": sum(
+                len(d.get("checks", [])) for d in rb["dimensions"]
+            ),
+        })
+        if self.cases:
+            self.evaluate(account)
+        self._save()
+        return self.view(account)
 
     # ---------- 推进到下一版 ----------
     def advance(

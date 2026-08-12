@@ -9,7 +9,7 @@ The Dashboard resolves runtime artifacts relative to the OpenHarness repository 
 | Experiment group and dimensions | `app/sessions/<session_id>/state.json` and `meta.json` |
 | Skill versions | `generation_runs/_session_skills/<session_id>/<skill_version>/` |
 | Cases for a Skill version | `generation_runs/<generation_id>/<wb_run_id>/cases/<case_id>/` |
-| Evaluation and Judge Trace | `app/sessions/<session_id>/check_judgments.jsonl` only |
+| Evaluation and Judge Trace | Raw Checks come from `app/sessions/<session_id>/check_judgments.jsonl`; dimension scores, overall, red-line hits, and Gate status are derived by `harness/judge.py` in the Session Summary API |
 | SKILL.md and instruction.md | `_session_skills/<session_id>/<version>/<artifact_hash>/<skill_name>/SKILL.md` and `references/instructions.md` |
 | Case report | `<case_id>/artifacts/report.md` |
 | Report-generation conversation | `<case_id>/conversation.md` |
@@ -36,7 +36,7 @@ Missing exact artifacts return a missing state in the UI.
 
 ## Loading behavior
 
-The initial Session Summary contains compact experiment descriptors, the generation-authoritative version-to-Case index, rubric definitions, and compact Check results. Large documents load only when requested:
+The initial Session Summary contains compact experiment descriptors, the generation-authoritative version-to-Case index, rubric definitions, and compact Check results. Raw Checks are the durable evaluation record. The Python API dynamically derives `scores`, `overall`, `redline_checks`, `hard_floor_failures`, and `case_failed_gate` through `harness/judge.py`; browser code never reimplements scoring. A recorded `rubric_sha256` mismatch produces `scoring_status=stale_rubric` and no score. Large documents load only when requested:
 
 - Skill content when a Skill panel opens.
 - `report.md` and Check reasoning when a Case report opens.

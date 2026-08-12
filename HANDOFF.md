@@ -99,7 +99,7 @@
 - `OPENHARNESS_EDITABLE_START/END` 内是 Optimizer 可改写区；四项 intake、三段结构、任务契约和版本 manifest 在结构层冻结。历史 directive（包括 `disclose_sample_bias`、`drop_noise`）仍可作为生成规则存在，但不等同于 v2.3 的独立 check。
 
 ## 5. ⚠️ 致命坑（务必记住）
-1. **默认与迭代 Rubric 分文件保存**：新 Session 默认仍把 `rubric_research.json` 复制进 `state.json`；v2.3 位于 `v2_rubric_research.json`，必须在目标实验中显式选择/导入。任何 Rubric 都不会自动刷新旧 Session；直接改某个 `state.json` 后也必须重启，才能刷新内存态。
+1. **默认与迭代 Rubric 分文件保存**：新 Session 默认仍把 `rubric_research.json` 复制进 `state.json`；v2.3 位于 `v2_rubric_research.json`，必须在目标实验中显式选择/导入。WebUI 导入只替换并冻结当前 Session，不限制 Rubric `product` 与 `Session.product_id` 一致；评分维度、Judge 模式和 backend 跟随导入 Rubric，默认文件与其他 Session 不受影响。任何 Rubric 都不会自动刷新旧 Session；直接改 Rubric 文件或某个 `state.json` 后必须重启对应 server，WebUI 导入则即时更新内存并落盘。
 2. **Rubric/报告变化会使旧 Judgment 失效**：批量 Judge 写入前后都有版本与 prompt SHA 守卫；不要把旧 `check_judgments.jsonl` 当成当前版本结果。真实结果看 `check_judgments.jsonl`，不是 mock 六维分。
 3. **Judge 默认逐维调用**：`per_dimension` 会保留成功维度并只重试缺失项。遇到部分失败直接重跑同一版本，不要清空已成功结果或另造重复 Session。
 4. **LLM Rewrite 候选不是提前采纳**：`pending_idx` 指向待评候选，`current_idx` 仍是父版；生成和 Judge 完整后才经 Gate 采纳/回滚。页面显示“候选已生成”不等于“已采纳”。

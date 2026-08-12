@@ -190,7 +190,10 @@
 
     <div class="card step" id="rubricCard">
       <h2><span class="n">·</span>编辑 Rubric（成败杠杆）</h2>
-      <p class="small mut">调整维度权重 / 目标阈值，保存为新 rubric 版本并重评。</p>
+      <p class="small mut">默认读取仓库当前 Rubric；也可把任意 product 的本地 Rubric JSON 导入当前 Session。导入不会覆盖默认文件或其他 Session。</p>
+      <label for="rubricFileInput">导入其他 Rubric JSON</label>
+      <input id="rubricFileInput" type="file" accept=".json,application/json">
+      <div id="rubricImportInfo" class="small mut" style="margin-top:6px"></div>
       <div id="rubricEditor"></div>
       <details style="margin-top:8px"><summary>查看六维判据与检查点</summary><div id="editorRubricBody" class="small"></div></details>
       <div class="row" style="margin-top:10px">

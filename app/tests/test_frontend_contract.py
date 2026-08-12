@@ -61,6 +61,20 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("configuredDataBtn", html)
         self.assertIn("JSON.parse(raw)", source)
 
+    def test_frontend_imports_session_local_rubric_json(self):
+        source = (APP / "app.js").read_text(encoding="utf-8")
+        html = (APP / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="rubricFileInput"', html)
+        self.assertIn('accept=".json,application/json"', html)
+        self.assertNotIn('id="rubricImportBtn"', html)
+        self.assertIn("JSON.parse(await file.text())", source)
+        self.assertIn("api('/api/rubric/import','POST'", source)
+        self.assertIn("STATE.rubric_source||{}", source)
+        self.assertIn(
+            "getElementById('rubricFileInput').onchange=async()=>",
+            source,
+        )
+
     def test_frontend_uses_backend_actions_for_loop_buttons(self):
         source = (APP / "app.js").read_text(encoding="utf-8")
         self.assertIn("STATE.actions&&STATE.actions.advance", source)
