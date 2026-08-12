@@ -35,9 +35,9 @@ def build_v0_skill():
         "id": "research-insight-assistant", "version": "v0", "parent_version": None,
         "structure": {
             "flow": [
-                {"step": 0, "name": "Intake & Scoping（开场三轮交互）",
-                 "produces": "report_spec{背景, hypothesis, 重点素材}",
-                 "rule": "生成前先与用户交互拿齐三项:①汇报背景②材料假设hypothesis③标出高质量重点素材;三项都用进报告;hypothesis只验证/证伪、不迎合"},
+                {"step": 0, "name": "Intake & Scoping（开场四项信息）",
+                 "produces": "report_spec{背景, hypothesis, 重点素材, 报告篇幅}",
+                 "rule": "生成前先与用户交互拿齐四项:①汇报背景②材料假设hypothesis③标出高质量重点素材④确认页数或字数;四项都用进报告;hypothesis只验证/证伪、不迎合;页数按每页不超过约1000个中文可见字符折算"},
                 {"step": 1, "name": "Source Curation", "subagent": "SourceCurator",
                  "produces": "source_slices", "rule": "素材切片配 S-xxx ID"},
                 {"step": 2, "name": "Claim Analysis", "subagent": "Analyst",
@@ -132,7 +132,7 @@ def build_dataset():
 
 
 def main():
-    rubric = json.load(open(os.path.join(ART_DIR, "rubric_research.json"), encoding="utf-8"))
+    rubric = json.load(open(os.path.join(ART_DIR, "v2_rubric_research.json"), encoding="utf-8"))
     skill0 = build_v0_skill()
     cases = build_dataset()
     backend = backend_mod.get_backend(product_id="research_insight")

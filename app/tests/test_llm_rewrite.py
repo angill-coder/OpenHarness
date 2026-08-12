@@ -34,6 +34,14 @@ from skill_compiler import compile_session_skill  # noqa: E402
 BASE_SKILL = APP.parent / "skills" / "research-report"
 
 
+def _load_v2_rubric():
+    return json.loads(
+        (HARNESS / "artifacts" / "v2_rubric_research.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
 class _FakeResponse:
     def __init__(self, body):
         self.body = body
@@ -379,7 +387,8 @@ class TestFreeformCompile(unittest.TestCase):
     def test_freeform_replaces_editable_keeps_structure(self):
         gen = generator_mod.generate_v0(
             "面向总裁，先收集背景、hypothesis 和材料重点分布，"
-            "再按摘要、关键发现、启示三段式输出，数据多时用图表。",
+            "并确认报告篇幅，再按摘要、关键发现、启示三段式输出，"
+            "数据多时用图表。",
             "research_insight",
             optimizer_mode="llm_rewrite",
         )
@@ -387,6 +396,8 @@ class TestFreeformCompile(unittest.TestCase):
         contract = sk.instructions.get("requirement_contract", "")
         self.assertIn("总裁/最高管理层", contract)
         self.assertIn("材料重点分布", contract)
+        self.assertIn("报告篇幅", contract)
+        self.assertIn("1000 个中文可见字符", contract)
         self.assertIn("严格三段式", contract)
         self.assertIn("markdown 表格或清晰图表", contract)
         prop = {"instructions_text": "## 硬规则（改写）\n1. 不编造、冲突不混用、单源降级、样本偏差、证据不足留白。",
@@ -404,7 +415,8 @@ class TestFreeformCompile(unittest.TestCase):
         self.assertNotIn("生命线", txt)                   # 旧可编辑区被替换
         self.assertIn("本会话任务契约（冻结", txt)
         self.assertIn("材料重点分布", txt)
-        self.assertIn("报告结构（面向高管，三部分", txt)   # 结构层保留
+        self.assertIn("报告篇幅", txt)
+        self.assertIn("固定交付结构", txt)                 # 结构层保留
         self.assertIn("OPENHARNESS_DIRECTIVES", txt)      # manifest 保留
         self.assertIn("OPENHARNESS_VERSION_RULES_START", txt)
 
@@ -414,9 +426,9 @@ class TestFreeformCompile(unittest.TestCase):
             "```json\n%s\n```" % json.dumps({
                 "instructions_text": draft,
                 "draft_summary": "依据需求和 rubric 起草",
-                "covered_redlines": ["T2", "T3", "T5", "E4"],
+                "covered_redlines": ["T1", "T2", "T3", "T5", "E5"],
             }, ensure_ascii=False),
-            json.dumps({"T2": True, "T3": True, "T5": True, "E4": True}),
+            json.dumps({"T1": True, "T2": True, "T3": True, "T5": True, "E5": True}),
         ]
         prompts = []
 
@@ -424,7 +436,11 @@ class TestFreeformCompile(unittest.TestCase):
             prompts.append(prompt)
             return replies.pop(0)
 
-        with mock.patch.object(llm_client, "call_llm", side_effect=fake_call):
+        with mock.patch.object(
+            generator_mod,
+            "_build_rubric_research",
+            side_effect=_load_v2_rubric,
+        ), mock.patch.object(llm_client, "call_llm", side_effect=fake_call):
             gen = generator_mod.generate_v0(
                 "面向总裁分析用户增长，所有数据必须可追溯",
                 "research_insight",
@@ -453,19 +469,24 @@ class TestFreeformCompile(unittest.TestCase):
             )
         skill = SkillArtifact.from_dict(gen["skill"])
         self.assertEqual(skill.instructions["v0_strategy"], "base_skill")
-        self.assertIn("可回溯性（生命线）", skill.instructions["prose"])
+        self.assertIn("先建立证据底稿", skill.instructions["prose"])
+        self.assertIn("五条不可突破的红线", skill.instructions["prose"])
 
     def test_v0_strategy_survives_snapshot_restore(self):
         draft = "## 从零规则\n1. 所有事实与结论必须有素材支持。"
         replies = [
             json.dumps({"instructions_text": draft}),
-            json.dumps({"T2": True, "T3": True, "T5": True, "E4": True}),
+            json.dumps({"T1": True, "T2": True, "T3": True, "T5": True, "E5": True}),
         ]
         old_base = persist._BASE
         with tempfile.TemporaryDirectory() as tmp:
             persist._BASE = tmp
             try:
                 with mock.patch.object(
+                    generator_mod,
+                    "_build_rubric_research",
+                    side_effect=_load_v2_rubric,
+                ), mock.patch.object(
                     llm_client,
                     "call_llm",
                     side_effect=lambda *args, **kwargs: replies.pop(0),
@@ -490,20 +511,20 @@ class TestFreeformCompile(unittest.TestCase):
 
 class TestRedlineGuard(unittest.TestCase):
     def setUp(self):
-        self.rubric = generator_mod._build_rubric_research()
+        self.rubric = _load_v2_rubric()
         self._orig = llm_client.call_llm
 
     def tearDown(self):
         llm_client.call_llm = self._orig
 
     def test_guard_rejects_when_redline_dropped(self):
-        llm_client.call_llm = lambda p, **kwargs: '{"T2": true, "T3": false, "T5": true, "E4": true}'
+        llm_client.call_llm = lambda p, **kwargs: '{"T1": true, "T2": true, "T3": false, "T5": true, "E5": true}'
         r = optimizer02._redline_guard("正文", self.rubric)
         self.assertFalse(r["ok"])
         self.assertIn("T3", r["dropped"])
 
     def test_guard_passes_when_all_kept(self):
-        llm_client.call_llm = lambda p, **kwargs: '{"T2": true, "T3": true, "T5": true, "E4": true}'
+        llm_client.call_llm = lambda p, **kwargs: '{"T1": true, "T2": true, "T3": true, "T5": true, "E5": true}'
         r = optimizer02._redline_guard("正文", self.rubric)
         self.assertTrue(r["ok"])
 
@@ -535,7 +556,7 @@ class TestRedlineGuard(unittest.TestCase):
 def _fake_llm(rewrite_text):
     def _call(prompt, **kwargs):
         if "红线义务清单" in prompt:                 # 守卫调用
-            return '{"T2": true, "T3": true, "T5": true, "E4": true}'
+            return '{"T1": true, "T2": true, "T3": true, "T5": true, "E5": true}'
         return ('{"instructions_text": %s, "change_summary": "改写", '
                 '"targets_failures": [], "preserved": [], "hypothesis": "h", '
                 '"self_check_no_hack": true}') % _json_str(rewrite_text)

@@ -91,6 +91,8 @@ python3 harness/data_workflow.py prepare generate \
     "research_background": "具体研究背景。",
     "hypo": "具体研究假设。",
     "material_focus": "市场规模和竞争格局是重点。",
+    "report_pages": 3,
+    "report_max_chars": 3000,
     "topic": "可选的展示 topic 修正",
     "split": "dev",
     "metadata": {
@@ -102,6 +104,9 @@ python3 harness/data_workflow.py prepare generate \
 
 override key 可以使用 source index、素材相对路径、素材文件名、素材 stem 或
 生成后的 case ID。
+`report_pages` 未提供时默认 3 页；页数按每页不超过约 1000 个中文可见字符
+折算。通常只需设置 `report_pages`，只有用户明确给出字数时才覆盖
+`report_max_chars`。
 同一素材命中多个内容不同的 override 时会报错，避免静默选错。
 
 ```bash

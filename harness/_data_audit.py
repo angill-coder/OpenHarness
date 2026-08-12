@@ -213,8 +213,12 @@ def _background(case: dict[str, Any]) -> str:
     )
 
 
-def _resolve_source_paths(case: dict[str, Any], base: Path) -> tuple[Path, ...]:
+def _resolve_dataset_paths(
+    case: dict[str, Any], base: Path
+) -> tuple[tuple[Path, ...], Path | None]:
+    """Resolve writer inputs without feeding an old Structured Data file back as source."""
     paths = []
+    structured_data_path = None
     for item in case.get("input_files") or []:
         if not isinstance(item, dict) or not item.get("source"):
             continue
@@ -224,12 +228,23 @@ def _resolve_source_paths(case: dict[str, Any], base: Path) -> tuple[Path, ...]:
         path = path.resolve()
         if not path.exists():
             raise DataQualityError(f"原始资料不存在: {path}")
+        target = str(item.get("target") or "").replace("\\", "/").lstrip("./")
+        if target == "materials/00_structured_data.json":
+            if structured_data_path is not None:
+                raise DataQualityError(
+                    f"{case.get('case_id') or case.get('id')} 存在多个 Structured Data 输入"
+                )
+            structured_data_path = path
+            continue
         paths.append(path)
     if not paths:
         raise DataQualityError(
             f"{case.get('case_id') or case.get('id')} 没有可用 input_files"
         )
-    return tuple(paths)
+    sources = tuple(paths)
+    if structured_data_path is None:
+        _, structured_data_path = _project_and_structured_data(sources)
+    return sources, structured_data_path
 
 
 def _project_and_structured_data(
@@ -292,8 +307,11 @@ def _load_bundles(request: DataQualityRequest) -> list[_CaseBundle]:
         available.add(case_id)
         if selected and case_id not in selected:
             continue
-        sources = _resolve_source_paths(case, dataset.parent)
-        project, structured_data_path = _project_and_structured_data(sources)
+        sources, structured_data_path = _resolve_dataset_paths(case, dataset.parent)
+        if structured_data_path is not None:
+            project = structured_data_path.parent.name
+        else:
+            project, _ = _project_and_structured_data(sources)
         human_report = case.get("human_report") or {}
         human_report_text = str(human_report.get("human_report_text") or "").strip()
         human_report_file_value = str(human_report.get("human_report_file") or "").strip()

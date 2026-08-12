@@ -217,6 +217,67 @@ class DataQualityTest(unittest.TestCase):
         self.assertEqual(result.cases[0].audit_status, "generated")
         self.assertEqual(result.cases[0].project, "中文项目")
 
+    def test_dataset_file_mappings_exclude_structured_data_from_sources_and_publish(self) -> None:
+        case_dir = self.root / "collection" / "weekly"
+        source = case_dir / "source"
+        source.mkdir(parents=True)
+        source_file = source / "interview.md"
+        source_file.write_text("有效访谈证据", encoding="utf-8")
+        structured_data = case_dir / "structured_data.json"
+        structured_data.write_text(
+            json.dumps(_structured_data("case-file-map"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        dataset = self.root / "data.json"
+        dataset.write_text(
+            json.dumps(
+                {
+                    "cases": [
+                        {
+                            "case_id": "case-file-map",
+                            "turns": [{"round": 0, "prompt": "周报"}],
+                            "input_files": [
+                                {
+                                    "source": "./collection/weekly/structured_data.json",
+                                    "target": "materials/00_structured_data.json",
+                                },
+                                {
+                                    "source": "./collection/weekly/source/interview.md",
+                                    "target": "materials/source/interview.md",
+                                },
+                            ],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        replacement = _structured_data("case-file-map")
+        replacement["items"][0]["content"] = "重新清洗后的证据。"
+
+        def fake_run(_runner, *, prompt, schema_path, cwd):
+            self.assertEqual(schema_path.name, "structured_data.schema.json")
+            self.assertIn(str(source_file.resolve()), prompt)
+            self.assertNotIn(str(structured_data.resolve()), prompt)
+            return replacement, 1.0
+
+        request = DataWorkflowRequest(
+            output_root=self.root / "output",
+            dataset=dataset,
+            stages=("structured_data",),
+            force_structured_data=True,
+            publish_structured_data=True,
+        )
+        with patch.object(CodexJsonRunner, "run", autospec=True, side_effect=fake_run):
+            result = run_data_workflow(request)
+
+        self.assertTrue(result.succeeded)
+        self.assertEqual(result.cases[0].project, "weekly")
+        published = json.loads(structured_data.read_text(encoding="utf-8"))
+        self.assertEqual(published["items"][0]["content"], "重新清洗后的证据。")
+
     def test_cli_defaults_to_both_stages(self) -> None:
         args = _parser().parse_args(
             [

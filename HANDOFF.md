@@ -1,23 +1,23 @@
 # OpenHarness 交接文档（HANDOFF）
 
-> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-07-21（见文末 §9 增量）。
+> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-08-11（见文末 §12 增量）。
 > 用户要求：**一律用简体中文交流**（曾误用日语被纠正）。
 
 ---
 
 ## 0. 一句话现状
 
-平台的「调研洞察汇报助手」六维评测闭环已**代码就绪并验证跑通**；已用 3 篇真实报告 + 素材建成数据集与校准集；**已把"下属实际用的报告生成 skill"部署成 Claude Code Agent Skill（`research-report`，见 §4.5）**——含开场 3 轮交互 + 3 段报告结构。用户此刻在 app 里跑优化器验证闭环（会话 `research-run`）。**剩下的主要是用户的人工活**：填专家六维分做校准、把坏样本骨架补成正文、用真实任务数据测 skill。
+平台的「调研洞察汇报助手」已具备真实报告生成、逐维 Judge、LLM 自由改写 Optimizer、候选 Gate 和 WebUI 实验闭环。默认 `rubric_research.json` 保持原版，迭代版 **v2.3（六维 25 checks）** 独立保存在 `v2_rubric_research.json`；`research-report` Skill 使用四项开场输入（背景、待验证假设、重点素材、报告篇幅）和三段式交付结构。真实项目以 20-case 训练集及独立 testing 数据开展多版本实验；新 Session 会冻结创建时的 Rubric 和 Skill，判断某次实验时必须读取该 Session 的 `state.json` 与 `_session_skills`，不能只看仓库文件名推断。
 
 ---
 
 ## 1. 项目是什么
 
-**OpenHarness** = 一个 **eval 驱动的 skill 自动优化平台**（路径 `/Users/angill/Documents/New project/OpenHarness`，非 git 仓库）。
-闭环：Runner → Judge（LLM-as-judge，需人工标注做 meta-eval 校准）→ 失败聚类 → Optimizer（反思式改写，只动 instructions/directives，不动结构）→ 版本化 Store → 回归看板。
+**OpenHarness** = 一个 **eval 驱动的 Skill 自动优化平台**（当前为 Git 仓库；以实际 checkout 路径为准，不依赖历史机器的绝对路径）。
+闭环：Runner → Judge（LLM-as-judge，需人工标注做 meta-eval 校准）→ 失败聚类 → Optimizer（`switch_search` 或 `llm_rewrite`）→ 候选 Gate → 版本化 Store → 回归看板。
 
 **铁律共识（用户认同，别违反）**：
-- **结构定质量上限**：flow/subagent/memory schema 由人 v0 设对；Optimizer(MVP) 只翻 directive，不动结构。
+- **结构定质量上限**：flow、交互协议、交付结构和 memory schema 由人设定；Optimizer 可以改写标记区内的 instructions，但不能修改冻结的任务契约和结构外壳。
 - **rubric 和数据是杠杆，不能外包给弱工程师**；human_report 与人工分是用户不可外包的核心。
 - **judge 校准一致率 ≥0.85 才允许开 Optimizer**（离线 `run_loop` 强制；app 的 advance 不强制）。
 
@@ -25,48 +25,51 @@
 - `report-assistant`（**算数字型**经营月报，旧，`data/report_assistant/`）——4 维：data_accuracy/completeness/insight/conciseness。
 - `research_insight`（**调研洞察汇报助手**，当前重点）——6 维（见 §3）。
 
-环境事实（**部分已在 2026-07 变化，以 §9 为准**）：本机机器可读文件用 JSON 非 YAML；读 pdf 用 `pypdf`（可用），读 docx 用 stdlib `zipfile`+`xml`（无 python-docx），xlsx 读不了。⚠️ 已过时：现在是**新机器（Linux，`/data/home/angillwang/OpenHarness`）、Python 3.11.6、装了 `cryptography`**；判分 LLM key 已配（bianxie 中转，见 §9），非"无 key"。
+环境随 checkout 所在机器变化：生产部署历史见 §9；本地实验可能运行在 macOS。不要从 HANDOFF 推断密钥、端口或依赖是否可用，启动前检查实际环境变量、`app/server.py --help` 和 WebUI 配置接口。密钥只通过环境变量或本地 gitignored 启动脚本注入，禁止写入仓库。
 
 ---
 
 ## 2. 架构：harness（离线引擎）+ app（Web 平台）
 
-### harness/（纯离线、确定性、stdlib）
+### harness/（离线引擎、数据准备与确定性评分）
 - `schemas.py` SkillArtifact/EvalRecord。`store.py` 版本化。`runner.py` 批量跑+判分。`calibration.py` judge↔人工一致率（±1 容差，门槛 0.85）。`clustering.py` 失败聚类。`optimizer.py` 反思式提议（`FORBIDDEN={keyword_emphasis,buzzword_emphasis}` 挡 reward-hack）。`loop.py` 编排。`dashboard.py` 看板。
 - `backend.py`（**已去 API**，平台即运行时，`get_backend` 不再看 key）：
   - `MockBackend` 算数字型（原样）。
   - `ResearchMockBackend` 六维型：按 23 个 `RESEARCH_DIRECTIVES`（22 质量 + 1 FORBIDDEN 的 buzzword_emphasis）输出**报告文本 + signals**。**signals 是 judge/clustering 的唯一事实源**。
   - `RecordedBackend` 真实型：按 (version, case_id) 查用户粘贴的真实报告文本，signals 为空。
-- `judge.py`：`score_report` 按 product 派发 → `score_report_bizreport` / `score_report_research`（读 `report["signals"]` 照六维锚点；traceability hard_floor=3 红线一票否决）。
-- `artifacts/rubric_research.json` = 六维 rubric（权重/锚点/gates/target/**checks**）。`artifacts/rubric.json` = 算数字型（勿动）。
+- `judge.py`：保留 mock/离线评分，并提供 `dim_from_checks` 将真实 check 判定汇总为六维分。每项 `met/partial/miss` 对应 `1/.5/0`，维度分为 `1 + 4 × mean(checks)`；任一红线 check 为 `miss` 时该维封顶 2。
+- `artifacts/rubric_research.json` = 默认六维 rubric 原版；`artifacts/v2_rubric_research.json` = v2.3 迭代版（25 checks）；`artifacts/rubric.json` = 算数字型（勿动）。
 - `run_demo_research.py`：**离线自测闭环**（合成多 case + 模拟专家分）→ 校准 0.933、dev overall 2.17→4.56、采纳 12 版、buzzword_emphasis 被 gate 拒。`run_demo.py`：旧产品，2.58→4.75 不回归。**这俩是"闭环逻辑对不对"的试金石，改完 harness 先跑它们。**
 
-### app/（stdlib http.server + 单页原生 JS，无依赖无 key）
-- `generator.py` 需求→v0 skill+rubric（`research_insight` 分支读 rubric_research.json）。
-- `session.py` 会话编排：产品无关维度（`self.dims` 从 rubric 取）；`import_data`（research 认 `human_report`）；`import_output`（贴真实报告文本）；`import_judgment`（贴平台 LLM-judge 六维分，**RecordedJudge**）；`_apply_recorded` 在 evaluate 后把真实报告/评分**覆盖** mock 分（有 judgment 的 case `score_source=recorded`，无则 `mock` 占位）。
-- `persistence.py` 落盘：`sessions/<sid>/` 下 meta.json/events.jsonl/state.json/**outputs.jsonl**(真实报告)/**judgments.jsonl**(真实评分)。启动 `_restore_all` 恢复。
-- `server.py` API：`/api/session`(建/查)、`/api/data`、`/api/labels`、`/api/rubric`、`/api/advance`、`/api/import_output`、`/api/import_judgment`、`/api/sessions`、`/api/sample_data`。
-- `index.html` 单页 UI：左列（打开已有会话选择器 / 需求→V0 / 导入数据 / 编辑Rubric）、中列（版本演进+生成下一版 / 当前skill / 人工标注表 / 第4步导入报告文本+六维评分）、右列看板（校准/曲线/失败模式/当前Rubric）。`rubricDimsHtml()` 在左中右三处展开六维判据+目标+**checks**。
+### app/（stdlib HTTP + 单页原生 JS）
+- `generator.py`：需求 → v0 Skill + Rubric；`research_insight` 会冻结任务契约，并把四项 intake 与篇幅换算写入 Skill。
+- `session_core.py` / `session_eval.py` / `session_label.py`：分别负责 Session 状态、评测/候选结算和人工标注；新 Session 将母本 Rubric 复制到 `state.json`，后续改母本不会自动刷新旧 Session。
+- `generation_jobs.py`：为目标版本编译 `_session_skills`，调用 WorkBuddy 生成全部 case 报告并写入 `generation_runs`。
+- `judge_batch.py`：默认 `per_dimension`，每个维度独立调用 Judge；成功维度可保留，重试时只补缺失维度。报告或 Rubric 变化会使旧 Judgment 失效。
+- `llm_client.py`：统一支持 `api`、`workbuddy`、`codex` 三种 LLM backend；Judge 和 Optimizer 可分别选择 backend、model 和 Codex reasoning effort。
+- `server.py`：真实 Judge 入口是 `POST /api/run_judge_batch`；旧 `/api/run_judge` 已停用并返回 410。`POST /api/advance` 生成下一版候选并经真实评分 Gate 决定采纳或回滚。
+- `persistence.py`：`sessions/<sid>/` 保存 `state.json`、`events.jsonl`、`check_judgments.jsonl`、输出与人工标签；诊断历史实验优先读这些落盘事实。
 
 ---
 
-## 3. 六维 rubric（research_insight）
+## 3. 六维 Rubric v2.3（research_insight 迭代版）
 
 | 维度(字段) | 权重 | 目标 | 红线/封顶 | checks |
 |---|---|---|---|---|
-| 可回溯性与支撑充分 `traceability` | 0.28 | ≥4.2 | **<3 一票否决**(编造/混用冲突/无据硬结论) | T1挂出处 T2不编造🔴 T3冲突不混用🔴 T4单源降级 T5不足留白🔴 |
-| 结构 `structure` | 0.15 | ≥4.0 | 摘要铺陈/对不上=2封顶 | S1摘要≤3纯结论 S2金字塔 S3MECE S4摘要↔正文 |
-| 逻辑与故事线 `narrative` | 0.12 | ≥3.8 | 概念矛盾=2封顶 | N1主线贯穿 N2概念口径一致 |
-| 提炼与洞察 `insight` | 0.22 | ≥3.6 | 复述/引噪=2封顶 | I1提炼成规律 I2归因/趋势/建议三要素 I3不过度外推 I4剔噪 |
-| 覆盖度 `coverage` | 0.08 | ≥4.0 | —(答不了的不算漏) | V1可答全答 V2关键claim无漏 V3必需段落齐 |
-| 表达与受众契合 `expression`(反向) | 0.15 | ≥3.8 | **"不是,而是"句式/注水=2封顶** | E1结论先行 E2结构化呈现 E3长度匹配 E4风格禁令🔴 |
+| 可回溯性与支撑充分 `traceability` | 0.28 | ≥4.2 | 任一红线 miss → 本维封顶 2；维度 <3 则 case 不合格 | T1论断有据/无编造🔴 T2忠实转述🔴 T3冲突不混用🔴 T4单源推断校准 T5不足留白🔴 T6口径完整 |
+| 结构 `structure` | 0.15 | ≥4.0 | <3 触发人工复检 | S1摘要质量 S4摘要↔正文 S5章节结论先行 |
+| 逻辑与故事线 `narrative` | 0.12 | ≥3.8 | <3 触发人工复检 | N2主线与论证推进 N4概念/口径一致 N5冲突呈现与决策含义 |
+| 提炼与洞察 `insight` | 0.22 | ≥3.6 | — | I1提炼规律 I2归因/机制有效 I3趋势与风险校准 I4建议洞察有效 |
+| 覆盖度 `coverage` | 0.08 | ≥4.0 | 答不了的问题不算遗漏 | V1关键问题覆盖与深度 V2必需段落齐 V3关键 Claim 无遗漏 |
+| 表达与受众契合 `expression`（反向） | 0.15 | ≥3.8 | E5 miss → 本维封顶 2；维度 <3 人工复检 | E1精炼易扫读 E2结构化呈现 E3表图规范 E4遵守用户篇幅 E5风格禁令🔴 E6终稿化/严谨/易懂 |
 
-- 完整锚点：`调研洞察汇报助手_Rubric落地文档.md`（人读）＝ `rubric_research.json`（机读）。checks 是本维展开的检查点，**仍汇成一个 1–5 分**（不单独打分、不改权重）。
-- overall 目标 4.0，校准门槛 0.85。
+- v2.3 的机器口径来源是 `harness/artifacts/v2_rubric_research.json`；共 **25 条 checks**，红线为 **T1/T2/T3/T5/E5**。默认 `rubric_research.json` 保持原版，两份文件不得互相覆盖；实际实验以 Session 冻结的 Rubric 为准。
+- 每条 check 先单独判 `met/partial/miss`，再汇成一个 1–5 维度分；overall 为六维加权平均。目标 overall=4.0，Judge↔人工校准门槛=0.85。
+- v2.3 将高度重叠项合并：例如摘要数量/结论性/排序并为 S1，主线/推进并为 N2，趋势/异常校验并为 I3。`noise_source_ids` 等 benchmark 专用检查移出主 Rubric，不再作为独立主 check。
 
 **human_report 四条边界原则（用户拍板，建新 case 沿用）**：
 1. 策略启示应答（列 expected_insight）、具体动作/投放留白（列 unsupportable_questions，硬答扣①）；
-2. noise_source_ids 只放**明显无关**（被引用=剔噪失败扣④）；
+2. `noise_source_ids` 只用于 benchmark/数据质检，放**明显无关**素材；它不再是 v2.3 主 Rubric 的独立 check，但写作仍不得拿噪声充数；
 3. 「≥2 独立信源否则降级待验证」只对**推断/归因类**（第三方面板单源可定论；仅访谈的机制类须标"定性/待验证"）；
 4. 「趋势将持续/线性外推未来」算 `unsupported_extrapolation` 越界扣①。
 
@@ -74,75 +77,68 @@
 
 ## 4. 数据资产与会话（现状）
 
-**`data/research_assistant/dataset.jsonl` = 3 条真实尺子**（唯一正式数据集，勿污染）：
-- `rr-ds-timelen` DeepSeek 用户时长分析
-- `rr-surge-eff` Surge AI 高人效
-- `rr-retention` 元宝/DS/豆包留存
-每条含 sources[](切片配 S-id) + human_report(supported_claims/key_claim_ids/expected_insights/unsupportable_questions/noise_source_ids/traps)。原始素材+抽出的正文在 `data/<案名>/`（`vF报告_正文.md`、`原始素材_正文.txt`）。
-
-**`make_bad_variants.py`**：读某 case 的 human_report 半自动派生坏报告骨架+建议六维分+reasoning，`--into-session <sid>` 合并进会话。已支持缺陷：hardanswer/overclaim/single_source/conflict/metric_caveat/selection_bias/outlier/noise/listing/summary/style。生成物 `bad_variants.<case>.jsonl`（骨架含【填写】）。
-
-**三个 app 会话**（`app/sessions/`）：
-- **`research-calib`** 27 案 = 3 好报告(真实正文+judge草案分, overall 4.57/4.63/4.85) + 24 坏变体(已补具体正文, overall 3.22~3.78, 10 条红线)。**用途=校准**（judge分 vs 用户人工分）。driven by recorded → **跑不动优化器**。
-- **`research-run`** 3 案（v0，纯 mock，未贴报告）。**用途=跑优化器闭环**（用户正在这里点"生成下一版"验证平台 work）。v0 dev≈2.12，一路可爬到 4.x 后收敛。
-- **`ds-timelen`** 3 案 = DeepSeek 1 好 + 2 条手工填好的坏（3.22红线/3.18）。**用途=区分度 demo**。
+- `data/research_assistant/dataset.jsonl` 保留 3 条早期真实尺子（DS 时长、Surge AI、AI 产品留存）及坏样本/人工校准资产，主要用于离线回归和历史校准，不再是唯一正式实验入口。
+- 当前真实项目数据按 `data/research-report/v1|v2|v3/data.json` 管理，这些运行数据默认被 Git 忽略。Session `meta.json.experiment_data.id` 决定数据版本；`OPENHARNESS_WB_DATASET_V1/V2/V3` 可分别覆盖路径，旧 `OPENHARNESS_WB_DATASET` 仅作 fallback。
+- **不要凭目录名猜正在使用的数据**：启动后调用 `GET /api/generation/config`，核对 dataset、Skill、CLI 和可移植输出根。20-case 训练集与 testing 数据必须使用不同 `data.json`/Session，不能混写评测结果。
+- 每个 case 的 `data.json` 是 Runner/Judge/Dashboard 共用入口，包含 turns、input_files、delivery_constraints 等。写作 Agent 读取 `materials/00_structured_data.json`；若有 ground truth，允许在构造阶段补充/纠错该文件，但 ground truth 本身不得作为额外文件暴露给写作 Agent。
+- `app/sessions/` 中的会话是历史快照，不应假定数量固定。常见历史会话包括 `research-calib`、`research-run`、`president-report-llm`、`3d8fe03d` 等；新实验应新建 Session，避免修改旧实验的 Rubric、Skill 或评分。
+- `make_bad_variants.py` 与 `bad_variants.*.jsonl` 是早期缺陷校准工具；其中 selection bias、noise 等标签可能仍用于 benchmark，但不代表 v2.3 存在同名独立 check。
 
 ---
 
 ## 4.5 部署给下属的报告生成 skill（Claude Code Agent Skill：research-report）
 
-**这是"真实模式下下属实际用来产报告"的 skill**（区别于 harness 里 optimizer 迭代的 skill 结构）。母本在 `skills/research-report/`（`SKILL.md` + `references/instructions.md`），已安装到 `~/.tclaude/skills/research-report/` 和 `~/.claude/skills/research-report/`（本机两处兜底）。用户上传素材说"生成调研洞察汇报报告"即自动触发（靠 SKILL.md 的 description 命中；**新开 Claude Code 会话才会被扫描到**）。
+**这是生成真实报告的 Skill 母本**，位于 `skills/research-report/`（`SKILL.md` + `references/instructions.md`）。实验运行时会按 Session/版本编译并冻结到 `generation_runs/_session_skills/<session>/<version>/...`；诊断某版报告必须查看冻结副本，不能假定它等于当前母本。安装到个人 Skill 目录后通常需要新会话才会重新扫描。
 
-- **内容 = "v-full"（22 质量 directive 全开，buzzword_emphasis 关）**——即 directive 空间上限版。它是**固定**的，不随 optimizer 自动更新；等 optimizer 在真实数据上收敛出最优 directive 子集后，需据此**手动重生成**这个 skill（用 `data/research_assistant/skill_full_运行提示词.md` 那套逻辑）。注意"全开"在真实 LLM 上不一定最优（长度 vs 覆盖/图表 有张力等），最优子集靠平台实测筛。
-  - directive 集演进：v0 建时 14 → 2026-07-14 加 3（`verify_no_fabrication` 红线 tag `fabrication_risk`、`note_metric_caveat` tag `metric_caveat`、`disclose_sample_bias` tag `selection_bias`，均归可回溯性，checks T2/T6/T7）→ 2026-07-15 再加/拆到 **22 质量**：`pyramid_summary` **拆成** `summary_format`+`pyramid_body`（结构）、新增 `ensure_narrative_flow`（逻辑主线，N1）、`crosscheck_outliers`（洞察，tag `outlier_confound`，I5）、`cover_key_claims`（覆盖 V1/V2）、`require_rigorous_wording`（表达 E5）。
-  - **`require_rigorous_wording` 是"真实-only"**：表达维 2 档被红线占、只剩 3/4/5 容 2 因子，硬加第 3 个会致贪心掩盖卡死；故它**不入 mock 评分**（backend 有 `imprecise_wording` 信号但 judge 不用），只作 directive+skill规则(第16条)+rubric锚点 E5，在真实生成/真实judge起作用。
-  - mock 评分设计：coverage/structure/narrative 用**线性/有序评分**保证贪心每步单调可采纳（结构 summary封顶2、余下 body/mece 线性；coverage 三因子线性；narrative 无主线3→概念4→5）。`crosscheck_outliers` tag-gated，demo 里 inert（合成 case 无 `outlier_confound`），靠单测验证。demo 仍 2.17→4.56、采纳 15 版收敛。
-- **开场 3 轮交互**（写在 flow step0 = 结构层，所有版本共有、与 directive 无关）：①汇报背景 ②材料假设 hypothesis ③标出高质量重点素材。三项都用进报告；**红线：hypothesis 只验证/证伪、不迎合**（素材不支持就如实证伪，否则违反可回溯性）。
-- **3 段报告结构**（`references/instructions.md`）：①核心摘要（≤3 bullet 结论先行）②核心发现（**归因融进每条发现**）③对我们的启示与建议（**趋势判断融进相关建议**）。**不单列**归因/趋势/**素材清单**；来源一律行内 `[S-xxx]`。
-- 同步点：`app/generator.py` 的 flow step0 + `RESEARCH_SECTIONS`(3段)、`skill_v0_research.json`/`skill_full_research.json` 的 flow step0、`dataset.jsonl` 各 case 的 `required_sections`(3段) 均已对齐这套交互与结构。**mock 评测不模拟交互、不读 required_sections**（覆盖度信号是 directive 驱动），所以这些改动只影响真实模式的一致性，不动 mock 结果。
-- 产出的报告 → app 第4步「导入报告文本」+ LLM-judge 打分「导入六维评分」→ 平台评测。
+- **四项开场输入**：①汇报背景 ②待验证假设 ③高质量/重点素材 ④报告篇幅。可以在一次回复中集中确认；用户已提供的只补缺。假设只能验证、部分支持、无法验证或证伪，不能迎合。
+- **篇幅预算**：用户直接给字数时优先遵守；给页数时按每页不超过约 1000 个中文可见字符折算，表格单元格文字计入，Markdown 标记和空白不计。未指定时默认 3 页以内/3000 字以内；这是上限，不为凑满注水。
+- **三段式交付结构**：①核心摘要（≤3 条结论）②核心发现（归因/机制放进对应发现）③启示与建议（趋势/风险放进相关行动语境）。不增加研究过程、素材清单或工作流状态章节。
+- **证据呈现**：写作和逆向核验时内部保留 S-xxx/C-xxx 等来源定位；最终高管正文**不展示来源编号**。用户要求依据或证据表时单独提供，不混入正文。
+- **终稿语言**：删除“待复算”“单一信源待验证”“证据不足建议补充研究”等中间工作流标签；真正影响决策的边界需转译为“当前能判断什么、不能判断什么、如何验证”。
+- **v2.3 方法**：先建立论断卡/证据底稿，再确定唯一决策主线和不超过 3 项核心判断；每项按“判断 → 证据 → 原因/机制 → 边界/反例 → 决策含义”组织。表图仅在存在比较价值时使用，空单元格必须说明“未采集/不适用”等状态。
+- `OPENHARNESS_EDITABLE_START/END` 内是 Optimizer 可改写区；四项 intake、三段结构、任务契约和版本 manifest 在结构层冻结。历史 directive（包括 `disclose_sample_bias`、`drop_noise`）仍可作为生成规则存在，但不等同于 v2.3 的独立 check。
 
 ## 5. ⚠️ 致命坑（务必记住）
-1. **改 rubric / 会话 state.json 后必须重启 server** —— 会话是 server 启动时读进内存的，`/api/session` 返回内存态。改磁盘不重启看不到。标准动作：改文件 →`Ctrl+C`→`python3 server.py`→浏览器刷新。（页面内「编辑Rubric」按钮改权重，以及“导入 Rubric JSON”是例外，均走内存直改+落盘。）导入只替换并冻结当前 Session，不限制 Rubric `product` 与 `Session.product_id` 一致；评分维度、Judge 模式和 backend 跟随导入 Rubric，默认母本与其他 Session 不受影响。
-2. **改 index.html 的 JS 后先语法检查**（曾因误删函数头导致整页 JS 崩、按钮全失效）：
-   `python3 -c "import re;open('/tmp/c.js','w').write(re.search(r'<script>(.*)</script>',open('app/index.html').read(),re.S).group(1))" && node --check /tmp/c.js`
-3. **mock vs recorded 泾渭分明**：优化器(advance)需要 mock signals（directive 驱动）才能聚类失败→提议；**recorded 报告 signals 为空→优化器直接"收敛"**。所以：跑优化器用"只有数据集、没贴报告"的会话（research-run）；校准用"贴了真实报告+judge分"的会话（research-calib）+ 用户人工分。
-4. **真实报告的六维分不会自动算**——需平台 LLM-as-judge 打分后经 `/api/import_judgment` 粘回（RecordedJudge）。harness 里没有真 LLM。
-5. **app 的 advance 不卡校准门槛**（离线 run_loop 才卡）。所以能直接跑优化器，但"优化的是未校准的 judge"这点要对用户说清。
-6. 后台可能残留测试 server 进程（`kill %1` 在本环境不可靠）；用 `pkill -f "server.py --port 8765"` 清理。
+1. **默认与迭代 Rubric 分文件保存**：新 Session 默认仍把 `rubric_research.json` 复制进 `state.json`；v2.3 位于 `v2_rubric_research.json`，必须在目标实验中显式选择/导入。WebUI 导入只替换并冻结当前 Session，不限制 Rubric `product` 与 `Session.product_id` 一致；评分维度、Judge 模式和 backend 跟随导入 Rubric，默认文件与其他 Session 不受影响。任何 Rubric 都不会自动刷新旧 Session；直接改 Rubric 文件或某个 `state.json` 后必须重启对应 server，WebUI 导入则即时更新内存并落盘。
+2. **Rubric/报告变化会使旧 Judgment 失效**：批量 Judge 写入前后都有版本与 prompt SHA 守卫；不要把旧 `check_judgments.jsonl` 当成当前版本结果。真实结果看 `check_judgments.jsonl`，不是 mock 六维分。
+3. **Judge 默认逐维调用**：`per_dimension` 会保留成功维度并只重试缺失项。遇到部分失败直接重跑同一版本，不要清空已成功结果或另造重复 Session。
+4. **LLM Rewrite 候选不是提前采纳**：`pending_idx` 指向待评候选，`current_idx` 仍是父版；生成和 Judge 完整后才经 Gate 采纳/回滚。页面显示“候选已生成”不等于“已采纳”。
+5. **改前端 JS 后做语法检查**：当前脚本在 `app/app.js`，运行 `node --check app/app.js`。改 Python 后用任务专用 `PYTHONPYCACHEPREFIX` 执行 `compileall`，避免系统缓存目录权限干扰。
+6. **不要硬编码服务端口或误杀其他实验**：启动前确认 `--port` 和目标 Session；停止时只结束对应 PID/端口。Rubric 或 Session 状态变更后需要重启对应 WebUI 服务。
+7. **密钥不得写入命令记录、代码或 HANDOFF**：只从环境变量/本地 gitignored 配置读取。历史文档里出现的 provider 名称不代表当前凭证仍有效。
 
 ---
 
 ## 6. 怎么运行
 
 ```bash
-cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   # 默认 8765, 无需 key
-# 浏览器 http://127.0.0.1:8765 → 左上「打开已有会话」选 research-run / research-calib / ds-timelen
+cd <当前-checkout>/app
+python3 server.py --host 127.0.0.1 --port <独立端口>
 ```
-- 跑优化器：开 `research-run` → 看 v0 基线+失败模式 → 反复点「▶ 生成下一版 skill」→ 看曲线爬升、失败消退、直到"收敛"。
-- 做校准：开 `research-calib` → 第3步给 27 案填**你的专家六维分** → 右列出一致率 → 差>1 的维度回去对齐锚点。
-- 离线自测：`cd harness && python3 run_demo_research.py`（六维）/ `python3 run_demo.py`（旧产品，验不回归）。
+- 真实循环：选择 Session → 确认数据集/Skill/Rubric 冻结副本 → 生成当前版本全部 case → `run_judge_batch` → 查看失败维度 → `advance` 生成候选 → 再生成/Judge → 等 Gate 结算。
+- Judge/Optimizer 的 backend 与 model 在 WebUI 或 API 参数中独立选择；实验记录必须保留实际 backend/model/reasoning effort。
+- 做校准：对同一批报告逐 check 填人工 `met/partial/miss`，与 `check_judgments.jsonl` 对比；一致率未达到 0.85 时先修 Rubric/Judge，不应解释 Optimizer 优劣。
+- 离线自测：`cd harness && python3 run_demo_research.py`（六维）/ `python3 run_demo.py`（旧产品回归）。
 
 ---
 
 ## 7. 下一步 TODO（按优先级）
 
-1. **用户跑通 research-run 优化器一轮**（进行中）——确认 app 里 v0→收敛 曲线出得来。
-2. **用户填 research-calib 的人工分** → 把校准一致率跑到 ≥0.85（这是开 optimizer 的前提；<0.85 的维度回改 `rubric_research.json` 锚点 + 落地文档，然后重启 server）。
-3. 坏变体正文核对/微调（`research-calib` 里 24 条已补，但可再打磨）；xlsx/docx 精确数字用户核对。
-4. 攒更多真实 case（覆盖高/中/低质量），凑 30–50 条稳校准。
-5. 之后才谈：真实数据上的逐版推进（人在环：平台跑vN→粘报告→粘judge分→advance）、L2(few-shot)/L3(memory)优化、结构级优化。
-6. 收尾类：把其余五维 checks 也补进 `调研洞察汇报助手_Rubric落地文档.md`（json 已有，人读版目前只补了表达维那张表）。
+1. 用 v2.3 的 25 条 checks 补做人工校准，特别关注合并后的 S1/N2/I3/V1 是否仍有稳定区分度。
+2. 在独立 testing 数据上复跑关键历史 Skill 版本，报告 generation model、Judge model、Rubric snapshot 和篇幅预算，避免跨实验口径混用。
+3. 观察 E4 的可见字符算法对表格密集报告是否合理；页数不是排版页数，当前统一按每页约 1000 可见字符评估。
+4. 继续检查 Structured Data 去重后是否遗漏关键时间点、冲突和口径；测试集与 20-case 训练集保持物理分离。
+5. 为 v2.3 收集足够的高/中/低质量报告后，再决定是否继续合并 checks 或调整红线；不要仅凭单次 loop 分数改 Rubric。
 
 ---
 
 ## 8. 关键文件地图
-- 规格：`调研洞察汇报助手_Rubric落地文档.md`（六维锚点+checks）、`调研洞察汇报助手_v0设计文档.md`（结构+schema）、`记忆与rubric分期设计.md`（专家反馈分流:rubric/skill-memory/个人-memory 三去处 + 生产vs评判 + 两期设计 + L1/L2/L3——memory层的 spec,尚未实现）。
-- 引擎：`harness/*.py` + `harness/artifacts/rubric_research.json`。
-- 平台：`app/*.py` + `app/index.html` + `app/README.md`（含「造校准集」流程）。
-- **下属用的报告生成 skill**：`skills/research-report/`（母本）→ 已装到 `~/.tclaude/skills/` 和 `~/.claude/skills/`（改后须新开 Claude Code 会话才生效）。相关：`data/research_assistant/skill_v0_research.json`(v0全关)、`skill_full_research.json`(v-full全开)、`skill_full_运行提示词.md`(可粘的系统提示词)、`judge_运行提示词.md`(判分提示词)。
-- **真实标注/校准(2026-07-17 加)**：app 支持 ①上传报告文件(md/txt/pdf/docx,`/api/upload_report`) ②逐 check 人工标注(满足/部分/不满足=1/.5/0,`/api/submit_check_labels`,落 `check_labels.jsonl`) ③页面按钮直调 **Opus 4.8** 判分(`/api/run_judge`,stdlib urllib,**需 `ANTHROPIC_API_KEY`+网络**,落 `check_judgments.jsonl`) ④逐 check 校准(人工 vs judge,`view.check_calib`)。维度分由 check 汇总:`judge.dim_from_checks`(1+4·mean,红线 check miss→封顶2)。**只动真实线,mock 优化器仍六维不变。** 会话 `real-eval`=干净标注会话(3案)。
-- 数据：`data/research_assistant/`（dataset.jsonl / make_bad_variants.py / bad_variants.*.jsonl / README.md）、`data/<三案>/`（原始素材+正文）。
+- Rubric 文件：`harness/artifacts/rubric_research.json`（`research_insight` 默认原版）、`harness/artifacts/v2_rubric_research.json`（v2.3 迭代版）与 `harness/artifacts/rubric.json`（旧 `report-assistant`）；各文件独立保存。
+- 生成 Skill 母本：`skills/research-report/SKILL.md` + `skills/research-report/references/instructions.md`；Session 冻结副本位于 `generation_runs/_session_skills/`。
+- 真实 Judge：`app/judge_batch.py`、`app/server.py`、`app/llm_client.py`；结果落 `app/sessions/<sid>/check_judgments.jsonl`。
+- Optimizer/Gate：`app/optimizer02.py`、`app/optimizer_pipeline.py`、`app/session_eval.py`、`app/session_core.py`。
+- 数据构造与质检：`harness/_data_prepare.py`、`harness/_data_audit.py`、`harness/data_workflow.py`、`harness/data_quality_assets/`、`harness/CASE_DATASETS.md`。
+- 实验事实：`app/sessions/<sid>/state.json`、`events.jsonl`、`generation_runs/`；判断实际 Skill、Rubric、模型和分数时以这些文件为准。
 - 记忆：`~/.tclaude/projects/-Users-angill-Documents-New-project-OpenHarness/memory/`（openharness-project / backend-six-dim-refactor / user-prefers-simplified-chinese）。
 
 ---
@@ -165,7 +161,7 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 - **待用户/运维做的基建**：iOA 控制台把 OpenHarness 登记为独立应用（确认 Token=`CRI7…`）；加 nginx server 块反代其域名→`:8080` 并 `proxy_set_header X-Tai-Identity $http_x_tai_identity;`(+`X-Tai-Identity-Mode`)。
 - **重启**：`bash app/start_real.sh --host 0.0.0.0`（Claude 的权限分类器会拦含密钥的启动脚本，须用户自己跑）。
 
-**④ rubric T1 口径调整**：应用户要求"正文不写引用出处、但论断仍须有据可回溯"。改了生成 skill（`skills/research-report/`）与 T1 判据（`harness/artifacts/rubric_research.json`、`app/sessions/real-eval/state.json`、judge 提示词、落地文档）——T1 从"论断挂出处"改为"论断可回溯(有据)，正文不印出处不扣分"。
+**④ rubric T1 口径调整**：应用户要求"正文不写引用出处、但论断仍须有据可回溯"。改了生成 skill（`skills/research-report/`）与 v2 T1 判据（现保存于 `harness/artifacts/v2_rubric_research.json`）、相关 Session 快照、judge 提示词和落地文档——T1 从"论断挂出处"改为"论断可回溯(有据)，正文不印出处不扣分"。
 
 **⑤ 报告生成 skill 母本微调**（`skills/research-report/`，本机路径，未装到 `~/.claude/skills`）：正文不印行内 `[S-xxx]`（改自检时核对可回溯）；禁止把"结论先行/归因"等写作原则字样当小标题写进正文。
 
@@ -190,9 +186,9 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 
 **迭代记忆（carry-forward，防回退核心，喂给 LLM）**：`optimizer_pipeline.build_optimizer_context()` 装配 {rubric 六维锚点+checks+红线+target、current_best(全文+每维分)、must_preserve(≥target 的维+未失败的 check)、open_failures(failure_report)、history(逐版改动+verdict+overall delta)、tried_rejected、guardrails}。
 
-**红线守卫**（`optimizer02._redline_guard`）：候选生成后、进 WB 生成前，用廉价 LLM 逐条核对候选是否仍保留 rubric 里 `redline:true` 的 **T2/T3/T5/E4**；任一被删则当场拒（不烧生成预算）。直接堵住 v16 那种"删红线"回退。
+**红线守卫**（`optimizer02._redline_guard`）：候选生成后、进 WB 生成前，动态读取当前 Session Rubric 中所有 `redline:true` 的 checks，核对候选是否保留对应规则；任一被删则当场拒（不烧生成预算）。v2.3 文件为 **T1/T2/T3/T5/E5**，但每个 Session 仍以其冻结 Rubric 为准。
 
-**freeform 表示与编译**：LLM 产出整段可编辑区正文，落 `skill.instructions.prose` + `mode="freeform"`。母本 `skills/research-report/references/instructions.md` 用 `<!-- OPENHARNESS_EDITABLE_START/END -->` 框住「## 硬规则…正反例」（结构层：开场三输入/三段结构/标题/manifest/VERSION_RULES 在标记外，LLM 不可动）。`skill_compiler` 加 freeform 分支：`mode=="freeform"` → 整体替换可编辑区，manifest/version_rules 保持基线原样；无 `mode` 键 → 走原 directive 路径（**switch_search 逐字不变**）。`directive_registry.load_editable_region` 供 v0 取全文。
+**freeform 表示与编译**：LLM 产出整段可编辑区正文，落 `skill.instructions.prose` + `mode="freeform"`。母本 `skills/research-report/references/instructions.md` 用 `<!-- OPENHARNESS_EDITABLE_START/END -->` 框住可改写质量方法；结构层的四项 intake、三段结构、任务契约、manifest 和 VERSION_RULES 在标记外，LLM 不可动。`skill_compiler` 的 freeform 分支整体替换可编辑区；无 `mode` 键则走旧 directive 路径。
 
 **LLM 调用抽取**：`server.py:_call_opus/_extract_json` 抽到 `app/llm_client.py`（`call_llm`/`extract_json`），server 保留同名别名（判分链路字节等价），断 app→server 循环依赖，judge 与 optimizer02 共用同一条判分 LLM 线（需 `ANTHROPIC_API_KEY`）。
 
@@ -215,9 +211,9 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 **新会话**：`app/sessions/president-report-llm/`，`product_id=research_insight`、`optimizer_mode=llm_rewrite`，已导入 `data/20260727_real_project_package/data.json` 的 20 条真实项目 case。创建脚本为 `app/seed_president_report_llm.py`，检测到同名会话时会拒绝覆盖。旧近似会话 `b27e80a8` 保留不动。
 
 **需求契约 / V0**：
-- `generator._research_requirement_contract()` 会把需求语义化为 `skill.instructions.requirement_contract`，本会话固定了：总裁受众；用户先给话题+原始素材；补问汇报背景、hypothesis、材料重点分布；摘要/关键发现/启示三段式；素材文件只读且不编造/篡改；数据密集处图表；结论先行/金字塔/MECE/简洁严谨。
+- `generator._research_requirement_contract()` 会把需求语义化为 `skill.instructions.requirement_contract`；2026-08-11 的母本契约包含：总裁受众；用户先给话题+原始素材；补问汇报背景、hypothesis、材料重点分布和报告篇幅；摘要/关键发现/启示三段式；素材文件只读且不编造/篡改；有比较价值时用表图；结论先行、精炼严谨。`president-report-llm` 创建更早，其冻结契约可能仍是三项输入，需读取 Session 状态确认。
 - 契约与 `instructions.prose` 分开存。`skill_compiler` 编译 freeform 时固定拼成“契约 + LLM 可改写质量规则”；`optimizer02` 只改 prose，不能把产品需求迭代丢失。页面会分别展示“冻结任务契约”和“可改写质量规则”。
-- 本次**没有修改** `harness/artifacts/rubric_research.json`；新会话 rubric 与该文件逐对象相等，核验 SHA-256（规范化 JSON）均为 `1ffb10b85ca0097186dbb73c54facd6ecc0c88c88b778518ffed89ab0bcda816`。
+- 该会话创建时复制了当时的 Rubric；随后母本已升级为 v2.3，因此不能再用历史 SHA 或当前母本推断该会话实际 Rubric。请直接读取 `app/sessions/president-report-llm/state.json`。
 
 **会话级 early-stop（与 rubric.target 分离）**：
 - 新增 snapshot 字段 `optimizer_stop={overall_target,max_no_improvement}` 与 `optimization_progress`，API/UI 建会话可配置；本会话为 `overall_target=4.8`、`max_no_improvement=4`。
@@ -227,6 +223,42 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 **失败重试**：报告生成仍是每 case 最多 3 次重试（共 4 次尝试）；通用 Judge/LLM 默认从 0 改为 2 次传输重试（`LLM_RETRIES` 可覆盖）；LLM Rewrite 独立默认 2 次（`LLM_REWRITE_RETRIES` 可覆盖）。HTTP 408/429/5xx、超时/网络错误会指数退避；整批 Judge 部分失败仍可在 UI 再点一次续跑未完成 case。
 
 **沙箱与验证**：
-- V0 已编译到 `generation_runs/_session_skills/president-report-llm/v0/ec45e61f6d27/research-report/`，目录 hash=`92d713416dced5fcc26ae85a94692a87b54b3494093ed1c77d451840fdfff7b5`。
-- App 46 项测试、Harness 20 项测试全绿；`node --check app/app.js` 与相关 Python `py_compile` 通过；两个离线 demo 仍为 research 2.17→4.56、旧 report-assistant 2.58→4.75。
+- 历史 V0 编译路径和 hash 只对当次运行有效；重新编译或 Skill 母本变化后必须以 `_session_skills` 当前目录和事件记录为准。
+- 当时的 App 46 项、Harness 20 项测试均通过；这是 2026-07-30 的历史验证记录，不代表当前分支测试数量。
 - 本地服务启动方式：`cd app && source ./start_real.sh && python3 server.py --host 127.0.0.1 --port 8080`。打开页面后选 `president-report-llm`，先跑 v0 的 20-case 生成 + 批量真实 Judge，再点 LLM 改写下一版；之后按同样循环推进，满足任一 early-stop 自动停。
+
+---
+
+## 12. 2026-08-08—11 增量（Codex Provider、Rubric v2.3、篇幅预算、Structured Data 清洗）
+
+### 12.1 Codex CLI Judge / Optimizer Provider（PR #23，已合入 Main）
+
+- `llm_client.py` 新增 `codex` backend；当前支持 `gpt-5.6-sol`，reasoning effort 支持 low/medium/high/xhigh/max/ultra。
+- Judge 与 Optimizer 分别保存所选 backend、model、reasoning effort；运行历史不能只写“GPT-5.6”，必须同时记录调用方式和 effort。
+- Codex CLI 使用临时、只读工作目录和标准输入 prompt；`OPENHARNESS_CODEX_CLI_PATH` 可覆盖可执行文件发现路径。
+
+### 12.2 Rubric v2.2 → v2.3（PR #24）
+
+- v2.2 曾扩展到 36 条 checks；v2.3 将高度重叠项合并为 **25 条**，维度权重和 overall 目标不变。
+- 当前 checks：T1–T6、S1/S4/S5、N2/N4/N5、I1–I4、V1–V3、E1–E6；红线为 T1/T2/T3/T5/E5。
+- 关键口径：T1 合并“论断有据”和“无事实编造”；T2 保留忠实转述；T4 的单源降级主要约束归因/机制/普遍性推断，权威统计面板的直接事实可单源陈述；I3 合并趋势、风险、异常验证与外推边界；E6 增加中间分析状态向最终汇报语言的转化。
+- v2.3 同步重写 `research-report` 方法：证据底稿 → 决策主线 → 洞察 → 终稿 → 逆向核验。标题可简短，关键是标题或首句能表达章节中心判断。
+
+### 12.3 用户控制报告篇幅（PR #24）
+
+- intake 从三项变为四项；固定数据交互只需模拟用户回复“控制在 X 页以内”，换算规则由 Skill/平台负责。
+- case 可带 `delivery_constraints={max_pages,max_chars,chars_per_page,counting_rule}`；数据生成器默认 3 页、每页 1000 个中文可见字符。
+- Judge 为 expression 维传入 `delivery_constraints` 和确定性计算的 `report_stats`。`visible_chars` 去除 Markdown 标记与空白、计入表格单元格文字；E4 直接比较 `visible_chars` 与 `max_chars`，不再主观估固定页数。
+
+### 12.4 Structured Data 清洗与重建（PR #24）
+
+- `input_files` 中目标为 `materials/00_structured_data.json` 的文件视为旧 Structured Data/发布目标，**不会再作为普通 Source 回灌给生成 Worker**；其余 source 才进入证据重建。
+- Worker 先清洗、去重、合并和提炼，再输出 Evidence。访谈要还原“问题—回答—限定条件”，过滤寒暄、口头禅、无答案问题和重复追问。
+- 同义逐字稿/整理稿合并为一条高密度 Evidence，并在 `source_ref` 保留多个可回查位置；不再输出 `company_views`、`timeline`、`weekly_updates` 等重复索引层。
+- “一页周报约 30–80 条 Evidence”只是常见密度参考，不是硬上限；是否保留取决于该条是否影响事实、趋势/机制、冲突、口径或证据边界。
+
+### 12.5 PR #24 验证与已知基线问题
+
+- PR 分支：`codex/rubric-v23-and-structured-data`；目标 Main；包含 v2.2、用户篇幅、v2.3 和 Structured Data 清洗四个功能 commit，未重复包含 PR #23 的 Codex Provider。
+- 相关回归：App 96 项、Harness 30 项通过；Python compileall、`node --check app/app.js`、`git diff --check` 通过。
+- 当前 Main 基线有两项 Dashboard 路径契约测试同样失败；本机安装的 macOS WorkBuddy 还会影响一项 Windows CLI 发现测试。相关文件未被 PR #24 修改，不能把这三项误判为本次回归。

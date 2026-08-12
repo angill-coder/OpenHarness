@@ -37,6 +37,8 @@ DEFAULT_BACKGROUND_TEMPLATE = (
 )
 DEFAULT_HYPO = "暂无预设假设，请基于素材形成并验证核心判断。"
 DEFAULT_MATERIAL_FOCUS = "都是重点素材。"
+DEFAULT_REPORT_PAGES = 3
+REPORT_CHARS_PER_PAGE = 1000
 DEFAULT_FILENAME_REGEX = re.compile(r"^(?P<index>\d+)_(?P<topic>.+)$")
 INTAKE_PROMPT_VERSION = "human_report-intake-v2"
 INTAKE_OUTPUT_SCHEMA: dict[str, Any] = {
@@ -381,6 +383,39 @@ def _intake_values(
     return background, hypo, material_focus, status
 
 
+def _delivery_constraints(override: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the user-confirmed report length for generated cases."""
+    raw_pages = override.get("report_pages", DEFAULT_REPORT_PAGES)
+    try:
+        max_pages = int(raw_pages)
+    except (TypeError, ValueError) as exc:
+        raise CaseDatasetError("report_pages 必须是正整数") from exc
+    if max_pages < 1:
+        raise CaseDatasetError("report_pages 必须是正整数")
+    raw_chars = override.get(
+        "report_max_chars",
+        max_pages * REPORT_CHARS_PER_PAGE,
+    )
+    try:
+        max_chars = int(raw_chars)
+    except (TypeError, ValueError) as exc:
+        raise CaseDatasetError("report_max_chars 必须是正整数") from exc
+    if max_chars < 1:
+        raise CaseDatasetError("report_max_chars 必须是正整数")
+    return {
+        "max_pages": max_pages,
+        "max_chars": max_chars,
+        "chars_per_page": REPORT_CHARS_PER_PAGE,
+        "counting_rule": (
+            "中文可见字符；表格单元格文字计入，Markdown 标记和空白不计"
+        ),
+    }
+
+
+def _delivery_prompt(constraints: dict[str, Any]) -> str:
+    return "4. 报告篇幅：控制在%d页以内。" % constraints["max_pages"]
+
+
 def build_atomic_cases(
     *,
     materials_dir: Path,
@@ -474,6 +509,7 @@ def build_atomic_cases(
             hypo_default=hypo_default,
             material_focus_default=material_focus_default,
         )
+        delivery_constraints = _delivery_constraints(override)
         metadata = {
             "openharness_case_id": openharness_id,
             "split": case_split,
@@ -513,6 +549,7 @@ def build_atomic_cases(
                 {
                     "id": case_id,
                     "metadata": metadata,
+                    "delivery_constraints": delivery_constraints,
                     "input_files": [
                         {
                             "source": _relative_path(source, output_path.parent),
@@ -532,7 +569,9 @@ def build_atomic_cases(
                         {
                             "round": 1,
                             "label": "intake_answers",
-                            "prompt": intake_prompt,
+                            "prompt": intake_prompt + "\n" + _delivery_prompt(
+                                delivery_constraints
+                            ),
                         },
                     ],
                 }
@@ -1467,6 +1506,7 @@ def _project_case_payload(
         hypo_default=hypo_default,
         material_focus_default=material_focus_default,
     )
+    delivery_constraints = _delivery_constraints(override)
     metadata = {
         "openharness_case_id": openharness_id,
         "split": case_split,
@@ -1498,6 +1538,7 @@ def _project_case_payload(
             {
                 "id": case_id,
                 "metadata": metadata,
+                "delivery_constraints": delivery_constraints,
                 "input_files": [
                     {
                         "source": "./source",
@@ -1523,7 +1564,8 @@ def _project_case_payload(
                             f"2. hypo："
                             f"{hypo.replace(chr(10), chr(10) + '   ')}\n"
                             f"3. 素材重点分布："
-                            f"{material_focus.replace(chr(10), chr(10) + '   ')}"
+                            f"{material_focus.replace(chr(10), chr(10) + '   ')}\n"
+                            f"{_delivery_prompt(delivery_constraints)}"
                         ),
                     },
                 ],
