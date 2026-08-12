@@ -1,201 +1,348 @@
 {
   "product": "research_insight",
-  "version": "v2.3",
-  "_note": "v2.3 精简 rubric：25 条 checks。在 v2.2 基础上合并高度重叠项，并将 benchmark 专用噪声检查移出主 rubric。",
+  "version": "v0",
+  "_note": "调研洞察汇报助手 六维 rubric。机器可读镜像 调研洞察汇报助手_Rubric落地文档.md §1-3。JSON(非YAML)因 harness 走 Python stdlib。judge.score_report_research 读 report[signals] 照本文件锚点打分。",
   "dimensions": [
     {
       "name": "traceability",
       "name_zh": "可回溯性与支撑充分",
-      "scale": [1, 5],
+      "scale": [
+        1,
+        5
+      ],
       "weight": 0.28,
       "hard_floor": 3,
       "is_reverse": false,
-      "criteria": "事实、数据与结论有据且忠实；不编造、不混用冲突；单源推断与证据不足按证据边界校准；统计口径完整。",
+      "criteria": "论断可回溯到 source/claim;不曲解、不编造;冲突指出而非混用;素材不足处诚实留白;结论需≥2独立信源否则降级'待验证'。",
       "anchors": {
-        "5": "所有事实、数据和结论均有素材支撑且转述忠实；冲突被正确指出；推断、归因和机制的信源强度与表述确定性匹配；证据不足处不强答；口径完整。",
-        "4": "整体可信，仅有一处非关键支撑、限定条件或口径说明略弱，不影响核心判断。",
-        "3": "主体可回溯，但存在一处关键支撑不足、单源机制判断过强或重要口径缺失。",
-        "2": "出现事实编造、关键论断无据、明显曲解、混用冲突或证据不足仍强答；触发红线时本维度封顶 2。",
-        "1": "大量论断无法回溯或明显编造，报告事实基础整体不可信。"
+        "5": "所有论断可回溯;无曲解无编造;冲突被正确指出;素材不足处明确说明证据不足;单一信源结论均已标注'待验证'。",
+        "4": "可回溯性完整;仅1处非关键引用缺失或表述略模糊,不影响结论。",
+        "3": "主体可回溯,但1处关键论断无出处/轻度曲解/单一信源结论未降级。",
+        "2": "≥1处编造事实 / 把冲突素材当一致混用 / 无支撑下强行给结论。核心可信度受损(封顶,红线)。",
+        "1": "大量论断无法回溯或明显编造;报告事实基础整体不可信。"
       },
-      "positive_example": "权威统计面板可支持直接事实；仅由访谈支持的机制判断以定性结论呈现，并说明其决策边界。",
-      "negative_example": "把单次访谈推断成普遍机制，或生成素材中不存在的数据。",
+      "positive_example": "人均日时长Q2达27分钟[S-001];竞品X为去重会话时长[S-003],不可直接比较;投放方向素材不足,建议补充后再定。",
+      "negative_example": "满意度显著上升,NPS预计破50。(素材里没有)",
       "checks": [
         {
           "id": "T1",
-          "label": "论断有据、无事实编造",
-          "desc": "每个事实、数据和结论均有素材支撑并可核验；正文不展示来源编号不扣分。局部或非关键论断支撑不足可判 partial；出现素材中不存在的新事实，或关键论断完全无据，判 miss。",
-          "effect": "miss=红线，维度 2 分封顶",
-          "redline": true,
-          "optimizer": {"pattern_id": "trace_evidence_fabrication", "directive_hint": "require_source_ref", "priority": 0}
+          "label": "论断可回溯(有据)",
+          "desc": "每个事实/数据/结论都真有素材支撑、可核验回溯到 S-xxx/C-xxx;正文不写出来源号是允许的,不因未印出处扣分,只看论断是否真有据",
+          "effect": "关键论断查无素材支撑/无法回溯→3",
+          "optimizer": {"pattern_id": "trace_uncited", "directive_hint": "require_source_ref", "priority": 11}
         },
         {
           "id": "T2",
-          "label": "素材表达忠实",
-          "desc": "转述、总结和改写保持素材原意，不改变主体、方向、范围、条件、统计口径或确定性。",
-          "effect": "miss=红线，维度 2 分封顶",
+          "label": "不编造·不曲解",
+          "desc": "无素材里不存在的新事实，未曲解原意",
+          "effect": "编造/曲解→2封顶",
           "redline": true,
-          "optimizer": {"pattern_id": "trace_faithfulness", "directive_hint": "verify_no_fabrication", "priority": 1}
+          "optimizer": {"pattern_id": "trace_fabrication", "directive_hint": "verify_no_fabrication", "priority": 0}
         },
         {
           "id": "T3",
           "label": "冲突指出不混用",
-          "desc": "素材之间存在事实或口径冲突时明确指出，不把冲突信息混用为一致结论，也不无说明地只取有利一方。",
-          "effect": "miss=红线，维度 2 分封顶",
+          "desc": "素材冲突正确指出、不当一致混用",
+          "effect": "混用冲突→2封顶",
           "redline": true,
-          "optimizer": {"pattern_id": "trace_conflict", "directive_hint": "flag_source_conflict", "priority": 2}
+          "optimizer": {"pattern_id": "trace_conflict", "directive_hint": "flag_source_conflict", "priority": 1}
         },
         {
           "id": "T4",
-          "label": "单源推断校准",
-          "desc": "单源降级主要适用于推断、归因和机制判断；权威统计面板或权威原始记录提供的直接事实可以单源陈述。仅有访谈、个案或单一模态支持的机制性结论，应降低确定性并说明结论边界；不强制使用“待验证”等固定文案。",
-          "effect": "确定性超过信源强度时降档",
-          "optimizer": {"pattern_id": "trace_single_source", "directive_hint": "require_two_sources", "priority": 10}
+          "label": "单源降级待验证",
+          "desc": "单一信源结论标'待验证'，≥2 独立信源才作定论",
+          "effect": "未降级→3",
+          "optimizer": {"pattern_id": "trace_single_source", "directive_hint": "require_two_sources", "priority": 12}
         },
         {
           "id": "T5",
           "label": "不足诚实留白",
-          "desc": "素材不足以回答的问题不得强行作答。对决策有影响时，说明当前能够和不能够得出的结论及所需验证；不强制输出“证据不足”等工作流标签。",
-          "effect": "miss=红线，维度 2 分封顶",
+          "desc": "素材撑不起的问题说'证据不足'，不硬答",
+          "effect": "硬答→2封顶",
           "redline": true,
-          "optimizer": {"pattern_id": "trace_hardanswer", "directive_hint": "honest_on_unsupportable", "priority": 3}
+          "optimizer": {"pattern_id": "trace_hardanswer", "directive_hint": "honest_on_unsupportable", "priority": 2}
         },
         {
           "id": "T6",
-          "label": "口径完整",
-          "desc": "对口径依赖的数字、比例、频率和区间，根据理解需要说明统计对象、分子/分母、时间范围、对比基准、单位及必要敏感性；不得选择最有利口径却不声明。",
-          "effect": "关键口径缺失或选择性口径导致误读时降档",
-          "optimizer": {"pattern_id": "trace_metric_caveat", "directive_hint": "note_metric_caveat", "priority": 11}
+          "label": "口径注明",
+          "desc": "口径依赖的数/结论要注明口径、必要时给敏感性",
+          "effect": "选有利口径不注明→3",
+          "optimizer": {"pattern_id": "trace_metric_caveat", "directive_hint": "note_metric_caveat", "priority": 13}
+        },
+        {
+          "id": "T7",
+          "label": "披露样本偏差",
+          "desc": "已知样本有系统性偏差要披露、不当客观结论",
+          "effect": "无视偏差→3",
+          "optimizer": {"pattern_id": "trace_sample_bias", "directive_hint": "disclose_sample_bias", "priority": 14}
         }
       ]
     },
     {
       "name": "structure",
       "name_zh": "结构",
-      "scale": [1, 5],
+      "scale": [
+        1,
+        5
+      ],
       "weight": 0.15,
       "hard_floor": null,
       "is_reverse": false,
-      "criteria": "摘要简洁、结论化并按重要性排序；摘要与正文对应；各章通过标题或首句结论先行。",
+      "criteria": "摘要≤3条bullet且每条直接写结论、按重要性排序;正文金字塔、章节MECE、紧凑无注水。",
       "anchors": {
-        "5": "摘要不超过 3 条且均为按重要性排序的核心结论；正文逐项展开摘要，各章通过标题或首句先给中心判断。",
-        "4": "结构基本达标，仅有一处轻微摘要质量、对应或结论位置问题。",
-        "3": "具备摘要和正文层级，但摘要含背景、排序不当，或多处章节铺陈在先。",
-        "2": "摘要与正文两张皮、摘要主要是背景，或正文缺少清晰章节逻辑。",
-        "1": "无有效结构，接近流水账。"
+        "5": "摘要≤3条纯结论按重要性排序;正文每章论点先行、章节MECE无重叠无遗漏;摘要与正文严格对应。",
+        "4": "结构基本达标,摘要/正文对应清晰;仅1处轻微交叉或1条bullet偏铺陈。",
+        "3": "有摘要+正文分层,但摘要含背景铺陈,或正文非金字塔,或章节明显重叠/遗漏。",
+        "2": "摘要是背景介绍而非结论 / 正文与摘要对不上 / 无明显章节逻辑(封顶)。",
+        "1": "无结构,流水账。"
       },
-      "positive_example": "摘要 3 条以内，先写最影响决策的判断；正文按相同顺序逐项展开。",
-      "negative_example": "摘要介绍研究方法，正文另起一套互不对应的主题。",
+      "positive_example": "• 增长由重度用户留存加深驱动,非拉新。 • 可持续性存疑,仅两期数据。 • 建议资源转向激活。",
+      "negative_example": "• 本季度对DeepSeek用户时长进行了分析。 • 数据来自内部BI和6人访谈。(全是背景铺陈)",
       "checks": [
-        {"id": "S1", "label": "摘要质量", "desc": "摘要不超过 3 条 bullet；每条直接表达能够独立成立的核心判断，不写成背景、过程、方法或材料说明；按对管理层决策的重要性排序。", "effect": "摘要超出 3 条、以铺陈为主或重要性次序明显失当时降档", "optimizer": {"pattern_id": "struct_summary_quality", "directive_hint": "summary_format", "priority": 20}},
-        {"id": "S4", "label": "摘要与正文对应", "desc": "正文能够逐项展开摘要中的核心结论，不出现摘要与正文“两张皮”。", "effect": "核心结论无法对应时降档", "optimizer": {"pattern_id": "struct_summary_body", "directive_hint": "summary_format", "priority": 23}},
-        {"id": "S5", "label": "章节结论先行", "desc": "每个章节通过标题或章节首句明确表达中心判断，再提供事实、数据、案例等支撑；标题可以简短，但不能使读者无法识别本章结论。", "effect": "多处章节需读完支撑材料后才能识别中心判断时降档", "optimizer": {"pattern_id": "struct_pyramid", "directive_hint": "pyramid_body", "priority": 24}}
+        {
+          "id": "S1",
+          "label": "摘要≤3条纯结论",
+          "desc": "摘要≤3 bullet、每条是结论非背景、重要在前",
+          "effect": "背景铺陈→2封顶",
+          "optimizer": {"pattern_id": "struct_summary", "directive_hint": "summary_format", "priority": 20}
+        },
+        {
+          "id": "S2",
+          "label": "金字塔",
+          "desc": "正文每章先给论点、再给支撑",
+          "effect": "支撑先于论点→3",
+          "optimizer": {"pattern_id": "struct_pyramid", "directive_hint": "pyramid_body", "priority": 21}
+        },
+        {
+          "id": "S3",
+          "label": "MECE 章节",
+          "desc": "章节不重复、不遗漏、不交叉",
+          "effect": "明显重叠/遗漏→3",
+          "optimizer": {"pattern_id": "struct_mece", "directive_hint": "mece_sections", "priority": 22}
+        },
+        {
+          "id": "S4",
+          "label": "摘要↔正文对应",
+          "desc": "正文是摘要的展开、严格对应",
+          "effect": "对不上→2封顶",
+          "optimizer": {"pattern_id": "struct_summary_body", "directive_hint": "summary_format", "priority": 23}
+        }
       ]
     },
     {
       "name": "narrative",
       "name_zh": "逻辑与故事线",
-      "scale": [1, 5],
+      "scale": [
+        1,
+        5
+      ],
       "weight": 0.12,
       "hard_floor": null,
       "is_reverse": false,
-      "criteria": "全文围绕明确问题并自然推进；概念口径一致；关键发现呈现真实张力并回答 so what。",
+      "criteria": "论点推进有逻辑;章节衔接自然串成故事线;同一概念/口径/术语全文含义一致。",
       "anchors": {
-        "5": "一条主线贯穿全文；章节因果、递进或分析步骤衔接自然；概念口径稳定；真实差异或约束被转化为明确决策含义。",
-        "4": "主线和推进清楚，仅有一处衔接或决策含义略弱。",
-        "3": "能够读懂，但章节偏并列拼接，或关键发现缺少 so what。",
-        "2": "故事线明显断裂、概念自相矛盾，或结论堆叠而无主线。",
-        "1": "逻辑混乱，无法复述报告在回答什么问题。"
+        "5": "一条清晰主线贯穿全文;章节因果/递进衔接自然;同一概念全文口径一致。",
+        "4": "主线清楚;个别衔接略生硬或1处措辞不统一(不影响理解)。",
+        "3": "能读懂,但章节像并列拼接、缺推进感;或有1处概念前后不一致。",
+        "2": "故事线断裂跳跃 / 概念自相矛盾(封顶)。",
+        "1": "逻辑混乱,无法跟随。"
       },
-      "positive_example": "全文围绕一个决策问题，按变化—原因—约束—决策含义递进。",
-      "negative_example": "各段互相并列，无法复述主线，也不说明对决策意味着什么。",
+      "positive_example": "从'时长为何涨'→'谁在涨'→'能否持续'→'我们该做什么',一条主线递进。",
+      "negative_example": "前文'时长'指累计前台时长,后文对比时不声明换成去重会话时长。",
       "checks": [
-        {"id": "N2", "label": "主线与论证推进", "desc": "全文围绕一个明确的研究或决策问题展开，读者能够清楚复述报告主线；章节之间形成因果、递进或分析步骤上的承接，而不是若干结论的并列拼接。", "effect": "主线分散、无法复述或章节并列拼接缺少推进时降档", "optimizer": {"pattern_id": "narr_focus_progression", "directive_hint": "ensure_narrative_flow", "priority": 31}},
-        {"id": "N4", "label": "概念与口径前后一致", "desc": "同一概念、指标、人群、统计口径和时间范围在全文含义稳定；发生变化时明确说明。", "effect": "概念或口径漂移时降档", "optimizer": {"pattern_id": "narr_drift", "directive_hint": "concept_consistency", "priority": 33}},
-        {"id": "N5", "label": "冲突呈现与决策含义", "desc": "关键发现应识别并呈现对决策有意义的差异、矛盾、反常、取舍或约束，并说明它改变了什么判断、为什么值得关注、对管理层意味着什么。素材不存在真实冲突时不得人为制造，但仍应说明核心发现的决策含义。", "effect": "关键发现缺少真实张力或 so what 时降档", "optimizer": {"pattern_id": "narr_tension_so_what", "directive_hint": "ensure_narrative_flow", "priority": 34}}
+        {
+          "id": "N1",
+          "label": "主线贯穿",
+          "desc": "一条清晰主线、章节因果/递进衔接自然",
+          "effect": "并列拼接缺推进→3",
+          "optimizer": {"pattern_id": "narr_flow", "directive_hint": "ensure_narrative_flow", "priority": 30}
+        },
+        {
+          "id": "N2",
+          "label": "概念口径一致",
+          "desc": "同一名词/口径全文含义不漂移",
+          "effect": "概念自相矛盾→2封顶",
+          "optimizer": {"pattern_id": "narr_drift", "directive_hint": "concept_consistency", "priority": 31}
+        }
       ]
     },
     {
       "name": "insight",
       "name_zh": "提炼与洞察",
-      "scale": [1, 5],
+      "scale": [
+        1,
+        5
+      ],
       "weight": 0.22,
       "hard_floor": null,
       "is_reverse": false,
-      "criteria": "从素材提炼规律；形成有效归因、经过异常校验和边界校准的趋势/风险判断，以及与证据和机制闭环的建议。",
+      "criteria": "案例抽象提炼成模式非罗列;归因/趋势(标置信)/建议三要素;噪音片段不引用;命中 expected_insights。",
       "anchors": {
-        "5": "案例被提炼成规律；归因具有解释增量；趋势和风险判断经过异常验证与边界校准且不越界；建议与问题、证据和机制闭环。",
-        "4": "洞察完整，仅一项支撑、机制解释或行动具体度略弱。",
-        "3": "存在判断但偏表面，案例仍有罗列，或趋势、建议与证据的连接不充分。",
-        "2": "基本复述素材、明显越界外推、把异常直接当趋势，或建议与前文脱节。",
-        "1": "纯素材罗列，无有效判断或洞察。"
+        "5": "命中expected_insights;案例被提炼成规律;归因具体有据、趋势标置信度、建议可执行;噪音全部剔除。",
+        "4": "三要素齐,但1项较泛或支撑略弱,或趋势过度外推未标置信;噪音基本剔除。",
+        "3": "有判断但偏表面(只说'增长了'不解释),或案例是罗列而非提炼,或引用了噪音片段。",
+        "2": "基本是素材复述 / 大量引用噪音片段充数,几乎无归因/趋势/建议(封顶)。",
+        "1": "纯素材罗列,无任何判断。"
       },
-      "positive_example": "从多个案例抽象共同机制，说明该机制为何导致当前结果，并据此给出可执行、可回溯的建议。",
-      "negative_example": "逐条复述案例后直接跳到建设知识库，未说明来自哪个案例、为何能提效。",
+      "positive_example": "5家AI Native公司4家采用'人机双轨过渡'——先影子运行再切流,共性是把风险控制在可回退区间[C-003,C-004,C-005]。",
+      "negative_example": "把5家公司案例逐条抄一遍,不提炼共性。",
       "checks": [
-        {"id": "I1", "label": "提炼成规律", "desc": "从案例和素材中抽象出模式、共性或规律，不能停留在逐条罗列。", "effect": "主要为案例罗列时降档", "optimizer": {"pattern_id": "insight_listing", "directive_hint": "abstract_cases", "priority": 40}},
-        {"id": "I2", "label": "归因/机制洞察有效", "desc": "任务需要解释为什么时，形成具有解释增量的原因或作用机制判断，而不是复述现象；归因需有素材支撑。", "effect": "仅复述现象或无据归因时降档", "optimizer": {"pattern_id": "insight_attribution", "directive_hint": "require_insight_triplet", "priority": 41}},
-        {"id": "I3", "label": "趋势与风险判断校准", "desc": "任务涉及时间变化、未来判断或潜在风险时，形成有决策价值且经过校准的判断；必要时标注置信程度。一次性异常或离群点需经过交叉验证或情境解释，不把短期、局部或异常现象直接当作趋势、归因或未来必然。", "effect": "异常未经验证、置信度失配或越界外推时降档", "optimizer": {"pattern_id": "insight_trend_risk", "directive_hint": "mark_extrapolation_confidence", "priority": 42}},
-        {"id": "I4", "label": "建议洞察有效", "desc": "建议针对已识别的问题、原因或机制，能够回溯到前文证据或案例，并说明为什么该动作能起作用；方向明确、可执行，不从现象直接跳到无支撑方案，也不使用“继续关注、加强重视”等空泛表达。", "effect": "建议空泛、与证据或机制脱节时降档", "optimizer": {"pattern_id": "insight_recommendation", "directive_hint": "require_insight_triplet", "priority": 43}}
+        {
+          "id": "I1",
+          "label": "提炼成规律",
+          "desc": "案例抽象成模式/共性，非逐条罗列",
+          "effect": "罗列→3",
+          "optimizer": {"pattern_id": "insight_listing", "directive_hint": "abstract_cases", "priority": 41}
+        },
+        {
+          "id": "I2",
+          "label": "归因/趋势/建议三要素",
+          "desc": "有归因、趋势(标置信度)、可执行建议",
+          "effect": "仅复述→2封顶",
+          "optimizer": {"pattern_id": "insight_restate", "directive_hint": "require_insight_triplet", "priority": 40}
+        },
+        {
+          "id": "I3",
+          "label": "不过度外推",
+          "desc": "趋势标置信、不越界外推",
+          "effect": "过度外推→4(并拉低可回溯性)",
+          "optimizer": {"pattern_id": "insight_overclaim", "directive_hint": "mark_extrapolation_confidence", "priority": 43}
+        },
+        {
+          "id": "I4",
+          "label": "剔噪",
+          "desc": "不引用噪音片段(noise_source_ids)",
+          "effect": "引噪音充数→3",
+          "optimizer": {"pattern_id": "insight_noise", "directive_hint": "drop_noise", "priority": 42}
+        },
+        {
+          "id": "I5",
+          "label": "异常交叉验证",
+          "desc": "一次性异常/离群作交叉或情境解释、不当作趋势或错误归因",
+          "effect": "异常当趋势→4",
+          "optimizer": {"pattern_id": "insight_outlier", "directive_hint": "crosscheck_outliers", "priority": 44}
+        }
       ]
     },
     {
       "name": "coverage",
       "name_zh": "覆盖度",
-      "scale": [1, 5],
+      "scale": [
+        1,
+        5
+      ],
       "weight": 0.08,
       "hard_floor": null,
       "is_reverse": false,
-      "criteria": "素材可支持的问题全部回答且分析深度与重要性匹配；必需段落和关键 Claim 齐全。",
+      "criteria": "素材支持的 key_question 全答;key_claim_ids 无遗漏;required_sections 全覆盖且非空。素材答不了的(unsupportable_questions)不算漏。",
       "anchors": {
-        "5": "可答问题全部回答；必需段落实质完整；关键 Claim 无遗漏；重点内容获得匹配其重要性的分析。",
-        "4": "主体覆盖完整，仅有一项次要内容略浅或次要 Claim 未展开。",
-        "3": "漏答一个可答问题、缺一个关键 Claim/实质段落，或重要内容明显浅于次要内容。",
-        "2": "多个可答问题、关键 Claim 或必需段落缺失，覆盖明显失衡。",
-        "1": "大面积缺失，报告不成形。"
+        "5": "可答的key_question全答、关键claim无遗漏、段落齐且有实质内容。",
+        "4": "段落齐、可答问题全答;有1个次要claim未提。",
+        "3": "缺1个required section,或漏1个关键claim / 未答1个素材支持的key_question。",
+        "2": "缺≥2段,或漏多个关键claim / 多个可答问题未答。",
+        "1": "大面积缺失,报告不成形。"
       },
-      "positive_example": "所有可答 key question 和关键 Claim 均被覆盖，重点问题得到更深入分析。",
-      "negative_example": "次要背景展开过多，核心决策问题只用一句带过。",
+      "positive_example": "五段齐全,时长变化原因与贡献用户群都答到。",
+      "negative_example": "缺'归因分析'段,且漏答'增长由哪类用户贡献'。",
       "checks": [
-        {"id": "V1", "label": "关键问题覆盖与深度", "desc": "key_questions 中素材能够支持回答的问题均已回答，不可回答的问题不算遗漏；重要问题获得与其决策重要性相匹配的分析，不出现关键内容浅尝辄止、次要内容过度展开或整体覆盖失衡。", "effect": "漏答可答问题或内容资源分配明显失衡时降档", "optimizer": {"pattern_id": "cover_questions_depth", "directive_hint": "cover_key_claims", "priority": 50}},
-        {"id": "V2", "label": "必需段落齐", "desc": "required_sections 指定的交付模块全部存在，并且包含实质内容。", "effect": "缺少必需段落或内容空泛时降档", "optimizer": {"pattern_id": "cover_sections", "directive_hint": "mece_sections", "priority": 51}},
-        {"id": "V3", "label": "关键 Claim 无遗漏", "desc": "key_claim_ids 中指定的关键事实或结论均在报告中得到覆盖。", "effect": "遗漏关键 Claim 时降档", "optimizer": {"pattern_id": "cover_claims", "directive_hint": "cover_key_claims", "priority": 52}}
+        {
+          "id": "V1",
+          "label": "可答问题全答",
+          "desc": "key_questions 中素材支持的都答到(答不了的不算漏)",
+          "effect": "漏答可答问题→3",
+          "optimizer": {"pattern_id": "cover_key_missed", "directive_hint": "cover_key_claims", "priority": 50}
+        },
+        {
+          "id": "V2",
+          "label": "关键 claim 无遗漏",
+          "desc": "key_claim_ids 都覆盖",
+          "effect": "漏关键claim→3",
+          "optimizer": {"pattern_id": "cover_key_missed", "directive_hint": "cover_key_claims", "priority": 51}
+        },
+        {
+          "id": "V3",
+          "label": "必需段落齐",
+          "desc": "required_sections 全覆盖且有实质内容",
+          "effect": "缺1段→3；缺≥2→2",
+          "optimizer": {"pattern_id": "cover_section_missed", "directive_hint": "mece_sections", "priority": 52}
+        }
       ]
     },
     {
       "name": "expression",
       "name_zh": "表达与受众契合",
-      "scale": [1, 5],
+      "scale": [
+        1,
+        5
+      ],
       "weight": 0.15,
       "hard_floor": null,
       "is_reverse": true,
-      "criteria": "面向高管精炼且易扫读；关键内容结构化呈现；图表规范、完整且自解释；长度适配用户预算；终稿语言严谨易懂；遵守风格禁令。",
-      "anchors": {
-        "5": "表达精炼无重复；关键数据和对比被结构化呈现；图表规范完整且自解释；长度、段落和 bullet 层级适配高管扫读；术语清楚；无中间态措辞和违禁风格。",
-        "4": "总体精炼易读，仅有一处轻微重复、表图缺项、长段或术语解释不足。",
-        "3": "存在多处冗余、长段、图表组织不足、措辞歧义或中间态表达，阅读效率受到影响。",
-        "2": "命中风格红线，或表达与高管终稿明显不符。",
-        "1": "充斥空话、结构难读，核心信息难以识别。"
-      },
-      "positive_example": "同类单位放在表头，正文用短 bullet 呈现结论—证据—含义，必要的不确定性转译为决策边界。",
-      "negative_example": "每个单元格重复单位；正文连续长段；保留“待复算、单一信源待验证”等工作流标签。",
+      "criteria": "面向高管精炼、结论先行、措辞严谨;关键数据用表/图结构化呈现;长度匹配受众;禁用'不是,而是'句式、不堆术语。反向维度防reward hacking。",
       "checks": [
-        {"id": "E1", "label": "精炼与可扫读性", "desc": "直接表达对决策有价值的结论，避免铺垫和无信息增量重复；相同主体、背景、限定条件、口径或单位在不影响理解时合并表达。每个段落或 bullet 原则上承载一个核心意思，并列、递进或多层信息应拆分呈现，不用 bullet 形式包装长段；摘要与正文可重申核心结论，但正文必须增加证据、分析或机制。若只有 Markdown 而无最终版式，以一段一意、明显并列信息是否拆分及是否出现 4 句以上分析长段作为替代判据。", "effect": "多处无效重复、核心长段或明显可拆信息未分层时降档", "optimizer": {"pattern_id": "expr_concise_scannable", "directive_hint": "require_rigorous_wording", "priority": 60}},
-        {"id": "E2", "label": "结构化呈现（表/图）", "desc": "关键数据和多组对比应使用 Markdown 表格或清晰图示呈现，不能埋在长段文字中。", "effect": "明显该表不表、该图不图时降档", "optimizer": {"pattern_id": "expr_nochart", "directive_hint": "require_charts", "priority": 61}},
-        {"id": "E3", "label": "表图规范、完整与自解释性", "desc": "已使用的表图具有清晰标题、必要编号、单位、坐标轴/图例和必要注释，包含完成分析或比较所需的关键对象、指标、时间和数值；读者无需反复回看正文即可理解。同类单位集中放在标题、表头、列名或坐标轴，混合单位分别标清；关键单元格不无说明留空，数据不可得时以“未采集、不适用”等状态及必要原因标注，可比对象采用一致字段和口径。数值真实性、转述忠实和统计口径分别由 T1/T2/T6 判断。", "effect": "表图关键缺项、空值无解释、形式不规范或无法独立理解时降档", "optimizer": {"pattern_id": "expr_chart_quality", "directive_hint": "require_charts", "priority": 62}},
-        {"id": "E4", "label": "遵守用户篇幅预算", "desc": "以用户在开场确认的页数或字数要求为准；用户给页数时按 1 页不超过约 1000 个中文可见字符折算，表格单元格文字计入，Markdown 标记和空白不计；用户未指定时默认 3 页以内 / 3000 字以内。篇幅是上限，不要求凑满；过短造成的内容遗漏由覆盖度判断，不在本 check 重复扣分。", "effect": "明显超过用户篇幅上限或通过注水凑篇幅时降档", "optimizer": {"pattern_id": "expr_length", "directive_hint": "match_exec_length", "priority": 63}},
-        {"id": "E5", "label": "风格禁令", "desc": "禁用“不是……而是……”句式；禁止堆砌“数据驱动、闭环、赋能、范式重构”等无具体信息的空话。专业语境中的必要术语不因关键词机械判错。", "effect": "miss=红线，维度 2 分封顶", "redline": true, "optimizer": {"pattern_id": "expr_bushi", "directive_hint": "ban_bushi_ershi", "priority": 4}},
-        {"id": "E6", "label": "终稿化、严谨与可理解性", "desc": "结论、限定条件、适用范围、百分比、区间、频率、指代词和内外部归属表达无歧义；首次出现的专业术语、缩写、组织特有称谓和“内部”类相对指称给出定义或明确归属。最终汇报不直接暴露“待复算、单一信源待验证、素材不足以恢复统一口径、证据不足建议补充研究”等中间分析或工作流标签；对决策有影响的不确定性应转译为能够和不能得出的结论、决策影响及具体验证动作，低价值过程说明删除或移至附注。", "effect": "歧义、关键术语无法理解或中间态表达明显影响终稿质量时降档", "optimizer": {"pattern_id": "expr_final_readable", "directive_hint": "require_rigorous_wording", "priority": 64}}
-      ]
+        {
+          "id": "E1",
+          "label": "结论先行·措辞严谨",
+          "desc": "结论先行、直击决策，措辞严谨不含糊",
+          "effect": "缺失/通篇铺垫→降到3",
+          "optimizer": {"pattern_id": "expr_rigorous", "directive_hint": "require_rigorous_wording", "priority": 60}
+        },
+        {
+          "id": "E2",
+          "label": "结构化呈现(表/图)",
+          "desc": "关键数据/对比用 markdown 表格或图，而非埋在长段文字里",
+          "effect": "该图不图→降到3",
+          "optimizer": {"pattern_id": "expr_nochart", "directive_hint": "require_charts", "priority": 61}
+        },
+        {
+          "id": "E3",
+          "label": "长度匹配受众",
+          "desc": "长度合 exec(≤1.5 页量级)、不注水",
+          "effect": "严重偏离长度→2封顶",
+          "optimizer": {"pattern_id": "expr_length", "directive_hint": "match_exec_length", "priority": 62}
+        },
+        {
+          "id": "E4",
+          "label": "风格禁令(硬红线)",
+          "desc": "禁用'不是,而是'句式;禁术语堆砌(数据驱动/闭环/赋能/范式重构式空话)",
+          "effect": "命中任一→2封顶",
+          "redline": true,
+          "optimizer": {"pattern_id": "expr_bushi", "directive_hint": "ban_bushi_ershi", "priority": 63}
+        },
+        {
+          "id": "E5",
+          "label": "措辞严谨",
+          "desc": "措辞严谨不含糊、不模棱两可(结论/限定条件清楚)",
+          "effect": "含糊/模棱→降档(真实judge评)",
+          "optimizer": {"pattern_id": "expr_rigorous", "directive_hint": "require_rigorous_wording", "priority": 64}
+        }
+      ],
+      "anchors": {
+        "5": "结论先行直击决策;关键数据/对比用了表格或图;措辞严谨;长度合exec(≤1.5页);无违禁句式无注水。",
+        "4": "基本精炼;有个别可删句,或1处本该用表却用文字。",
+        "3": "一定冗余或轻度术语堆砌,或该可视化的没可视化,或长度偏离受众。",
+        "2": "出现'不是,而是'句式 / 明显冗长套话术语堆砌 / 严重偏离长度(封顶)。",
+        "1": "充斥空话,信息密度极低。"
+      },
+      "positive_example": "用一张3行表呈现Q1/Q2时长、重度/轻度增幅、样本量。",
+      "negative_example": "增长并非来自拉新,而是来自留存加深。(命中'不是,而是'句式)"
     }
   ],
   "aggregate": "weighted_avg",
   "gates": [
-    {"id": "red_line_traceability", "type": "hard_floor", "dimension": "traceability", "floor": 3, "rule": "任一 case traceability < 3 -> 该 case 不合格"},
-    {"id": "no_regression", "type": "no_regression", "drop_tolerance": 0.15, "rule": "候选版本采纳条件：目标维度或 overall 提升，其他维度不回退超过 0.15，且不新增红线失败"},
-    {"id": "structure_guard", "type": "human_review", "dimension": "structure", "floor": 3, "rule": "structure < 3 -> 人工复检"},
-    {"id": "narrative_guard", "type": "human_review", "dimension": "narrative", "floor": 3, "rule": "narrative < 3 -> 人工复检"},
-    {"id": "hack_guard", "type": "human_review", "dimension": "expression", "floor": 3, "rule": "expression < 3 -> 触发人工复检"}
+    {
+      "id": "red_line_traceability",
+      "type": "hard_floor",
+      "dimension": "traceability",
+      "floor": 3,
+      "rule": "任一 case traceability < 3(编造/混用冲突/无据硬结论) -> 该 case 不合格"
+    },
+    {
+      "id": "no_regression",
+      "type": "no_regression",
+      "drop_tolerance": 0.15,
+      "rule": "候选版本采纳条件:目标维度↑ 且 其它维度均不塌(分维度看)"
+    }
   ],
   "target": {
     "traceability": 4.2,
@@ -204,7 +351,6 @@
     "insight": 3.6,
     "coverage": 4.0,
     "expression": 3.8,
-    "overall": 4.0,
-    "judge_human_agreement": 0.85
+    "overall": 4.0
   }
 }

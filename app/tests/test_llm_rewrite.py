@@ -34,6 +34,14 @@ from skill_compiler import compile_session_skill  # noqa: E402
 BASE_SKILL = APP.parent / "skills" / "research-report"
 
 
+def _load_v2_rubric():
+    return json.loads(
+        (HARNESS / "artifacts" / "v2_rubric_research.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
 class _FakeResponse:
     def __init__(self, body):
         self.body = body
@@ -428,7 +436,11 @@ class TestFreeformCompile(unittest.TestCase):
             prompts.append(prompt)
             return replies.pop(0)
 
-        with mock.patch.object(llm_client, "call_llm", side_effect=fake_call):
+        with mock.patch.object(
+            generator_mod,
+            "_build_rubric_research",
+            side_effect=_load_v2_rubric,
+        ), mock.patch.object(llm_client, "call_llm", side_effect=fake_call):
             gen = generator_mod.generate_v0(
                 "面向总裁分析用户增长，所有数据必须可追溯",
                 "research_insight",
@@ -471,6 +483,10 @@ class TestFreeformCompile(unittest.TestCase):
             persist._BASE = tmp
             try:
                 with mock.patch.object(
+                    generator_mod,
+                    "_build_rubric_research",
+                    side_effect=_load_v2_rubric,
+                ), mock.patch.object(
                     llm_client,
                     "call_llm",
                     side_effect=lambda *args, **kwargs: replies.pop(0),
@@ -495,7 +511,7 @@ class TestFreeformCompile(unittest.TestCase):
 
 class TestRedlineGuard(unittest.TestCase):
     def setUp(self):
-        self.rubric = generator_mod._build_rubric_research()
+        self.rubric = _load_v2_rubric()
         self._orig = llm_client.call_llm
 
     def tearDown(self):

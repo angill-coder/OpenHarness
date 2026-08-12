@@ -132,7 +132,7 @@ def build_dataset():
 
 
 def main():
-    rubric = json.load(open(os.path.join(ART_DIR, "rubric_research.json"), encoding="utf-8"))
+    rubric = json.load(open(os.path.join(ART_DIR, "v2_rubric_research.json"), encoding="utf-8"))
     skill0 = build_v0_skill()
     cases = build_dataset()
     backend = backend_mod.get_backend(product_id="research_insight")

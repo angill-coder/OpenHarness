@@ -7,7 +7,7 @@
 
 ## 0. 一句话现状
 
-平台的「调研洞察汇报助手」已具备真实报告生成、逐维 Judge、LLM 自由改写 Optimizer、候选 Gate 和 WebUI 实验闭环。当前主 Rubric 是 **v2.3（六维 25 checks）**；`research-report` Skill 使用四项开场输入（背景、待验证假设、重点素材、报告篇幅）和三段式交付结构。真实项目以 20-case 训练集及独立 testing 数据开展多版本实验；新 Session 会冻结创建时的 Rubric 和 Skill，判断某次实验时必须读取该 Session 的 `state.json` 与 `_session_skills`，不能只看仓库母本。
+平台的「调研洞察汇报助手」已具备真实报告生成、逐维 Judge、LLM 自由改写 Optimizer、候选 Gate 和 WebUI 实验闭环。默认 `rubric_research.json` 保持原版，迭代版 **v2.3（六维 25 checks）** 独立保存在 `v2_rubric_research.json`；`research-report` Skill 使用四项开场输入（背景、待验证假设、重点素材、报告篇幅）和三段式交付结构。真实项目以 20-case 训练集及独立 testing 数据开展多版本实验；新 Session 会冻结创建时的 Rubric 和 Skill，判断某次实验时必须读取该 Session 的 `state.json` 与 `_session_skills`，不能只看仓库文件名推断。
 
 ---
 
@@ -38,7 +38,7 @@
   - `ResearchMockBackend` 六维型：按 23 个 `RESEARCH_DIRECTIVES`（22 质量 + 1 FORBIDDEN 的 buzzword_emphasis）输出**报告文本 + signals**。**signals 是 judge/clustering 的唯一事实源**。
   - `RecordedBackend` 真实型：按 (version, case_id) 查用户粘贴的真实报告文本，signals 为空。
 - `judge.py`：保留 mock/离线评分，并提供 `dim_from_checks` 将真实 check 判定汇总为六维分。每项 `met/partial/miss` 对应 `1/.5/0`，维度分为 `1 + 4 × mean(checks)`；任一红线 check 为 `miss` 时该维封顶 2。
-- `artifacts/rubric_research.json` = 六维 rubric（权重/锚点/gates/target/**checks**）。`artifacts/rubric.json` = 算数字型（勿动）。
+- `artifacts/rubric_research.json` = 默认六维 rubric 原版；`artifacts/v2_rubric_research.json` = v2.3 迭代版（25 checks）；`artifacts/rubric.json` = 算数字型（勿动）。
 - `run_demo_research.py`：**离线自测闭环**（合成多 case + 模拟专家分）→ 校准 0.933、dev overall 2.17→4.56、采纳 12 版、buzzword_emphasis 被 gate 拒。`run_demo.py`：旧产品，2.58→4.75 不回归。**这俩是"闭环逻辑对不对"的试金石，改完 harness 先跑它们。**
 
 ### app/（stdlib HTTP + 单页原生 JS）
@@ -52,7 +52,7 @@
 
 ---
 
-## 3. 六维 Rubric v2.3（research_insight）
+## 3. 六维 Rubric v2.3（research_insight 迭代版）
 
 | 维度(字段) | 权重 | 目标 | 红线/封顶 | checks |
 |---|---|---|---|---|
@@ -63,7 +63,7 @@
 | 覆盖度 `coverage` | 0.08 | ≥4.0 | 答不了的问题不算遗漏 | V1关键问题覆盖与深度 V2必需段落齐 V3关键 Claim 无遗漏 |
 | 表达与受众契合 `expression`（反向） | 0.15 | ≥3.8 | E5 miss → 本维封顶 2；维度 <3 人工复检 | E1精炼易扫读 E2结构化呈现 E3表图规范 E4遵守用户篇幅 E5风格禁令🔴 E6终稿化/严谨/易懂 |
 
-- 机器口径唯一来源是 `harness/artifacts/rubric_research.json`；v2.3 共 **25 条 checks**，红线为 **T1/T2/T3/T5/E5**。讨论文档和历史 Session 可能保存旧版，不得反向覆盖当前母本。
+- v2.3 的机器口径来源是 `harness/artifacts/v2_rubric_research.json`；共 **25 条 checks**，红线为 **T1/T2/T3/T5/E5**。默认 `rubric_research.json` 保持原版，两份文件不得互相覆盖；实际实验以 Session 冻结的 Rubric 为准。
 - 每条 check 先单独判 `met/partial/miss`，再汇成一个 1–5 维度分；overall 为六维加权平均。目标 overall=4.0，Judge↔人工校准门槛=0.85。
 - v2.3 将高度重叠项合并：例如摘要数量/结论性/排序并为 S1，主线/推进并为 N2，趋势/异常校验并为 I3。`noise_source_ids` 等 benchmark 专用检查移出主 Rubric，不再作为独立主 check。
 
@@ -99,7 +99,7 @@
 - `OPENHARNESS_EDITABLE_START/END` 内是 Optimizer 可改写区；四项 intake、三段结构、任务契约和版本 manifest 在结构层冻结。历史 directive（包括 `disclose_sample_bias`、`drop_noise`）仍可作为生成规则存在，但不等同于 v2.3 的独立 check。
 
 ## 5. ⚠️ 致命坑（务必记住）
-1. **母本 Rubric 不会刷新旧 Session**：新 Session 创建时会把 `rubric_research.json` 复制进 `state.json`。修改母本后应重启 server 并新建 Session，或显式迁移目标 Session；禁止批量覆盖历史实验。直接改某个 `state.json` 后也必须重启，才能刷新内存态。
+1. **默认与迭代 Rubric 分文件保存**：新 Session 默认仍把 `rubric_research.json` 复制进 `state.json`；v2.3 位于 `v2_rubric_research.json`，必须在目标实验中显式选择/导入。任何 Rubric 都不会自动刷新旧 Session；直接改某个 `state.json` 后也必须重启，才能刷新内存态。
 2. **Rubric/报告变化会使旧 Judgment 失效**：批量 Judge 写入前后都有版本与 prompt SHA 守卫；不要把旧 `check_judgments.jsonl` 当成当前版本结果。真实结果看 `check_judgments.jsonl`，不是 mock 六维分。
 3. **Judge 默认逐维调用**：`per_dimension` 会保留成功维度并只重试缺失项。遇到部分失败直接重跑同一版本，不要清空已成功结果或另造重复 Session。
 4. **LLM Rewrite 候选不是提前采纳**：`pending_idx` 指向待评候选，`current_idx` 仍是父版；生成和 Judge 完整后才经 Gate 采纳/回滚。页面显示“候选已生成”不等于“已采纳”。
@@ -133,7 +133,7 @@ python3 server.py --host 127.0.0.1 --port <独立端口>
 ---
 
 ## 8. 关键文件地图
-- Rubric 母本：`harness/artifacts/rubric_research.json`（`research_insight`）与 `harness/artifacts/rubric.json`（旧 `report-assistant`），两者互不继承。
+- Rubric 文件：`harness/artifacts/rubric_research.json`（`research_insight` 默认原版）、`harness/artifacts/v2_rubric_research.json`（v2.3 迭代版）与 `harness/artifacts/rubric.json`（旧 `report-assistant`）；各文件独立保存。
 - 生成 Skill 母本：`skills/research-report/SKILL.md` + `skills/research-report/references/instructions.md`；Session 冻结副本位于 `generation_runs/_session_skills/`。
 - 真实 Judge：`app/judge_batch.py`、`app/server.py`、`app/llm_client.py`；结果落 `app/sessions/<sid>/check_judgments.jsonl`。
 - Optimizer/Gate：`app/optimizer02.py`、`app/optimizer_pipeline.py`、`app/session_eval.py`、`app/session_core.py`。
@@ -161,7 +161,7 @@ python3 server.py --host 127.0.0.1 --port <独立端口>
 - **待用户/运维做的基建**：iOA 控制台把 OpenHarness 登记为独立应用（确认 Token=`CRI7…`）；加 nginx server 块反代其域名→`:8080` 并 `proxy_set_header X-Tai-Identity $http_x_tai_identity;`(+`X-Tai-Identity-Mode`)。
 - **重启**：`bash app/start_real.sh --host 0.0.0.0`（Claude 的权限分类器会拦含密钥的启动脚本，须用户自己跑）。
 
-**④ rubric T1 口径调整**：应用户要求"正文不写引用出处、但论断仍须有据可回溯"。改了生成 skill（`skills/research-report/`）与 T1 判据（`harness/artifacts/rubric_research.json`、`app/sessions/real-eval/state.json`、judge 提示词、落地文档）——T1 从"论断挂出处"改为"论断可回溯(有据)，正文不印出处不扣分"。
+**④ rubric T1 口径调整**：应用户要求"正文不写引用出处、但论断仍须有据可回溯"。改了生成 skill（`skills/research-report/`）与 v2 T1 判据（现保存于 `harness/artifacts/v2_rubric_research.json`）、相关 Session 快照、judge 提示词和落地文档——T1 从"论断挂出处"改为"论断可回溯(有据)，正文不印出处不扣分"。
 
 **⑤ 报告生成 skill 母本微调**（`skills/research-report/`，本机路径，未装到 `~/.claude/skills`）：正文不印行内 `[S-xxx]`（改自检时核对可回溯）；禁止把"结论先行/归因"等写作原则字样当小标题写进正文。
 
@@ -186,7 +186,7 @@ python3 server.py --host 127.0.0.1 --port <独立端口>
 
 **迭代记忆（carry-forward，防回退核心，喂给 LLM）**：`optimizer_pipeline.build_optimizer_context()` 装配 {rubric 六维锚点+checks+红线+target、current_best(全文+每维分)、must_preserve(≥target 的维+未失败的 check)、open_failures(failure_report)、history(逐版改动+verdict+overall delta)、tried_rejected、guardrails}。
 
-**红线守卫**（`optimizer02._redline_guard`）：候选生成后、进 WB 生成前，动态读取当前 Session Rubric 中所有 `redline:true` 的 checks，核对候选是否保留对应规则；任一被删则当场拒（不烧生成预算）。v2.3 母本当前为 **T1/T2/T3/T5/E5**，但历史 Session 仍以其冻结 Rubric 为准。
+**红线守卫**（`optimizer02._redline_guard`）：候选生成后、进 WB 生成前，动态读取当前 Session Rubric 中所有 `redline:true` 的 checks，核对候选是否保留对应规则；任一被删则当场拒（不烧生成预算）。v2.3 文件为 **T1/T2/T3/T5/E5**，但每个 Session 仍以其冻结 Rubric 为准。
 
 **freeform 表示与编译**：LLM 产出整段可编辑区正文，落 `skill.instructions.prose` + `mode="freeform"`。母本 `skills/research-report/references/instructions.md` 用 `<!-- OPENHARNESS_EDITABLE_START/END -->` 框住可改写质量方法；结构层的四项 intake、三段结构、任务契约、manifest 和 VERSION_RULES 在标记外，LLM 不可动。`skill_compiler` 的 freeform 分支整体替换可编辑区；无 `mode` 键则走旧 directive 路径。
 

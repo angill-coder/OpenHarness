@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 APP = Path(__file__).resolve().parents[1]
 HARNESS = APP.parent / "harness"
@@ -21,6 +22,7 @@ from judge_batch import (  # noqa: E402
     normalize_judge_strategy,
 )
 import persistence as persist  # noqa: E402
+import generator as generator_mod  # noqa: E402
 from server import (  # noqa: E402
     _build_judge_prompt,
     _judge_parallelism,
@@ -29,6 +31,14 @@ from server import (  # noqa: E402
     _llm_selection,
 )
 from session import Session  # noqa: E402
+
+
+def _load_v2_rubric():
+    return json.loads(
+        (HARNESS / "artifacts" / "v2_rubric_research.json").read_text(
+            encoding="utf-8"
+        )
+    )
 
 
 RUBRIC = {
@@ -909,11 +919,16 @@ class ModelOnlySessionTest(unittest.TestCase):
         self.assertNotIn("human_label", state["current_eval"][0])
 
     def test_real_judge_failure_proposes_pending_version(self):
-        session = Session(
-            "judge-proposal",
-            "生成调研洞察报告",
-            "research_insight",
-        )
+        with mock.patch.object(
+            generator_mod,
+            "_build_rubric_research",
+            side_effect=_load_v2_rubric,
+        ):
+            session = Session(
+                "judge-proposal",
+                "生成调研洞察报告",
+                "research_insight",
+            )
         session.import_data(
             [
                 {

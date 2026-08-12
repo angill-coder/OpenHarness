@@ -26,7 +26,7 @@ class RealFailureAnalysisTest(unittest.TestCase):
             (
                 HARNESS
                 / "artifacts"
-                / "rubric_research.json"
+                / "v2_rubric_research.json"
             ).read_text(encoding="utf-8")
         )
         cls.check_ids = [
@@ -93,6 +93,17 @@ class RealFailureAnalysisTest(unittest.TestCase):
         self.assertEqual(actual_by_dimension, expected_by_dimension)
         self.assertEqual(len(self.check_ids), 25)
         self.assertEqual(redlines, {"T1", "T2", "T3", "T5", "E5"})
+
+    def test_v23_does_not_replace_default_research_rubric(self):
+        default_rubric = json.loads(
+            (
+                HARNESS
+                / "artifacts"
+                / "rubric_research.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(default_rubric["version"], "v0")
+        self.assertNotEqual(default_rubric, self.rubric)
 
     def test_missing_mapping_fails_validation_and_analysis(self):
         rubric = copy.deepcopy(self.rubric)
