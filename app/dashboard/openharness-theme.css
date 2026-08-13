@@ -168,6 +168,14 @@ button:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline-color
   padding:10px 16px;border-bottom:1px solid #333c48!important;background:#1a1f27!important
 }
 .single-case-report-head b,.report-title-with-restore h4{margin:0;color:#f0f3f7!important;font-size:14px!important;letter-spacing:.01em}
+.single-case-report-head .batch,.report-title-with-restore>.batch{
+  display:inline-flex;min-height:30px;align-items:center;padding:6px 10px;
+  border:1px solid #416d9f;border-radius:7px;background:#1f3046;
+  color:#75b5ff!important;font-size:12px;font-weight:700;text-decoration:none
+}
+.single-case-report-head .batch:hover,.report-title-with-restore>.batch:hover{
+  border-color:#5687bd;background:#29425f;color:#b9dcff!important
+}
 .single-case-report .inline-document,.version-case-report .inline-document{
   width:auto;height:auto!important;min-height:0!important;max-height:none!important;flex:1;margin:14px 16px 18px;
   padding:34px clamp(28px,3vw,54px);overflow:auto;border:1px solid #3a4553!important;border-radius:11px!important;

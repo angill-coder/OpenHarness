@@ -8,7 +8,7 @@ server.py — OpenHarness 标注/迭代平台 Web 服务 (stdlib http.server, �
 
 API:
   GET  /                      -> index.html
-  POST /api/session           {requirement, product_id?}  -> 建会话, 生成 v0 skill+rubric
+  POST /api/session           {requirement, product_id?, session_id?}  -> 建会话, 生成 v0 skill+rubric
   GET  /api/session?id=       -> 当前会话完整状态
   POST /api/data              {id, rows?, use_sample?, use_configured?} -> 导入数据
   POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
@@ -25,6 +25,7 @@ API:
 """
 import argparse
 import base64
+import copy
 from contextlib import nullcontext
 import hashlib
 import io
@@ -35,6 +36,7 @@ from pathlib import Path
 import re
 import sys
 import threading
+import time
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -46,6 +48,8 @@ import session as session_mod  # noqa: E402
 import persistence as persist  # noqa: E402
 import llm_client  # noqa: E402
 import dashboard_api  # noqa: E402
+import rubrics_loop as rubrics_loop_mod  # noqa: E402
+from run_experiment_loop import ExperimentLoop  # noqa: E402
 from generation_jobs import (  # noqa: E402
     GenerationJobError,
     GenerationJobService,
@@ -79,8 +83,10 @@ DATA_DIRS = {
 SESSIONS = {}          # sid -> Session
 PREFER_REAL = False
 GENERATION_SERVICE = None
+RUBRICS_LOOP_SERVICE = None
 _JUDGE_ACTIVE = set()
 _JUDGE_ACTIVE_LOCK = threading.Lock()
+_INTERNAL_TOKEN = uuid.uuid4().hex
 
 
 def _session_lock(sid):
@@ -111,6 +117,23 @@ def _release_judge(sid):
 def _active_judge(sid):
     with _JUDGE_ACTIVE_LOCK:
         return sid in _JUDGE_ACTIVE
+
+
+def _rubrics_loop_service():
+    global RUBRICS_LOOP_SERVICE
+    if RUBRICS_LOOP_SERVICE is None:
+        RUBRICS_LOOP_SERVICE = rubrics_loop_mod.RubricsLoopService(
+            Path(ROOT), Path(persist.base_dir()),
+            generation_root=(
+                GENERATION_SERVICE.settings.output_root
+                if GENERATION_SERVICE is not None
+                else Path(
+                    os.environ.get("OPENHARNESS_WB_OUTPUT")
+                    or (Path(ROOT) / "generation_runs")
+                )
+            ),
+        )
+    return RUBRICS_LOOP_SERVICE
 
 
 def _load_sample(product="report-assistant"):
@@ -312,7 +335,7 @@ def _llm_selection(payload, purpose):
     prefix = "OPENHARNESS_%s" % purpose.upper()
     backend = llm_client.normalize_backend(
         payload.get("llm_backend")
-        or os.environ.get(prefix + "_LLM_BACKEND", "workbuddy")
+        or os.environ.get(prefix + "_LLM_BACKEND", "api")
     )
     model = None
     reasoning_effort = None
@@ -424,6 +447,265 @@ def _restore_all():
     return ok
 
 
+def _clone_rubric_experiment_session(source, candidate, experiment):
+    """从当前最佳 Skill 创建隔离 Session；不复制报告和 Judge 结果。"""
+    suffix = experiment["experiment_id"].replace("rx-", "")[:8]
+    base = (source.id + "-rubric-" + suffix)[:64]
+    target_id = base
+    counter = 2
+    while target_id in SESSIONS or persist.load_snapshot(target_id):
+        marker = "-%d" % counter
+        target_id = base[:64 - len(marker)] + marker
+        counter += 1
+    source_entry = source._current()
+    snapshot = source.to_snapshot()
+    rubric = copy.deepcopy(candidate["candidate_rubric"])
+    rubric["version"] = "%s-candidate-%s" % (
+        candidate["parent_rubric_version"], suffix
+    )
+    snapshot.update({
+        "id": target_id,
+        "rubric": rubric,
+        "rubric_source": {
+            "kind": "imported",
+            "filename": "rubrics-loop-%s.json" % candidate["candidate_id"],
+            "version": rubric.get("version"),
+        },
+        "current_idx": 0,
+        "pending_idx": None,
+        "opt_history": [],
+        "generation_imports": {},
+        "optimization_progress": {
+            "best_overall": None,
+            "no_improvement_streak": 0,
+            "evaluated_candidates": 0,
+            "last_candidate": None,
+            "last_candidate_overall": None,
+            "last_outcome": None,
+            "stopped": False,
+            "reason": None,
+        },
+        "datasets": copy.deepcopy(getattr(source, "datasets", {})),
+        "active_dataset_id": getattr(source, "active_dataset_id", None),
+        "versions": [{
+            "skill": source_entry["skill"].to_dict(),
+            "adopted": True,
+            "proposal": None,
+            "failure_report": None,
+            "failure_mapping_error": [],
+            "workflow_block": None,
+            "candidate_state": None,
+            "verdict": None,
+            "verdict_reasons": None,
+        }],
+    })
+    case_ids = set((experiment.get("config") or {}).get("case_ids") or [])
+    if case_ids:
+        snapshot["cases"] = [
+            item for item in snapshot.get("cases") or []
+            if item.get("case_id") in case_ids
+        ]
+    persist.init_cloned_session(source.id, target_id, {
+        "rubrics_loop_experiment_id": experiment["experiment_id"],
+        "rubrics_loop_candidate_id": candidate["candidate_id"],
+    })
+    persist.save_snapshot(target_id, snapshot)
+    persist.append_event(target_id, "rubrics_loop_experiment_created", {
+        "source_session_id": source.id,
+        "candidate_id": candidate["candidate_id"],
+        "rubric_sha256": candidate["candidate_rubric_sha256"],
+    })
+    SESSIONS[target_id] = session_mod.Session.restore(
+        snapshot, prefer_real=PREFER_REAL
+    )
+    return target_id
+
+
+def _start_rubric_experiment_worker(
+    service, source_session_id, candidate_id, experiment_id,
+    experiment_session_id, base_url, config,
+):
+    def run():
+        try:
+            service.update_experiment(source_session_id, experiment_id, {
+                "status": "running",
+                "experiment_session_id": experiment_session_id,
+                "started_at": round(time.time(), 3),
+            })
+            skill_cfg = config.get("skill_optimizer") or {}
+            judge_cfg = config.get("judge") or {}
+            loop = ExperimentLoop(
+                base_url=base_url,
+                session_id=experiment_session_id,
+                poll_seconds=2,
+                request_timeout=900,
+                max_generation_jobs_per_version=3,
+                max_judge_rounds=3,
+                max_optimizer_attempts=3,
+                generation_parallel=config.get("generation_parallel"),
+                judge_parallel=config.get("judge_parallel"),
+                max_settled_candidates=1,
+                generation_model=config.get("runner_model") or None,
+                judge_llm_backend=judge_cfg.get("llm_backend"),
+                judge_llm_model=judge_cfg.get("llm_model"),
+                judge_llm_reasoning_effort=judge_cfg.get("llm_reasoning_effort"),
+                optimizer_llm_backend=skill_cfg.get("llm_backend"),
+                optimizer_llm_model=skill_cfg.get("llm_model"),
+                optimizer_llm_reasoning_effort=skill_cfg.get("llm_reasoning_effort"),
+                request_headers={"X-OpenHarness-Internal-Token": _INTERNAL_TOKEN},
+                log_path=(
+                    Path(persist.base_dir()) / experiment_session_id
+                    / "rubrics_loop_automation.jsonl"
+                ),
+            )
+            result_code = loop.run()
+            final_state = SESSIONS[experiment_session_id].view("rubrics-loop")
+            candidate = service.get_candidate(source_session_id, candidate_id)
+            batch_ids = candidate.get("feedback_batch_ids") or [
+                candidate["source_batch_id"]
+            ]
+            batches = [
+                service.get_batch(source_session_id, batch_id)
+                for batch_id in batch_ids
+            ]
+            target_checks = {}
+            category_by_feedback = {}
+            analyses = candidate.get("cumulative_feedback_analysis") or (
+                candidate.get("feedback_analysis") or []
+            )
+            operations = candidate.get("cumulative_operations") or (
+                candidate.get("operations") or []
+            )
+            for item in analyses:
+                feedback_id = str(item.get("feedback_id") or "")
+                if not feedback_id:
+                    continue
+                category_by_feedback[feedback_id] = item.get("category")
+                target_checks.setdefault(feedback_id, set()).update(
+                    str(value) for value in item.get("existing_check_ids") or []
+                    if value
+                )
+            for operation in operations:
+                check_ids = {
+                    str(operation.get(key))
+                    for key in ("check_id", "target_id", "new_id", "merged_id")
+                    if operation.get(key)
+                }
+                for feedback_id in operation.get("feedback_ids") or []:
+                    target_checks.setdefault(str(feedback_id), set()).update(check_ids)
+            exp_session = SESSIONS[experiment_session_id]
+            final_version = final_state.get("current_version")
+            final_judgments = exp_session.judge_checks.get(final_version, {})
+
+            def check_number(value):
+                return {"met": 1.0, "partial": 0.5, "miss": 0.0}.get(
+                    value, float(value) if isinstance(value, (int, float)) else None
+                )
+
+            feedback_results = []
+            feedback_items = [
+                feedback
+                for batch in batches
+                for feedback in batch.get("feedback") or []
+            ]
+            for feedback in feedback_items:
+                feedback_id = feedback["feedback_id"]
+                category = category_by_feedback.get(feedback_id)
+                check_ids = sorted(target_checks.get(feedback_id) or [])
+                values = []
+                for judgment in final_judgments.values():
+                    checks = (judgment or {}).get("checks") or {}
+                    values.extend(
+                        number for number in (
+                            check_number(checks.get(check_id))
+                            for check_id in check_ids
+                        ) if number is not None
+                    )
+                average = sum(values) / len(values) if values else None
+                if category and category != "rubric":
+                    status = "non_rubric_issue"
+                elif not check_ids:
+                    status = "uncovered"
+                elif average is not None and average >= 0.75:
+                    status = "covered_and_improved"
+                else:
+                    status = "covered_not_improved"
+                feedback_results.append({
+                    "feedback_id": feedback_id,
+                    "category": category,
+                    "check_ids": check_ids,
+                    "final_check_average": average,
+                    "status": status,
+                })
+            source_state = SESSIONS[source_session_id].view("rubrics-loop")
+            service.update_experiment(source_session_id, experiment_id, {
+                "status": "completed" if result_code == 0 else "failed",
+                "result_code": result_code,
+                "final_state": {
+                    "current_version": final_state.get("current_version"),
+                    "best_version": final_state.get("best_version"),
+                    "curve": final_state.get("curve"),
+                    "version_status": final_state.get("version_status"),
+                    "judge_progress": final_state.get("judge_progress"),
+                },
+                "comparison": {
+                    "source_old_rubric_curve": source_state.get("curve"),
+                    "candidate_rubric_curve": final_state.get("curve"),
+                },
+                "feedback_results": feedback_results,
+                "finished_at": round(time.time(), 3),
+            })
+            service.update_candidate(source_session_id, candidate_id, {
+                "status": "awaiting_review",
+                "experiment_id": experiment_id,
+            })
+            if candidate.get("draft_id"):
+                service.update_draft(
+                    source_session_id, candidate["draft_id"],
+                    {"status": "awaiting_review"},
+                )
+        except Exception as exc:
+            service.update_experiment(source_session_id, experiment_id, {
+                "status": "failed",
+                "error": str(exc),
+                "finished_at": round(time.time(), 3),
+            })
+            error_candidate = service.get_candidate(
+                source_session_id, candidate_id
+            )
+            service.update_candidate(source_session_id, candidate_id, {
+                "status": (
+                    "staged" if error_candidate.get("draft_id") else "validated"
+                ),
+                "experiment_error": str(exc),
+            })
+            try:
+                if error_candidate.get("draft_id"):
+                    service.update_draft(
+                        source_session_id, error_candidate["draft_id"],
+                        {"status": "collecting"},
+                    )
+            except Exception:
+                pass
+    threading.Thread(
+        target=run,
+        name="rubrics-loop-%s" % experiment_id,
+        daemon=True,
+    ).start()
+
+
+def _reset_rubric_experiment_candidate(service, session_id, candidate_id):
+    candidate = service.get_candidate(session_id, candidate_id)
+    service.update_candidate(session_id, candidate_id, {
+        "status": "staged" if candidate.get("draft_id") else "validated",
+        "experiment_id": "",
+    })
+    if candidate.get("draft_id"):
+        service.update_draft(
+            session_id, candidate["draft_id"], {"status": "collecting"}
+        )
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass  # 静默
@@ -513,6 +795,9 @@ class Handler(BaseHTTPRequestHandler):
     def _account(self):
         """[鉴权已临时关闭·本地测试] 跳过 iOA 校验, 统一用本地账号。
         恢复 iOA 鉴权: 取消下方注释块 + 顶部 `import auth as auth_mod` + 删掉本地兜底两行。"""
+        if self.headers.get("X-OpenHarness-Internal-Token") == _INTERNAL_TOKEN:
+            self._identity = {"LoginName": "rubrics-loop", "DisplayName": "Rubrics Loop"}
+            return "rubrics-loop"
         # --- iOA 鉴权(临时注释, 本地测试用) ---
         # ident = auth_mod.current_user(self.headers)
         # acct = auth_mod.account_of(ident)
@@ -549,6 +834,20 @@ class Handler(BaseHTTPRequestHandler):
             if not target.is_file():
                 return self._send(404, {"error": "页面文件不存在"})
             return self._send_file(target)
+        if u.path in ("/rubrics-loop", "/rubrics-loop/"):
+            return self._send_file(
+                Path(HERE) / "rubrics_loop_ui" / "index.html"
+            )
+        if u.path.startswith("/rubrics-loop/"):
+            ui_root = (Path(HERE) / "rubrics_loop_ui").resolve()
+            target = (ui_root / u.path[len("/rubrics-loop/"):]).resolve()
+            try:
+                target.relative_to(ui_root)
+            except ValueError:
+                return self._send(403, {"error": "禁止访问 Rubrics Loop 目录之外的文件"})
+            if not target.is_file():
+                return self._send(404, {"error": "页面文件不存在"})
+            return self._send_file(target)
         # 其余 /api/* 一律需要 iOA 身份
         acct = self._account()
         if not acct:
@@ -558,6 +857,72 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"login_name": acct,
                                     "display_name": ident.get("DisplayName", acct),
                                     "email": ident.get("Email", "")})
+        if u.path == "/api/rubrics-loop/context":
+            return self._send(200, _rubrics_loop_service().context())
+        if u.path == "/api/rubrics-loop/report":
+            q = parse_qs(u.query)
+            try:
+                return self._send(200, _rubrics_loop_service().report(
+                    (q.get("session_id") or [""])[0],
+                    (q.get("skill_version") or [""])[0],
+                    (q.get("case_id") or [""])[0],
+                    (q.get("report_sha256") or [""])[0],
+                    (q.get("rubric_sha256") or [""])[0],
+                ))
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+        if u.path == "/api/rubrics-loop/batches":
+            q = parse_qs(u.query)
+            session_id = (q.get("session_id") or [""])[0]
+            batch_id = (q.get("batch_id") or [""])[0]
+            try:
+                value = (
+                    _rubrics_loop_service().get_batch(session_id, batch_id)
+                    if batch_id
+                    else _rubrics_loop_service().list_batches(session_id)
+                )
+                return self._send(200, {"batches": value} if not batch_id else value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+        if u.path == "/api/rubrics-loop/iterations":
+            q = parse_qs(u.query)
+            try:
+                return self._send(200, _rubrics_loop_service().list_iterations(
+                    (q.get("session_id") or [""])[0]
+                ))
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+        if u.path == "/api/rubrics-loop/candidate":
+            q = parse_qs(u.query)
+            try:
+                return self._send(200, _rubrics_loop_service().get_candidate(
+                    (q.get("session_id") or [""])[0],
+                    (q.get("candidate_id") or [""])[0],
+                ))
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+        if u.path == "/api/rubrics-loop/draft":
+            q = parse_qs(u.query)
+            try:
+                session_id = (q.get("session_id") or [""])[0]
+                draft_id = (q.get("draft_id") or [""])[0]
+                value = (
+                    _rubrics_loop_service().get_draft(session_id, draft_id)
+                    if draft_id
+                    else _rubrics_loop_service().active_draft(session_id)
+                )
+                return self._send(200, {"draft": value})
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+        if u.path == "/api/rubrics-loop/experiment":
+            q = parse_qs(u.query)
+            try:
+                return self._send(200, _rubrics_loop_service().get_experiment(
+                    (q.get("session_id") or [""])[0],
+                    (q.get("experiment_id") or [""])[0],
+                ))
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
         if u.path == "/api/local/tree":
             revision, tree = dashboard_api.session_tree(
                 Path(ROOT), self._dashboard_sessions_root()
@@ -568,7 +933,8 @@ class Handler(BaseHTTPRequestHandler):
             session_id = (q.get("session") or [""])[0]
             try:
                 document = dashboard_api.session_summary_document(
-                    self._dashboard_sessions_root(), session_id, Path(ROOT)
+                    self._dashboard_sessions_root(), session_id, Path(ROOT),
+                    self._dashboard_generation_root(),
                 )
                 return self._send(200, document)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -621,6 +987,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._dashboard_sessions_root(),
                     session_id,
                     version,
+                    self._dashboard_generation_root(),
                 )
                 return self._send(200, document)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -639,6 +1006,7 @@ class Handler(BaseHTTPRequestHandler):
                     version,
                     case_id,
                     generation_id,
+                    self._dashboard_generation_root(),
                 )
                 return self._send(200, document)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -682,6 +1050,7 @@ class Handler(BaseHTTPRequestHandler):
                 matched = dashboard_api.generation_case_report_document(
                     Path(ROOT), self._dashboard_sessions_root(),
                     session_id, version, case_id,
+                    self._dashboard_generation_root(),
                 )
                 return self._send(200, matched)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -844,7 +1213,7 @@ class Handler(BaseHTTPRequestHandler):
                             DEFAULT_JUDGE_MAX_RETRIES,
                         )
                     ),
-                    "llm_backends": ["api", "workbuddy", "codex"],
+                    "llm_backends": ["api", "codex", "workbuddy"],
                     "evaluation_models": list(SUPPORTED_WB_MODELS),
                     "evaluation_model_default": DEFAULT_EVALUATION_WB_MODEL,
                     "api_models": list(SUPPORTED_API_MODELS),
@@ -861,7 +1230,7 @@ class Handler(BaseHTTPRequestHandler):
                     "codex_cli_error": codex_config["error"],
                     "judge_llm_backend": os.environ.get(
                         "OPENHARNESS_JUDGE_LLM_BACKEND",
-                        "workbuddy",
+                        "api",
                     ),
                     "judge_wb_model": os.environ.get(
                         "OPENHARNESS_JUDGE_WB_MODEL",
@@ -884,7 +1253,7 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                     "optimizer_llm_backend": os.environ.get(
                         "OPENHARNESS_OPTIMIZER_LLM_BACKEND",
-                        "workbuddy",
+                        "api",
                     ),
                     "optimizer_wb_model": os.environ.get(
                         "OPENHARNESS_OPTIMIZER_WB_MODEL",
@@ -975,6 +1344,224 @@ class Handler(BaseHTTPRequestHandler):
         if not acct:
             return
 
+        if u.path == "/api/rubrics-loop/batches":
+            try:
+                value = _rubrics_loop_service().create_batch(
+                    b.get("session_id"), b.get("report_ref"), acct
+                )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/batches/add-report":
+            try:
+                value = _rubrics_loop_service().add_report(
+                    b.get("session_id"), b.get("batch_id"), b.get("report_ref") or {}
+                )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/feedback/resolve-selection":
+            try:
+                report_ref = b.get("report_ref") or {}
+                value = _rubrics_loop_service().resolve_selection(
+                    b.get("session_id"),
+                    report_ref.get("skill_version"),
+                    report_ref.get("case_id"),
+                    b.get("rendered_text", ""),
+                    report_ref.get("report_sha256", ""),
+                    report_ref.get("rubric_sha256", ""),
+                )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/feedback":
+            try:
+                if b.get("action") == "delete":
+                    value = _rubrics_loop_service().delete_feedback(
+                        b.get("session_id"), b.get("batch_id"), b.get("feedback_id")
+                    )
+                elif b.get("action") == "update":
+                    value = _rubrics_loop_service().update_feedback(
+                        b.get("session_id"), b.get("batch_id"),
+                        b.get("feedback_id"), b.get("content"), acct,
+                    )
+                else:
+                    value = _rubrics_loop_service().add_feedback(
+                        b.get("session_id"), b.get("batch_id"),
+                        b.get("scope"), b.get("content"), b.get("report_ref"),
+                        quote=b.get("quote", ""),
+                        rendered_quote=b.get("rendered_quote", ""),
+                        before_context=b.get("before_context", ""),
+                        after_context=b.get("after_context", ""),
+                        account=acct,
+                    )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path in {
+            "/api/rubrics-loop/candidates",
+            "/api/rubrics-loop/candidates/revise",
+        }:
+            try:
+                backend, model, effort = _llm_selection(b, "rubrics_optimizer")
+                value = _rubrics_loop_service().propose_candidate(
+                    b.get("session_id"), b.get("batch_id"),
+                    {
+                        "llm_backend": backend,
+                        "llm_model": model,
+                        "llm_reasoning_effort": effort,
+                    },
+                    account=acct,
+                    revision_note=b.get("revision_note", ""),
+                    previous_candidate_id=b.get("candidate_id", ""),
+                )
+                return self._send(200, value)
+            except llm_client.LLMClientError as exc:
+                return self._send(502, {"error": "Rubrics Optimizer 调用失败: %s" % exc})
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/candidates/edit":
+            try:
+                value = _rubrics_loop_service().edit_candidate_rubric(
+                    b.get("session_id"),
+                    b.get("candidate_id"),
+                    b.get("candidate_rubric") or {},
+                    acct,
+                )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/candidates/stage":
+            try:
+                value = _rubrics_loop_service().stage_candidate(
+                    b.get("session_id"), b.get("candidate_id"), acct,
+                    bool(b.get("history_conflict_confirmed")),
+                )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/experiments":
+            service = None
+            value = None
+            source = None
+            try:
+                source = self._sess(b.get("session_id"))
+                if not source:
+                    return
+                service = _rubrics_loop_service()
+                retry_experiment_id = str(b.get("experiment_id") or "").strip()
+                if retry_experiment_id:
+                    value = service.retry_experiment(
+                        b.get("session_id"), retry_experiment_id,
+                        b.get("candidate_id"), b.get("config") or {}, acct,
+                        bool(b.get("redline_confirmed")),
+                    )
+                else:
+                    value = service.create_experiment(
+                        b.get("session_id"), b.get("candidate_id"),
+                        b.get("config") or {}, acct,
+                        bool(b.get("redline_confirmed")),
+                    )
+                candidate = service.get_candidate(
+                    source.id, b.get("candidate_id")
+                )
+                if retry_experiment_id:
+                    experiment_session_id = value.get("experiment_session_id")
+                    if experiment_session_id not in SESSIONS:
+                        raise rubrics_loop_mod.RubricsLoopError(
+                            "原验证 Session 不存在，无法原地重试"
+                        )
+                else:
+                    with _session_lock(source.id):
+                        experiment_session_id = _clone_rubric_experiment_session(
+                            source, candidate, value
+                        )
+                value = service.update_experiment(
+                    source.id,
+                    value["experiment_id"],
+                    {
+                        "experiment_session_id": experiment_session_id,
+                        "status": "queued",
+                    },
+                )
+                host, port = self.server.server_address[:2]
+                if host in {"", "0.0.0.0", "::"}:
+                    host = "127.0.0.1"
+                base_url = "http://%s:%s" % (host, port)
+                _start_rubric_experiment_worker(
+                    service,
+                    source.id,
+                    candidate["candidate_id"],
+                    value["experiment_id"],
+                    experiment_session_id,
+                    base_url,
+                    value.get("config") or {},
+                )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                if service and value and source:
+                    service.update_experiment(
+                        source.id, value["experiment_id"],
+                        {"status": "failed", "error": str(exc)},
+                    )
+                    _reset_rubric_experiment_candidate(
+                        service, source.id, b.get("candidate_id")
+                    )
+                return self._send(400, {"error": str(exc)})
+            except Exception as exc:
+                if service and value and source:
+                    service.update_experiment(
+                        source.id, value["experiment_id"],
+                        {"status": "failed", "error": str(exc)},
+                    )
+                    _reset_rubric_experiment_candidate(
+                        service, source.id, b.get("candidate_id")
+                    )
+                return self._send(
+                    500, {"error": "创建验证实验失败: %s" % exc}
+                )
+
+        if u.path == "/api/rubrics-loop/candidates/adopt":
+            try:
+                value = _rubrics_loop_service().adopt_candidate(
+                    b.get("session_id"), b.get("candidate_id"), acct
+                )
+                persist.append_event(b.get("session_id"), "rubric_candidate_adopted", {
+                    "candidate_id": b.get("candidate_id"),
+                    "rubric_version": value["version"],
+                    "rubric_sha256": value["rubric_sha256"],
+                    "account": acct,
+                })
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/candidates/reject":
+            try:
+                value = _rubrics_loop_service().reject_candidate(
+                    b.get("session_id"), b.get("candidate_id"),
+                    b.get("reason", ""), acct,
+                )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/rubrics/set-default":
+            try:
+                value = _rubrics_loop_service().set_default(
+                    b.get("product_id"), b.get("version")
+                )
+                return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
         if u.path == "/api/session":
             req = (b.get("requirement") or "").strip()
             if not req:
@@ -1004,7 +1591,34 @@ class Handler(BaseHTTPRequestHandler):
             stop = b.get("optimizer_stop") or {}
             if not isinstance(stop, dict):
                 return self._send(400, {"error": "optimizer_stop 必须是对象"})
-            sid = uuid.uuid4().hex[:8]
+            requested_sid = (b.get("session_id") or "").strip()
+            if requested_sid and not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", requested_sid
+            ):
+                return self._send(
+                    400,
+                    {
+                        "error": (
+                            "session_id 仅允许 1-64 位字母、数字、点、"
+                            "下划线或连字符，且首位必须是字母或数字"
+                        )
+                    },
+                )
+            sid = requested_sid or uuid.uuid4().hex[:8]
+            if sid in SESSIONS or persist.load_snapshot(sid):
+                return self._send(409, {"error": "会话已存在: %s" % sid})
+            v0_llm_backend = None
+            v0_llm_model = None
+            v0_llm_reasoning_effort = None
+            if v0_strategy == "llm_scratch":
+                try:
+                    (
+                        v0_llm_backend,
+                        v0_llm_model,
+                        v0_llm_reasoning_effort,
+                    ) = _llm_selection(b, "optimizer")
+                except llm_client.LLMClientError as exc:
+                    return self._send(400, {"error": str(exc)})
             try:
                 SESSIONS[sid] = session_mod.Session(
                     sid,
@@ -1015,6 +1629,9 @@ class Handler(BaseHTTPRequestHandler):
                     optimizer_stop=stop,
                     experiment_user=experiment_user,
                     v0_strategy=v0_strategy,
+                    v0_llm_backend=v0_llm_backend,
+                    v0_llm_model=v0_llm_model,
+                    v0_llm_reasoning_effort=v0_llm_reasoning_effort,
                 )
             except llm_client.LLMClientError as e:
                 return self._send(502, {"error": "LLM 起草 v0 失败: %s" % e})

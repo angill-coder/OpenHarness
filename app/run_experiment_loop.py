@@ -77,6 +77,7 @@ def plan_next_action(
     state: Dict[str, Any],
     generation: Dict[str, Any],
     max_generation_jobs_per_version: int,
+    max_no_improvement_streak: int = 0,
 ) -> Dict[str, Any]:
     """纯函数：根据服务端快照决定下一动作，便于测试与审计。"""
     stop = state.get("optimizer_stop") or {}
@@ -84,6 +85,16 @@ def plan_next_action(
         return {
             "action": "stop",
             "reason": stop.get("reason") or "已命中停止条件",
+        }
+    no_improvement_streak = int(stop.get("no_improvement_streak") or 0)
+    if (
+        max_no_improvement_streak > 0
+        and no_improvement_streak >= max_no_improvement_streak
+    ):
+        return {
+            "action": "stop",
+            "reason": "连续 %d 个候选未改善"
+            % no_improvement_streak,
         }
 
     active = generation.get("job")
@@ -165,6 +176,18 @@ class ExperimentLoop:
         generation_parallel: Optional[int] = None,
         judge_parallel: Optional[int] = None,
         max_settled_candidates: Optional[int] = None,
+        max_no_improvement_streak: int = 0,
+        generation_model: Optional[str] = None,
+        llm_backend: Optional[str] = None,
+        llm_model: Optional[str] = None,
+        llm_reasoning_effort: Optional[str] = None,
+        judge_llm_backend: Optional[str] = None,
+        judge_llm_model: Optional[str] = None,
+        judge_llm_reasoning_effort: Optional[str] = None,
+        optimizer_llm_backend: Optional[str] = None,
+        optimizer_llm_model: Optional[str] = None,
+        optimizer_llm_reasoning_effort: Optional[str] = None,
+        request_headers: Optional[Dict[str, str]] = None,
         log_path: Optional[Path] = None,
     ):
         self.base_url = base_url.rstrip("/")
@@ -187,6 +210,25 @@ class ExperimentLoop:
             if max_settled_candidates is None
             else max(1, int(max_settled_candidates))
         )
+        self.max_no_improvement_streak = max(
+            0,
+            int(max_no_improvement_streak),
+        )
+        self.generation_model = generation_model
+        self.llm_backend = llm_backend
+        self.llm_model = llm_model
+        self.llm_reasoning_effort = llm_reasoning_effort
+        self.judge_llm_backend = judge_llm_backend or llm_backend
+        self.judge_llm_model = judge_llm_model or llm_model
+        self.judge_llm_reasoning_effort = (
+            judge_llm_reasoning_effort or llm_reasoning_effort
+        )
+        self.optimizer_llm_backend = optimizer_llm_backend or llm_backend
+        self.optimizer_llm_model = optimizer_llm_model or llm_model
+        self.optimizer_llm_reasoning_effort = (
+            optimizer_llm_reasoning_effort or llm_reasoning_effort
+        )
+        self.request_headers = dict(request_headers or {})
         self.log_path = log_path
         self._last_generation_marker = None
         self._judge_rounds: Dict[str, int] = {}
@@ -214,7 +256,7 @@ class ExperimentLoop:
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         data = None
-        headers = {}
+        headers = dict(self.request_headers)
         if payload is not None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -317,6 +359,8 @@ class ExperimentLoop:
         }
         if self.generation_parallel is not None:
             payload["parallel"] = self.generation_parallel
+        if self.generation_model:
+            payload["model"] = self.generation_model
         result = self.api(
             "/api/generation/start",
             "POST",
@@ -340,6 +384,8 @@ class ExperimentLoop:
         }
         if self.generation_parallel is not None:
             payload["parallel"] = self.generation_parallel
+        if self.generation_model:
+            payload["model"] = self.generation_model
         result = self.api(
             "/api/generation/retry",
             "POST",
@@ -371,6 +417,12 @@ class ExperimentLoop:
         }
         if self.judge_parallel is not None:
             payload["parallel"] = self.judge_parallel
+        if self.judge_llm_backend:
+            payload["llm_backend"] = self.judge_llm_backend
+        if self.judge_llm_model:
+            payload["llm_model"] = self.judge_llm_model
+        if self.judge_llm_reasoning_effort:
+            payload["llm_reasoning_effort"] = self.judge_llm_reasoning_effort
         self.emit(
             "judge_started",
             version=version,
@@ -408,11 +460,14 @@ class ExperimentLoop:
             version=version,
             attempt=attempt,
         )
-        result = self.api(
-            "/api/advance",
-            "POST",
-            {"id": self.session_id},
-        )
+        payload = {"id": self.session_id}
+        if self.optimizer_llm_backend:
+            payload["llm_backend"] = self.optimizer_llm_backend
+        if self.optimizer_llm_model:
+            payload["llm_model"] = self.optimizer_llm_model
+        if self.optimizer_llm_reasoning_effort:
+            payload["llm_reasoning_effort"] = self.optimizer_llm_reasoning_effort
+        result = self.api("/api/advance", "POST", payload)
         advance = result.get("advance_result") or {}
         self.emit(
             "optimizer_finished",
@@ -463,6 +518,19 @@ class ExperimentLoop:
             ),
             max_judge_rounds=self.max_judge_rounds,
             max_optimizer_attempts=self.max_optimizer_attempts,
+            max_no_improvement_streak=(
+                self.max_no_improvement_streak
+            ),
+            generation_model=self.generation_model,
+            llm_backend=self.llm_backend,
+            llm_model=self.llm_model,
+            llm_reasoning_effort=self.llm_reasoning_effort,
+            judge_llm_backend=self.judge_llm_backend,
+            judge_llm_model=self.judge_llm_model,
+            judge_llm_reasoning_effort=self.judge_llm_reasoning_effort,
+            optimizer_llm_backend=self.optimizer_llm_backend,
+            optimizer_llm_model=self.optimizer_llm_model,
+            optimizer_llm_reasoning_effort=self.optimizer_llm_reasoning_effort,
         )
 
         transient_errors = 0
@@ -494,6 +562,7 @@ class ExperimentLoop:
                     state,
                     generation,
                     self.max_generation_jobs_per_version,
+                    self.max_no_improvement_streak,
                 )
                 self.emit(
                     "next_action",
@@ -591,6 +660,22 @@ def main(argv=None):
         help="指定数量的非 v0 候选完成 Gate 判定后退出。",
     )
     parser.add_argument(
+        "--max-no-improvement-streak",
+        type=int,
+        default=0,
+        help="连续若干候选未改善后退出；0 表示不启用。",
+    )
+    parser.add_argument("--generation-model")
+    parser.add_argument("--llm-backend")
+    parser.add_argument("--llm-model")
+    parser.add_argument("--llm-reasoning-effort")
+    parser.add_argument("--judge-llm-backend")
+    parser.add_argument("--judge-llm-model")
+    parser.add_argument("--judge-llm-reasoning-effort")
+    parser.add_argument("--optimizer-llm-backend")
+    parser.add_argument("--optimizer-llm-model")
+    parser.add_argument("--optimizer-llm-reasoning-effort")
+    parser.add_argument(
         "--once",
         action="store_true",
         help="只输出下一动作，不执行变更。",
@@ -626,6 +711,23 @@ def main(argv=None):
             generation_parallel=args.generation_parallel,
             judge_parallel=args.judge_parallel,
             max_settled_candidates=args.max_settled_candidates,
+            max_no_improvement_streak=(
+                args.max_no_improvement_streak
+            ),
+            generation_model=args.generation_model,
+            llm_backend=args.llm_backend,
+            llm_model=args.llm_model,
+            llm_reasoning_effort=args.llm_reasoning_effort,
+            judge_llm_backend=args.judge_llm_backend,
+            judge_llm_model=args.judge_llm_model,
+            judge_llm_reasoning_effort=(
+                args.judge_llm_reasoning_effort
+            ),
+            optimizer_llm_backend=args.optimizer_llm_backend,
+            optimizer_llm_model=args.optimizer_llm_model,
+            optimizer_llm_reasoning_effort=(
+                args.optimizer_llm_reasoning_effort
+            ),
             log_path=log_path,
         )
         return loop.run(once=args.once)

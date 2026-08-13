@@ -68,6 +68,13 @@ def _portable_generation_path(generation_root: Path, raw_path: str) -> Path:
     if "generation_runs" in lowered:
         tail = parts[lowered.index("generation_runs") + 1:]
         candidate = generation_root.joinpath(*tail).resolve()
+    elif "_session_skills" in lowered:
+        # A saved absolute skill_ref may come from another installation whose
+        # output directory had a custom name.  The stable artifact boundary is
+        # `_session_skills`, so relocate that suffix under the configured
+        # generation root instead of trusting the stale host prefix.
+        tail = parts[lowered.index("_session_skills"):]
+        candidate = generation_root.joinpath(*tail).resolve()
     else:
         path = Path(raw).expanduser()
         candidate = (path if path.is_absolute() else generation_root / path).resolve()
@@ -349,8 +356,16 @@ def _portable_trace_string(value: object, case_root: Path) -> str:
     for source in {str(generation_root), generation_root.as_posix()}:
         text = text.replace(source, "runtime:generation_runs")
         text = text.replace(source.replace("\\", "\\\\"), "runtime:generation_runs")
+    # macOS may serialize `/var/...` while Path.resolve() yields
+    # `/private/var/...`; normalize any absolute POSIX prefix that ends at the
+    # stable generation_runs boundary as well.
     text = re.sub(
-        r'(?i)[a-z]:[^"\r\n]*?generation_runs',
+        r'/(?:[^"\\\r\n]+/)*generation_runs',
+        "runtime:generation_runs",
+        text,
+    )
+    text = re.sub(
+        r'(?i)(?<![a-z0-9_])[a-z]:[^"\r\n]*?generation_runs',
         "runtime:generation_runs",
         text,
     )
@@ -933,9 +948,12 @@ def _skill_version_sort_key(path: Path) -> tuple[str, int, str]:
     return prefix.lower(), int(digits or -1), name.lower()
 
 def _generation_session_index(
-    root: Path, sessions_root: Path, session_id: str, state: dict[str, object]
+    root: Path, sessions_root: Path, session_id: str, state: dict[str, object],
+    generation_root: Path | None = None,
 ) -> dict[str, object]:
-    generation_root = (root.resolve() / "generation_runs").resolve()
+    generation_root = (
+        generation_root or (root.resolve() / "generation_runs")
+    ).expanduser().resolve()
     skills_root = (generation_root / "_session_skills" / session_id).resolve()
     skills_root.relative_to(generation_root)
     state_versions = {
@@ -1049,6 +1067,7 @@ def session_runtime_sources(
 
 def session_summary_document(
     sessions_root: Path, session_id: str, root: Path | None = None,
+    generation_root: Path | None = None,
 ) -> dict[str, object]:
     """Return the dashboard's compact, cached Session bootstrap document."""
     session_id = _safe_generation_segment(session_id, "session id")
@@ -1064,7 +1083,12 @@ def session_summary_document(
     fingerprint = (_file_fingerprint(state_path), _file_fingerprint(meta_path),
                    _file_fingerprint(judgment_path),
                    _file_fingerprint(events_path))
-    cache_key = str(session_root).lower() + ("|generation" if root is not None else "")
+    generation_cache_key = (
+        "|generation:" + str(generation_root.expanduser().resolve()).lower()
+        if root is not None and generation_root is not None
+        else "|generation" if root is not None else ""
+    )
+    cache_key = str(session_root).lower() + generation_cache_key
     if root is None:
         with _CACHE_LOCK:
             cached = _SUMMARY_CACHE.get(cache_key)
@@ -1073,7 +1097,9 @@ def session_summary_document(
     state = _read_json_document(state_path)
     compact_state = _compact_state(state)
     if root is not None:
-        generation_index = _generation_session_index(root, sessions_root, session_id, state)
+        generation_index = _generation_session_index(
+            root, sessions_root, session_id, state, generation_root
+        )
         compact_state["versions"] = generation_index["versions"]
         compact_state["cases"] = generation_index["cases"]
         compact_state["generation_version_cases"] = generation_index["version_cases"]

@@ -24,6 +24,7 @@ SUPPORTED_WB_MODELS = (
     "deepseek-v4-pro-ioa",
     "hy3-ioa",
     "deepseek-v4-flash-ioa",
+    "claude-opus-5",
     "claude-opus-4.8-1m",
     "claude-opus-4.8",
     "claude-opus-4.7-1m",

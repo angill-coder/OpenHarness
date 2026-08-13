@@ -125,7 +125,7 @@ function populateCodexReasoningSelect(id,defaultEffort){
 }
 function syncLlmBackendControls(kind){
   const backend=document.getElementById(kind+'LlmBackend');
-  const selected=(backend&&backend.value)||'workbuddy';
+  const selected=(backend&&backend.value)||'api';
   const isWorkbuddy=selected==='workbuddy';
   const isApi=selected==='api';
   const isCodex=selected==='codex';
@@ -139,7 +139,7 @@ function syncLlmBackendControls(kind){
   if(codexReasoningWrap)codexReasoningWrap.style.display=isCodex?'block':'none';
 }
 function readLlmSelection(kind){
-  const backend=(document.getElementById(kind+'LlmBackend')||{}).value||'workbuddy';
+  const backend=(document.getElementById(kind+'LlmBackend')||{}).value||'api';
   const result={llm_backend:backend};
   const inputId=kind+(
     backend==='workbuddy'?'WbModel':backend==='codex'?'CodexModel':'ApiModel'
@@ -562,11 +562,11 @@ function renderGenerationPanel(){
     const judgeBackend=document.getElementById('judgeLlmBackend');
     const optimizerBackend=document.getElementById('optimizerLlmBackend');
     if(judgeBackend&&!judgeBackend.dataset.initialized){
-      judgeBackend.value=GEN_CONFIG.judge_llm_backend||'workbuddy';
+      judgeBackend.value=GEN_CONFIG.judge_llm_backend||'api';
       judgeBackend.dataset.initialized='1';
     }
     if(optimizerBackend&&!optimizerBackend.dataset.initialized){
-      optimizerBackend.value=GEN_CONFIG.optimizer_llm_backend||'workbuddy';
+      optimizerBackend.value=GEN_CONFIG.optimizer_llm_backend||'api';
       optimizerBackend.dataset.initialized='1';
     }
     populateEvaluationModelSelect('judgeWbModel',GEN_CONFIG.judge_wb_model);

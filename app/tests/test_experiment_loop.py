@@ -24,12 +24,14 @@ def _state(
     pending_judge=None,
     judge_complete=False,
     advance=True,
+    no_improvement_streak=0,
 ):
     return {
         "current_version": "v2",
         "optimizer_stop": {
             "stopped": stopped,
             "reason": "达到停止条件" if stopped else None,
+            "no_improvement_streak": no_improvement_streak,
         },
         "judge_progress": {
             "complete": judge_complete,
@@ -53,6 +55,19 @@ class ExperimentLoopPlanTest(unittest.TestCase):
             3,
         )
         self.assertEqual(action["action"], "stop")
+
+    def test_external_no_improvement_limit_stops(self):
+        action = plan_next_action(
+            _state(
+                no_improvement_streak=3,
+                missing_reports=["c1"],
+            ),
+            {"job": {"active": True, "job_id": "j1"}},
+            3,
+            3,
+        )
+        self.assertEqual(action["action"], "stop")
+        self.assertIn("连续 3 个候选", action["reason"])
 
     def test_attaches_active_generation(self):
         action = plan_next_action(
@@ -153,6 +168,65 @@ class ExperimentLoopPlanTest(unittest.TestCase):
         loop._advance({"version": "v1"})
 
         self.assertEqual(loop._optimizer_attempts["v1"], 0)
+
+    def test_judge_and_optimizer_receive_selected_codex_model(self):
+        loop = ExperimentLoop(
+            "http://127.0.0.1:8080",
+            "president-report-llm",
+            judge_parallel=20,
+            llm_backend="codex",
+            llm_model="gpt-5.6-sol",
+            llm_reasoning_effort="medium",
+        )
+        calls = []
+
+        def fake_api(path, method="GET", payload=None, timeout=None):
+            calls.append((path, method, payload))
+            if path == "/api/run_judge_batch":
+                return {"summary": {"status": "completed"}}
+            return {
+                "advance_result": {
+                    "status": "proposed",
+                    "version": "v2",
+                }
+            }
+
+        loop.api = fake_api
+        loop.emit = lambda *args, **kwargs: None
+        loop._run_judge({"version": "v1", "pending_case_ids": []})
+        loop._advance({"version": "v1"})
+
+        for _, _, payload in calls:
+            self.assertEqual(payload["llm_backend"], "codex")
+            self.assertEqual(payload["llm_model"], "gpt-5.6-sol")
+            self.assertEqual(payload["llm_reasoning_effort"], "medium")
+
+    def test_judge_and_optimizer_can_use_different_backends(self):
+        loop = ExperimentLoop(
+            "http://127.0.0.1:8080",
+            "president-report-llm",
+            judge_llm_backend="codex",
+            judge_llm_model="gpt-5.6-sol",
+            optimizer_llm_backend="workbuddy",
+            optimizer_llm_model="claude-opus-5",
+        )
+        calls = []
+
+        def fake_api(path, method="GET", payload=None, timeout=None):
+            calls.append((path, payload))
+            if path == "/api/run_judge_batch":
+                return {"summary": {"status": "completed"}}
+            return {"advance_result": {"status": "proposed", "version": "v2"}}
+
+        loop.api = fake_api
+        loop.emit = lambda *args, **kwargs: None
+        loop._run_judge({"version": "v1", "pending_case_ids": []})
+        loop._advance({"version": "v1"})
+
+        self.assertEqual("codex", calls[0][1]["llm_backend"])
+        self.assertEqual("gpt-5.6-sol", calls[0][1]["llm_model"])
+        self.assertEqual("workbuddy", calls[1][1]["llm_backend"])
+        self.assertEqual("claude-opus-5", calls[1][1]["llm_model"])
 
 
 if __name__ == "__main__":

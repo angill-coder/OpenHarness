@@ -32,7 +32,7 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("result.llm_reasoning_effort=effort", source)
         self.assertIn("GEN_CONFIG.codex_reasoning_effort_default||'medium'", source)
         self.assertIn(
-            '<option value="workbuddy" selected>WorkBuddy CLI</option>',
+            '<option value="api" selected>API</option>',
             html,
         )
 
@@ -153,3 +153,165 @@ class FrontendContractTest(unittest.TestCase):
         self.assertNotIn("getElementById('backendBadge')", source)
         self.assertNotIn("getElementById('sessBadge')", source)
         self.assertIn('<nav class="product-nav"', html)
+
+    def test_rubrics_loop_keeps_three_model_configs_independent(self):
+        source = (APP / "rubrics_loop_ui" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        html = (APP / "rubrics_loop_ui" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        for prefix in ("optimizer", "skill", "judge"):
+            self.assertIn('id="%sBackend"' % prefix, html)
+            self.assertIn('id="%sModel"' % prefix, html)
+            self.assertIn('id="%sEffort"' % prefix, html)
+        self.assertIn("modelPayload('optimizer')", source)
+        self.assertIn("modelPayload('skill')", source)
+        self.assertIn("modelPayload('judge')", source)
+        self.assertIn("$(prefix+'Effort').value", source)
+        self.assertIn("['api','codex','workbuddy']", source)
+        self.assertIn("||'api'", source)
+
+    def test_rubrics_loop_uses_runner_model_select_and_plain_validation_label(self):
+        source = (APP / "rubrics_loop_ui" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        html = (APP / "rubrics_loop_ui" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('<select id="runnerModel">', html)
+        self.assertNotIn('<input id="runnerModel"', html)
+        self.assertIn("state.config.models||state.config.evaluation_models", source)
+        self.assertIn("runnerDefault=state.config.model", source)
+        self.assertIn("$('runnerModel').value.trim()", source)
+        self.assertIn("验证新 Rubrics", html)
+        self.assertIn("查看验证实验详情", html)
+        self.assertNotIn("打开现有 Skill Loop", html)
+        self.assertIn("existingExperiment?'查看验证实验详情':'验证新 Rubrics'", source)
+        self.assertIn("location.href='/?id='+encodeURIComponent(experimentSessionId)", source)
+        self.assertIn("result.status==='failed'?'重试验证实验'", source)
+        self.assertIn("experiment_id:retrying?state.experiment.experiment_id:null", source)
+        self.assertNotIn("配置累计草案验证实验", source)
+        self.assertIn("function confirmRedlineChanges(candidate)", source)
+        self.assertIn("if(!changes.length)return true", source)
+        self.assertIn("设为红线：", source)
+        self.assertIn("取消红线：", source)
+        self.assertIn("红线会影响维度封顶和最终得分", source)
+        self.assertNotIn("如有红线变化，确认已审核", source)
+
+    def test_rubrics_loop_uses_reading_and_annotation_layout(self):
+        source = (APP / "rubrics_loop_ui" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        html = (APP / "rubrics_loop_ui" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn('class="version-item" open', source)
+        self.assertIn('id="judgeScore"', html)
+        self.assertIn('id="currentReportTools"', html)
+        self.assertIn("本轮反馈", html)
+        self.assertNotIn("Feedback Batch", html)
+        self.assertNotIn("开始新一轮", html)
+        self.assertNotIn("跨报告共性意见", html)
+        self.assertIn('id="feedbackInput"', html)
+        self.assertIn('id="feedbackScope"', html)
+        self.assertIn("继续批注其他报告", html)
+        self.assertIn("提交已有批注", html)
+        self.assertIn("state.selectedQuote?'inline':'report'", source)
+        self.assertIn("右侧会出现批注输入框", source)
+        self.assertIn("Enter 添加反馈 · Shift+Enter 换行", html)
+        self.assertIn("Rubrics Optimizer 模型设置", html)
+        self.assertIn('id="optimizerRunStatus"', html)
+        self.assertIn("event.key==='Enter'&&!event.shiftKey", source)
+        self.assertIn("data-edit-feedback", source)
+        self.assertIn('id="historyGroups"', html)
+        self.assertIn("/api/rubrics-loop/iterations", source)
+        self.assertIn("restoreWorkflow()", source)
+        self.assertIn("data-open-iteration", source)
+        self.assertNotIn("restoreDraft()", source)
+        self.assertIn("state.batch||{report_refs:[],feedback:[]}", source)
+        self.assertIn('<div class="md-table"><table><thead><tr>', source)
+        self.assertIn("replace(/\\*\\*([^*]+)\\*\\*/g", source)
+
+        styles = (APP / "rubrics_loop_ui" / "styles.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("body .selector{position:static;grid-column:1/-1;max-height:460px}", styles)
+        self.assertIn("body .report-panel{grid-column:1}", styles)
+        self.assertIn("body .batch-panel{grid-column:2", styles)
+
+    def test_rubrics_loop_candidate_review_is_readable_and_diffable(self):
+        source = (APP / "rubrics_loop_ui" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        html = (APP / "rubrics_loop_ui" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        styles = (APP / "rubrics_loop_ui" / "styles.css").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("候选 Rubrics 审核", html)
+        self.assertLess(
+            html.index("Rubrics 迭代历史"),
+            html.index('id="candidatePanel"'),
+        )
+        self.assertIn(
+            'id="candidatePanel" class="panel candidate-panel hidden"', html
+        )
+        self.assertIn('id="closeCandidateReview"', html)
+        self.assertIn("反馈处理结果", html)
+        self.assertIn("Rubrics 变更对照", html)
+        self.assertIn('id="candidateRubricTable"', html)
+        self.assertIn('<details class="candidate-rubric-section">', html)
+        self.assertNotIn('<details class="candidate-rubric-section" open>', html)
+        self.assertLess(html.index('class="review-action-section"'), html.index('class="candidate-rubric-section"'))
+        self.assertIn("高级编辑：查看或修改原始 JSON", html)
+        self.assertNotIn("查看或修改候选 Rubrics JSON", html)
+        self.assertIn("function candidateDiff", source)
+        self.assertIn("function renderCandidateAnalysis", source)
+        self.assertIn("function renderCandidateChanges", source)
+        self.assertIn("function renderCandidateTable", source)
+        self.assertIn("现有 Rubrics 已覆盖 · 无需修改", source)
+        self.assertIn("属于任务配置 · 不修改通用 Rubrics", source)
+        self.assertIn("修改前", source)
+        self.assertIn("修改后", source)
+        self.assertIn("<th>维度</th><th>Check ID</th><th>Check 内容</th>", source)
+        self.assertNotIn('<th>红线</th>', source)
+        self.assertIn("changed-row", styles)
+        self.assertIn("diff-sides", styles)
+        self.assertIn("height:clamp(360px,58vh,560px)", styles)
+        self.assertIn('id="rubricFileInput"', html)
+        self.assertIn("/api/rubric/import", source)
+        self.assertIn("默认 Rubric 文件和其他 Session 未修改", source)
+        self.assertIn("更换当前 Session Rubric", html)
+        self.assertIn('id="stageCandidate"', html)
+        self.assertIn("暂存到待验证草案", html)
+        self.assertIn("/api/rubrics-loop/candidates/stage", source)
+        self.assertIn("待验证 Rubrics 草案", source)
+        self.assertIn("working_parent_rubric", source)
+        self.assertIn("requestedCandidate=query.get('candidate_id')", source)
+        self.assertIn("if(active.batch_id&&!active.candidate_id)", source)
+        self.assertNotIn("groupIndex===0?' open'", source)
+        self.assertIn("history-iteration${selected?' selected':''}", source)
+        self.assertIn('<section class="history-group">', source)
+        self.assertNotIn('<details class="history-group"', source)
+        self.assertIn(".history-group>header", styles)
+        self.assertIn('class="history-feedback-item${hasQuote?', source)
+        self.assertIn("当时选中的原文", source)
+        self.assertIn("history-quote-tooltip", source)
+        self.assertIn(".history-feedback-item.has-quote:hover", styles)
+        self.assertIn("/api/rubrics-loop/feedback/resolve-selection", source)
+        self.assertIn("result.markdown_quote", source)
+        self.assertIn("rendered_quote:renderedQuote", source)
+        self.assertIn("已选中 Markdown 原文", html)
+        self.assertIn("悬浮查看原文批注", source)
+        self.assertIn("当时选中的 Markdown 原文", source)
+        self.assertIn("analysis-quote-tooltip", source)
+        self.assertIn(".analysis-item.scoped{border-left-color:#687482}", styles)
+        self.assertIn(".analysis-item.scoped .analysis-head span{color:#a6b0bd}", styles)
+        self.assertNotIn(".analysis-item.scoped{border-left-color:#d29b50}", styles)
+        self.assertIn("只替换当前 Session 的 Rubric", html)
+        self.assertIn("function sortCaseIdsByFileName", source)
+        self.assertIn("localeCompare(String(caseFileName(session,left))", source)
+        self.assertIn("body .topbar .brand{font-size:16px", styles)
+        self.assertIn("body .topbar nav a{display:inline-flex", styles)
