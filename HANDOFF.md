@@ -273,4 +273,5 @@ python3 server.py --host 127.0.0.1 --port <独立端口>
 - 断点续跑是硬约束：Skill Loop 完成后先落 `loop_completed_at`；AI 验收失败时只重试验收，不重跑 Runner/Judge。每条 Feedback 独立落盘，重试只补未完成条目。服务重启后，旧的 queued/running Experiment 会自动标记为可从断点重试。
 - 同一 Candidate + Rubric SHA 禁止重复创建验证实验，失败必须原地重试原 Experiment Session，避免重复消耗 Runner/Judge/Optimizer token。
 - Rubrics Loop 第三阶段现为“验证与决策”，展示 Skill 迭代进度、Feedback AI 验收证据和三个人工动作：采纳新 Rubrics、继续优化、保留原 Rubrics。
+- 重复验收测试可用 `app/restore_rubrics_loop_fixture.py`：服务停止时先 dry-run 查看将归档的验证 Experiment/Session，再加 `--apply` 恢复已保存的 pre-validation fixture；旧状态会移动到 runtime 的 `_restore_archives`，不会直接删除。
 - 关键文件：`app/feedback_acceptance.py`、`app/rubrics_loop.py`、`app/server.py`、`app/rubrics_loop_ui/`、`app/tests/test_feedback_acceptance.py`。
