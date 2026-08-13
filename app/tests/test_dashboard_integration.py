@@ -69,6 +69,31 @@ class DashboardDataContractTest(unittest.TestCase):
 
             self.assertEqual(expected.resolve(), resolved)
 
+    def test_dataset_resolution_selects_full_version_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            expected = root / "data" / "v12 中文资料" / "data.json"
+            expected.parent.mkdir(parents=True)
+            expected.write_text("{}", encoding="utf-8")
+            configured = root / "legacy.json"
+            configured.write_text("{}", encoding="utf-8")
+
+            resolved = dashboard_api.resolve_dataset_path(
+                root,
+                configured=configured,
+                data_version="v12 中文资料",
+            )
+
+            self.assertEqual(expected.resolve(), resolved)
+
+    def test_runtime_sources_keep_full_selected_data_id(self):
+        sources = dashboard_api.session_runtime_sources(
+            "exp-1", {"experiment_data": "v12_real_package"}
+        )
+
+        self.assertIn("runtime:data/v12_real_package/", sources["raw_package"])
+
+
     def test_custom_sessions_directory_drives_case_source_lookup(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -112,9 +137,15 @@ class DashboardDataContractTest(unittest.TestCase):
             (case_root / "structured_data.json").write_text(
                 json.dumps(structured_payload), encoding="utf-8"
             )
+            nested_source = source / "nested" / "brief.txt"
+            nested_source.parent.mkdir()
+            nested_source.write_text("material", encoding="utf-8")
             dataset.write_text(json.dumps({"cases": [{
                 "case_id": "case-1",
-                "input_files": [{"source": "training_data/case-1/source"}],
+                "input_files": [
+                    {"source": "training_data/case-1/structured_data.json"},
+                    {"source": "training_data/case-1/source/nested/brief.txt"},
+                ],
             }]}), encoding="utf-8")
             sessions = root / "sessions"
             session = sessions / "exp-1"
@@ -130,8 +161,12 @@ class DashboardDataContractTest(unittest.TestCase):
                 root, sessions, dataset, "exp-1", "case-1"
             )
             self.assertEqual(structured_payload, structured["case"])
+            _, source_roots = dashboard_api.case_source_roots(
+                root, sessions, dataset, "exp-1", "case-1"
+            )
             self.assertEqual(structured_payload, document["metadata"])
             self.assertEqual("structured_data", document["document_type"])
+            self.assertEqual([source.resolve()], source_roots)
             self.assertEqual(1, document["evidence_count"])
             self.assertEqual(
                 "runtime:data/configured/training_data/case-1/structured_data.json",
@@ -247,6 +282,10 @@ class DashboardDataContractTest(unittest.TestCase):
             sessions = root / "runtime-sessions"
             jobs = sessions / "session-a" / "generation_jobs"
             jobs.mkdir(parents=True)
+            (jobs.parent / "state.json").write_text(json.dumps({
+                "versions": [{"version": "v2"}],
+                "cases": [{"case_id": "case-a"}],
+            }), encoding="utf-8")
             generation_root = Path(tmp) / "portable-generation-output"
             artifact = (
                 generation_root / "_session_skills" / "session-a"
@@ -257,8 +296,21 @@ class DashboardDataContractTest(unittest.TestCase):
             (artifact / "references" / "instructions.md").write_text(
                 "portable instructions", encoding="utf-8"
             )
+            case_root = (
+                generation_root / "gen-a" / "case-run" / "cases" / "case-a"
+            )
+            case_root.mkdir(parents=True)
+            (generation_root / "gen-a" / "generation_result.json").write_text(
+                json.dumps({
+                    "generation_id": "gen-a",
+                    "session_id": "session-a",
+                    "skill_version": "v2",
+                    "cases": [{"openharness_case_id": "case-a",
+                               "attempts": [{"wb_run_id": "case-run"}]}],
+                }), encoding="utf-8")
             (jobs / "job-a.json").write_text(json.dumps({
                 "skill_version": "v2",
+                "generation_id": "gen-a",
                 "skill_mode": "session_artifact",
                 "skill_ref": (
                     "C:/old/install/custom-output/_session_skills/"
@@ -278,6 +330,16 @@ class DashboardDataContractTest(unittest.TestCase):
             self.assertEqual("portable skill", document["skill_md"])
             self.assertEqual(
                 "portable instructions", document["instruction_md"]
+            )
+            summary = dashboard_api.session_summary_document(
+                sessions, "session-a", root, generation_root=generation_root
+            )
+            self.assertEqual(
+                ["v2"], [item["version"] for item in summary["state"]["versions"]]
+            )
+            self.assertEqual(
+                ["case-a"],
+                summary["state"]["generation_version_cases"]["v2"],
             )
     def test_session_summary_uses_generation_skill_versions_and_case_directories(self):
         with tempfile.TemporaryDirectory() as tmp:

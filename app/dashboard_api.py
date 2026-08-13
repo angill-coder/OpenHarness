@@ -15,6 +15,7 @@ HARNESS = Path(__file__).resolve().parents[1] / "harness"
 if str(HARNESS) not in sys.path:
     sys.path.insert(0, str(HARNESS))
 
+from data_packages import resolve_data_json  # noqa: E402
 import judge as judge_mod  # noqa: E402
 
 
@@ -933,9 +934,12 @@ def _skill_version_sort_key(path: Path) -> tuple[str, int, str]:
     return prefix.lower(), int(digits or -1), name.lower()
 
 def _generation_session_index(
-    root: Path, sessions_root: Path, session_id: str, state: dict[str, object]
+    root: Path, sessions_root: Path, session_id: str, state: dict[str, object],
+    generation_root: Path | None = None,
 ) -> dict[str, object]:
-    generation_root = (root.resolve() / "generation_runs").resolve()
+    generation_root = (
+        generation_root or (root.resolve() / "generation_runs")
+    ).expanduser().resolve()
     skills_root = (generation_root / "_session_skills" / session_id).resolve()
     skills_root.relative_to(generation_root)
     state_versions = {
@@ -1001,13 +1005,7 @@ def session_runtime_sources(
     marker = state.get("experiment_data") or state.get("product_id") or "v1"
     if isinstance(marker, dict):
         marker = marker.get("id") or marker.get("label") or "v1"
-    data_version = next(
-        (
-            version for version in ("v1", "v2", "v3")
-            if version in str(marker).lower()
-        ),
-        "v1",
-    )
+    data_version = str(marker).strip() or "v1"
     session_ref = "runtime:sessions/" + session_id
     data_ref = "runtime:data/" + data_version
     return {
@@ -1049,6 +1047,7 @@ def session_runtime_sources(
 
 def session_summary_document(
     sessions_root: Path, session_id: str, root: Path | None = None,
+    generation_root: Path | None = None,
 ) -> dict[str, object]:
     """Return the dashboard's compact, cached Session bootstrap document."""
     session_id = _safe_generation_segment(session_id, "session id")
@@ -1064,7 +1063,10 @@ def session_summary_document(
     fingerprint = (_file_fingerprint(state_path), _file_fingerprint(meta_path),
                    _file_fingerprint(judgment_path),
                    _file_fingerprint(events_path))
-    cache_key = str(session_root).lower() + ("|generation" if root is not None else "")
+    cache_key = str(session_root).lower() + (
+        "|generation:" + str(generation_root or "default").lower()
+        if root is not None else ""
+    )
     if root is None:
         with _CACHE_LOCK:
             cached = _SUMMARY_CACHE.get(cache_key)
@@ -1073,7 +1075,9 @@ def session_summary_document(
     state = _read_json_document(state_path)
     compact_state = _compact_state(state)
     if root is not None:
-        generation_index = _generation_session_index(root, sessions_root, session_id, state)
+        generation_index = _generation_session_index(
+            root, sessions_root, session_id, state, generation_root
+        )
         compact_state["versions"] = generation_index["versions"]
         compact_state["cases"] = generation_index["cases"]
         compact_state["generation_version_cases"] = generation_index["version_cases"]
@@ -1262,8 +1266,20 @@ def _existing_source_roots(
             else (dataset_root / source).resolve()
         )
         source.relative_to(dataset_root)
-        if source.is_dir() and source.name.lower() == "source":
-            roots.append(source)
+        source_root = next(
+            (
+                parent for parent in (source, *source.parents)
+                if parent.name.lower() == "source"
+            ),
+            None,
+        )
+        if (
+            source_root is not None
+            and source_root.is_dir()
+            and source_root not in roots
+        ):
+            source_root.relative_to(dataset_root)
+            roots.append(source_root)
     return roots
 
 def resolve_dataset_path(
@@ -1271,11 +1287,14 @@ def resolve_dataset_path(
     configured: object = None,
     data_version: str | None = None,
 ) -> Path | None:
-    normalized = str(data_version or "v1").strip().lower()
-    version = next(
-        (item for item in ("v1", "v2", "v3") if item in normalized),
-        "v1",
-    )
+    selected = str(data_version or "v1").strip()
+    try:
+        return resolve_data_json(root / "data", selected)
+    except (OSError, ValueError):
+        pass
+    normalized = selected.lower()
+    matched = re.search(r"v\d+", normalized)
+    version = matched.group(0) if matched else "v1"
     suffix = version.upper()
     candidates = [
         configured,
@@ -1372,7 +1391,11 @@ def case_structured_document(
         root, sessions_root, dataset_path, session_id, case_id
     )
     payload = json.loads(path.read_text(encoding="utf-8"))
-    version = dataset_root.name if dataset_root.name.lower() in {"v1", "v2", "v3"} else None
+    version = (
+        dataset_root.name
+        if re.match(r"^v\d+", dataset_root.name, re.IGNORECASE)
+        else None
+    )
     return {
         "case": payload,
         "source": "runtime:data/" + (version or "configured") + "/" + path.relative_to(dataset_root).as_posix(),

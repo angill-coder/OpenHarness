@@ -18,7 +18,7 @@ The Dashboard resolves runtime artifacts relative to the OpenHarness repository 
 | Raw source package | `data/<data_version>/<training-data-directory>/<case_id>/source/` |
 | Complete Case Metadata / Structured Data | `data/<data_version>/<training-data-directory>/<case_id>/structured_data.json` |
 
-The training-data directory name is discovered from the selected version's `data.json` `input_files` mapping. This supports the existing v1/v2/v3 package directory names without hard-coding a machine-specific absolute path.
+The training-data directory name is discovered from the selected package's `data.json` `input_files` mapping. Any first-level `v<number>*` package accepted by the Data tabs uses the same resolver; no package name or machine-specific absolute path is hard-coded in the primary lookup.
 
 ## Exact-link rules
 
@@ -43,4 +43,4 @@ The initial Session Summary contains compact experiment descriptors, the generat
 - `conversation.md` and `results.json` when the generation-chain panel opens.
 - `structured_data.json` and source file listings when the data panel opens.
 
-Runtime data (`generation_runs/`, `app/sessions/`, Data v1/v2/v3, and source packages) remains local and must not be included in the Dashboard PR.
+Runtime data (`generation_runs/`, `app/sessions/`, selected `v<number>*` Data packages, and source packages) remains local and must not be included in the Dashboard PR. A Data package is immutable once referenced by a Session; publish changed contents under a new package name.

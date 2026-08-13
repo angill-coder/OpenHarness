@@ -168,7 +168,10 @@ class TestLLMClientErrors(unittest.TestCase):
         with mock.patch.object(
             llm_client,
             "discover_command",
-            return_value=("/tmp/workbuddy",),
+            return_value=(
+                "C:/Program Files/WorkBuddy/WorkBuddy.exe",
+                "C:/Program Files/WorkBuddy/resources/cli/bin/codebuddy",
+            ),
         ):
             with mock.patch.object(
                 llm_client.subprocess,
@@ -204,6 +207,43 @@ class TestLLMClientErrors(unittest.TestCase):
             environment["CODEBUDDY_MEMORY_RELEVANCE_DISABLED"],
             "1",
         )
+        self.assertEqual(
+            environment["ELECTRON_RUN_AS_NODE"],
+            "1",
+        )
+
+    def test_workbuddy_backend_reports_authentication_required(self):
+        event = json.dumps({
+            "type": "assistant",
+            "message": {
+                "model": "deepseek-v4-pro-ioa",
+                "content": [{
+                    "type": "text",
+                    "text": "Authentication required. Please use /login command",
+                }],
+            },
+        })
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=event + "\n",
+            stderr="",
+        )
+        with mock.patch.object(
+            llm_client,
+            "discover_command",
+            return_value=("/tmp/workbuddy",),
+        ), mock.patch.object(
+            llm_client.subprocess,
+            "run",
+            return_value=completed,
+        ):
+            with self.assertRaisesRegex(
+                llm_client.LLMClientError,
+                "WorkBuddy CLI 未登录",
+            ):
+                llm_client.call_llm(
+                    "judge prompt", backend="workbuddy", retries=0
+                )
 
     def test_workbuddy_backend_rejects_unknown_model(self):
         with self.assertRaises(llm_client.LLMClientError) as ctx:

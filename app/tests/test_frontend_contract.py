@@ -57,8 +57,10 @@ class FrontendContractTest(unittest.TestCase):
     def test_frontend_accepts_unified_cases_document(self):
         source = (APP / "app.js").read_text(encoding="utf-8")
         html = (APP / "index.html").read_text(encoding="utf-8")
-        self.assertIn("use_configured:true", source)
-        self.assertIn("configuredDataBtn", html)
+        self.assertIn("api('/api/data/options','GET')", source)
+        self.assertIn("data_id:dataId", source)
+        self.assertIn('id="dataTabs"', html)
+        self.assertNotIn("configuredDataBtn", html)
         self.assertIn("JSON.parse(raw)", source)
 
     def test_frontend_imports_session_local_rubric_json(self):
