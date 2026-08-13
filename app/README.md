@@ -24,7 +24,7 @@ the Dashboard does not maintain per-user paths or Session ID allowlists.
 
 每次实验变更都会即时写入 `state.json`，报告追加到 `outputs.jsonl`，Judge 结果追加到
 `check_judgments.jsonl`（兼容旧 `judgments.jsonl`）。看板每 2 秒检查文件树摘要；摘要变化后重新读取对应会话并刷新版本、Case、报告和评分。`GET /api/local/config` 可用于检查当前生效的物理目录、数据集路径和允许读取的文件契约。
-Data v1, v2, and v3 all use this same Session pipeline. A Runner import writes the
+Every selected `v<number>*` Data package uses this same Session pipeline. A Runner import writes the
 report plus its compact `generation_trace` into the corresponding `outputs.jsonl`
 row. A Judge import writes checks, reasoning, hashes, and `judge_trace` into the
 corresponding `check_judgments.jsonl` row. The Dashboard therefore has no
@@ -35,6 +35,7 @@ owner-specific or data-version-specific ingestion branch.
 默认配置已经对应当前仓库；需要覆盖时设置：
 
 ```bash
+# 以下 V1/V2/V3 变量仅供未记录 experiment_data 的旧 Session 兼容；新 Session 使用 Data 选项卡
 export OPENHARNESS_WB_DATASET_V1=../data/research-report/v1/data.json
 export OPENHARNESS_WB_DATASET_V2=../data/research-report/v2/data.json
 export OPENHARNESS_WB_DATASET_V3=../data/research-report/v3/data.json
@@ -82,9 +83,9 @@ export OPENHARNESS_OPTIMIZER_CODEX_REASONING_EFFORT=medium
 Codex 调用使用非交互、临时会话和只读沙箱；Prompt 通过 stdin 传入，最终文本
 通过 `--output-last-message` 回收，不写入 OpenHarness 工作区。
 
-调研汇报数据统一安装在 `data/research-report/v1|v2|v3/`，每个目录的 `data.json` 是 Runner、Judge 和 Dashboard 共用的唯一入口。Session `meta.json` 中的 `experiment_data.id` 决定使用 v1、v2 还是 v3；原始 source 始终以 `data.json` 所在目录为相对路径根。这些目录已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查三个实际路径。
+Data 选项卡只扫描 `data/` 下第一层、以 `v+数字` 开头且包含 `data.json` 的目录。选中的目录名写入 Session `state.json#experiment_data`；Runner、Judge 和 Dashboard 统一通过 `data_packages.resolve_data_json()` 从 `data/<experiment_data>/data.json` 读取，source 和 structured data 均以该目录为相对路径根。已被 Session 使用的 Data 包视为不可变；内容变化时应新建一个 `v+数字` 目录，避免运行记录和 Dashboard 缓存指向变化中的输入。
 
-`OPENHARNESS_WB_DATASET_V1/V2/V3` 可分别覆盖三个入口。旧的 `OPENHARNESS_WB_DATASET` 仍保留兼容；若设置，会作为未单独配置版本的统一 fallback。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
+`OPENHARNESS_WB_DATASET` 和旧的 V1/V2/V3 配置仅作为未选择 Data 的历史 Session、样例或手工导入流程的兼容 fallback。
 
 报告生成和 Judge 的默认并发均为 20。当前版本不设置人为安全上限；实际并发不会超过待处理 case 数量，并受本机资源、WB CLI 和模型服务容量约束。
 
@@ -104,7 +105,7 @@ Web UI 可为每次报告生成任务从 WorkBuddy 支持列表中选择模型�
 ## 页面输入（左列自上而下）
 
 1. **需求描述 → 生成 V0**：填一段对产品的描述，点「生成 V0」。调研洞察产品固定读取 `skills/research-report` 唯一基线，并按基线实际内容初始化已启用 directive；其它产品仍由 generator 生成 v0。
-2. **导入数据**：调研报告可直接点「加载当前 WB 数据集」，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `human_report` 保存人工报告，但不会发送给 WB 生成模型或模型 Judge；Judge 使用 `structured_data` 核验报告。
+2. **导入数据**：从 Data 选项卡选择一个 `v+数字` 数据目录，也可粘贴 JSONL、JSON 数组或 `openharness-wb/v1` 的 `{cases:[...]}`。统一数据中的 `human_report` 保存人工报告，但不会发送给 WB 生成模型或模型 Judge；Judge 使用 `structured_data` 核验报告。
 3. **一键真实生成**：中列「真实运行 · WB CLI」点击「一键生成并导入报告」，前端显示逐 case 进度；case 启动后立即显示为生成中，无有效报告自动额外重试 3 次，每份成功报告产出后立即导入冻结版本。
 4. **批量模型 Judge**：点击「批量 Judge 全部 case」。系统以有限并发为每个 case 单独调用模型，并把逐-check结果汇总为六维分。
 
@@ -187,7 +188,8 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 |-----------|------|
 | `POST /api/session` `{requirement, product_id?}` | 建会话，生成 v0 |
 | `GET /api/session?id=` | 当前会话完整状态 |
-| `POST /api/data` `{id, rows? / use_sample?}` | 导入数据 |
+| `GET /api/data/options` | 扫描可用的 Data 目录 |
+| `POST /api/data` `{id, data_id? / rows? / use_sample?}` | 导入数据 |
 | `POST /api/rubric` `{id, weights?, target?}` | 编辑 rubric（存新版本）|
 | `POST /api/rubric/import` `{id, rubric, filename?}` | 校验并把完整 rubric JSON 导入当前 Session，不覆盖默认文件 |
 | `POST /api/advance` `{id}` | 全部 case 模型 Judge 完成后生成下一版 skill |

@@ -267,6 +267,12 @@ def _workbuddy_environment(command: tuple[str, ...]) -> dict[str, str]:
     environment["CODEBUDDY_MEMORY_RELEVANCE_DISABLED"] = "1"
     environment["CODEBUDDY_MEMORY_EXTRACTION_DISABLED"] = "1"
     environment["CODEBUDDY_TEAM_MEMORY_ENABLED"] = "0"
+    if (
+        len(command) > 1
+        and Path(command[0]).name.lower() == "workbuddy.exe"
+        and Path(command[1]).name.lower() == "codebuddy"
+    ):
+        environment["ELECTRON_RUN_AS_NODE"] = "1"
     workbuddy_home = os.environ.get("OPENHARNESS_WB_HOME")
     if workbuddy_home:
         environment["CODEBUDDY_CONFIG_DIR"] = str(
@@ -297,6 +303,10 @@ def _parse_workbuddy_output(raw: str) -> str:
         result = collector.result.get("result")
         if isinstance(result, str):
             content = result.strip()
+    if content.startswith("Authentication required"):
+        raise LLMClientError(
+            "WorkBuddy CLI 未登录；请在交互式 WorkBuddy CLI 中运行 /login"
+        )
     if not content:
         raise LLMClientError("WorkBuddy CLI 未返回可用的 assistant 文本")
     return content

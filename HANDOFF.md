@@ -1,6 +1,6 @@
 # OpenHarness 交接文档（HANDOFF）
 
-> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-08-11（见文末 §12 增量）。
+> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-08-13（见文末 §13 增量）。
 > 用户要求：**一律用简体中文交流**（曾误用日语被纠正）。
 
 ---
@@ -78,9 +78,10 @@
 ## 4. 数据资产与会话（现状）
 
 - `data/research_assistant/dataset.jsonl` 保留 3 条早期真实尺子（DS 时长、Surge AI、AI 产品留存）及坏样本/人工校准资产，主要用于离线回归和历史校准，不再是唯一正式实验入口。
-- 当前真实项目数据按 `data/research-report/v1|v2|v3/data.json` 管理，这些运行数据默认被 Git 忽略。Session `meta.json.experiment_data.id` 决定数据版本；`OPENHARNESS_WB_DATASET_V1/V2/V3` 可分别覆盖路径，旧 `OPENHARNESS_WB_DATASET` 仅作 fallback。
+- 当前真实项目数据按仓库 `data/` 下第一层的 `v+数字` 开头目录管理，例如 `data/v4_20260810_real_project_package/data.json`。WebUI Data 选项卡自动发现这些目录；选中值冻结到 Session `state.json#experiment_data`。Runner、Judge 和 Dashboard 必须统一调用 `app/data_packages.py::resolve_data_json()` 解析 `data/<experiment_data>/data.json`，不要各自复制目录名正则或版本映射。`OPENHARNESS_WB_DATASET_V1/V2/V3` 与 `OPENHARNESS_WB_DATASET` 只保留为未选择 Data 的旧会话兼容回退。
 - **不要凭目录名猜正在使用的数据**：启动后调用 `GET /api/generation/config`，核对 dataset、Skill、CLI 和可移植输出根。20-case 训练集与 testing 数据必须使用不同 `data.json`/Session，不能混写评测结果。
 - 每个 case 的 `data.json` 是 Runner/Judge/Dashboard 共用入口，包含 turns、input_files、delivery_constraints 等。写作 Agent 读取 `materials/00_structured_data.json`；若有 ground truth，允许在构造阶段补充/纠错该文件，但 ground truth 本身不得作为额外文件暴露给写作 Agent。
+- Data 包一旦被 Session 引用即视为不可变；内容变化时创建新的 `v+数字` 目录，不覆盖原目录。这样 Session、生成产物、Judge 和 Dashboard 始终指向同一批输入，也无需增加缓存失效逻辑。
 - `app/sessions/` 中的会话是历史快照，不应假定数量固定。常见历史会话包括 `research-calib`、`research-run`、`president-report-llm`、`3d8fe03d` 等；新实验应新建 Session，避免修改旧实验的 Rubric、Skill 或评分。
 - `make_bad_variants.py` 与 `bad_variants.*.jsonl` 是早期缺陷校准工具；其中 selection bias、noise 等标签可能仍用于 benchmark，但不代表 v2.3 存在同名独立 check。
 
@@ -262,3 +263,49 @@ python3 server.py --host 127.0.0.1 --port <独立端口>
 - PR 分支：`codex/rubric-v23-and-structured-data`；目标 Main；包含 v2.2、用户篇幅、v2.3 和 Structured Data 清洗四个功能 commit，未重复包含 PR #23 的 Codex Provider。
 - 相关回归：App 96 项、Harness 30 项通过；Python compileall、`node --check app/app.js`、`git diff --check` 通过。
 - 当前 Main 基线有两项 Dashboard 路径契约测试同样失败；本机安装的 macOS WorkBuddy 还会影响一项 Windows CLI 发现测试。相关文件未被 PR #24 修改，不能把这三项误判为本次回归。
+
+---
+
+## 13. 2026-08-13 增量（Data 选项卡、统一输入路径、可移植运行目录与 Dashboard 联动）
+
+**目标与边界**：把“加载当前 WB 数据集”改为 Data 选项卡，并让 Runner、Judge、Dashboard 全链路使用所选 Data。按用户要求采用最小侵入式方案：只支持目录，不支持压缩包；不新增数据注册表或多套版本映射；旧会话继续走兼容回退。
+
+### 13.1 唯一 Data 契约
+
+- `app/data_packages.py` 是唯一的数据包发现与解析模块：只扫描 `data/` 第一层，目录名须匹配 `^v\d+` 且顶层存在 `data.json`；按数字版本自然排序。目录名后缀可包含英文、中文、空格、点、横线等，路径分隔符和越界路径会被拒绝。
+- Data 选项卡通过 `GET /api/data/options` 获取候选；选择后，`POST /api/data` 将完整目录名写入 `state.json#experiment_data`，并从对应 `data.json` 加载 case。`state.json#experiment_data` 是版本 ID，不是文件路径。
+- Runner、Judge 与 Dashboard 都从 `state.json#experiment_data` 出发，并统一调用 `resolve_data_json(data_root, data_id)`；不要在调用方新增 `if v4/v5`、目录名正则或静态 source map。
+- 只认 `data/<experiment_data>/data.json` 中声明的 case 数。某个 Data 目录即使额外存有周报或其他文件，只要未进入该 `data.json` 的 cases，就不会增加 WebUI 的“导入数据”数量。
+
+### 13.2 Source、Structured Data 与 Dashboard
+
+- 每个 case 的 `input_files.source` 相对所选 Data 包解析；Runner 将这些原始资料交给报告生成流程。Structured Data 从 source 所在 case 目录旁的 `structured_data.json` 唯一定位，支持 source 下的嵌套子目录，不能靠全局文件名猜测。
+- Dashboard 会话 data 类型读取 `state.json#experiment_data`；case 展开后的 Structured Data 和原始资料包也使用该 Session 对应的数据包，不再固定读取 v1/v3。运行来源文案使用 `runtime:data/<experiment_data>/...`。
+- `dashboard_api.resolve_dataset_path()` 先调用统一解析器解析精确选择值，失败时才尝试旧 configured/env 路径，因而新 Data 优先、历史 Session 仍可打开。
+- Dashboard 的报告、Skill、生成 trace 和 metrics 使用与生成任务相同的 generation root，避免短输出目录启用后仍去仓库内 `generation_runs/` 查找。
+
+### 13.3 Windows 长路径与可移植输出
+
+- 生成根可通过 `OPENHARNESS_WB_OUTPUT` 指向较短的本地目录；`generation_jobs.py` 和 Dashboard 服务端读取同一变量。这是可配置运行策略，不把某台机器的绝对路径写进代码或 Git。
+- Runner 的临时工作目录已压缩目录层级和名称，减少 Windows CLI 遇到长路径的概率；生成产物仍记录可移植引用，Dashboard 会在当前 generation root 下恢复实际路径。
+- Windows 本地验证使用仓库外短输出根；提交时不要写入个人绝对路径、PID、端口、token 或 CLI 登录信息。
+
+### 13.4 Judge Provider
+
+- `llm_client.py` 支持 `api`、`workbuddy`、`codex` 三种 backend。Codex Judge 通过无状态 CLI 调用，使用临时只读工作目录；可用 `OPENHARNESS_CODEX_CLI_PATH` 覆盖可执行文件发现，但不得提交个人安装路径或认证文件。
+- Judge 输出必须包含 rubric 要求的 `checks` 对象；逐维结果可续跑缺失维度。Dashboard 最近调用信息从真实 Judgment 记录读取，不能用当前 UI 选择值冒充历史调用方式。
+- 本次用于验证的既有 Session Judgment 记录显示 backend 为 WorkBuddy；Codex 通路已接入代码和测试，但不要把历史 WorkBuddy 结果误写为 Codex 结果。
+
+### 13.5 验证基线
+
+- 相关 Python/前端检查通过：`python -m py_compile`、`node --check app/app.js`、`node --check app/dashboard/local-realtime-loader.js`、`git diff --check`。
+- Data、生成、Judge、Dashboard、前端契约和 legacy fallback 共 133 项相关单测通过。App 全量发现为 146 项，其中 145 项通过；唯一收集错误来自 `run_experiment_loop.py` 在 Windows 导入 Unix-only `fcntl`，与本次 Data 改造无关。Harness 全量 50 项中 47 项通过；其余 3 项为 Windows 环境基线问题（Codex 可执行格式 1 项、测试默认 GBK 解码 UTF-8 文件 2 项），未涉及本次改动文件。
+- 实际 API 验证：`GET /api/data/options` 返回 v3/v4；选择 `v4_20260810_real_project_package` 的 Session 可在 20/20 case 中定位 Structured Data 与原始资料包；抽查 case 的 Structured Data 来自 v4，原始资料包返回 8 个文件。
+- 回归测试覆盖复杂合法目录名（如 `v12 中文资料`）、所选 Data 优先于旧 configured 路径、嵌套 source、短 generation root 和 Dashboard 运行来源。
+
+### 13.6 后续 GitHub 提交注意事项
+
+- 当前工作分支为 `codex/fix-dashboard-path-contract`，远端为 `https://github.com/angill-coder/OpenHarness.git`；本节记录的是尚未提交的本地改造，提交前重新查看 `git status` 和完整 diff。
+- 应提交业务代码、测试及文档；不要提交 `.runtime/`、`server-*.log`、本地输出根、生成报告、Session 运行快照、Data 原始资料包、token、登录状态或个人绝对路径。
+- 主要新增文件是 `app/data_packages.py` 与 `app/tests/test_data_packages.py`；其余改动集中在 Data 选项卡、Session 字段持久化、生成/Judge 数据解析、Dashboard 路径、Codex CLI 与对应测试。提交时应按功能核对，避免把无关工作区文件混入。
+- 不要删除 v1/v2/v3 的 legacy fallback；它只服务未记录 `experiment_data` 的历史 Session。新功能一律走统一解析器。

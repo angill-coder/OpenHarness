@@ -42,7 +42,12 @@ from model_config import (  # noqa: E402
     DEFAULT_GENERATION_WB_MODEL,
     SUPPORTED_WB_MODELS,
 )
+
+
 import persistence as persist  # noqa: E402
+from data_packages import resolve_data_json  # noqa: E402
+
+
 def _read_trace_json(path: Path, default):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -252,12 +257,6 @@ class GenerationSettings:
         return dict(self.dataset_paths).get(key, self.dataset_path)
 
     def validate(self) -> None:
-        configured = self.dataset_paths or (("v1", self.dataset_path),)
-        for data_version, dataset_path in configured:
-            if not dataset_path.expanduser().is_file():
-                raise GenerationJobError(
-                    "WB %s dataset missing: %s" % (data_version, dataset_path)
-                )
         if self.skill_name or not self.skill_path:
             raise GenerationJobError(
                 "Session Skill 版本演进必须配置唯一基础 skill_path"
@@ -448,6 +447,10 @@ class GenerationJobService:
             )
 
     def dataset_path_for_session(self, session_id: str) -> Path:
+        session = self.sessions.get(session_id)
+        data_id = getattr(session, "experiment_data", None)
+        if data_id:
+            return resolve_data_json(ROOT / "data", data_id)
         metadata = persist.load_meta(session_id) or {}
         marker = metadata.get("experiment_data") or metadata.get("data_version") or "v1"
         if isinstance(marker, dict):
@@ -723,6 +726,11 @@ class GenerationJobService:
             )
         missing_dataset = sorted(set(requested) - set(dataset))
         if missing_dataset:
+            if getattr(session, "experiment_data", None):
+                raise GenerationJobError(
+                    "所选 Data 不包含 Session case: "
+                    + ", ".join(missing_dataset)
+                )
             if set(missing_dataset) != set(requested):
                 raise GenerationJobError(
                     "data.json 仅覆盖部分 Session case，缺少: "

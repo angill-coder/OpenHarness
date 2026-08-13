@@ -220,8 +220,33 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertNotIn("echo", settings.models)
         self.assertEqual(settings.models, SUPPORTED_WB_MODELS)
 
-    def test_session_metadata_routes_to_versioned_dataset(self):
+    def test_session_state_routes_to_selected_data_package(self):
         v2_dataset = self.root / "v2" / "data.json"
+        v2_dataset.parent.mkdir()
+        v2_dataset.write_text("{}", encoding="utf-8")
+        self.session.experiment_data = "v2"
+        settings = GenerationSettings(
+            dataset_path=self.dataset,
+            output_root=self.root / "runs-routed",
+        )
+        service = GenerationJobService(
+            {"test-session": self.session},
+            settings=settings,
+            runner_func=lambda *_args, **_kwargs: None,
+        )
+
+        with patch(
+            "generation_jobs.resolve_data_json",
+            return_value=v2_dataset.resolve(),
+        ) as resolver:
+            self.assertEqual(
+                service.dataset_path_for_session("test-session"),
+                v2_dataset.resolve(),
+            )
+        resolver.assert_called_once_with(APP.parent / "data", "v2")
+
+    def test_legacy_session_metadata_still_routes_versioned_dataset(self):
+        v2_dataset = self.root / "legacy-v2" / "data.json"
         v2_dataset.parent.mkdir()
         v2_dataset.write_text("{}", encoding="utf-8")
         meta_path = self.root / "sessions" / "test-session" / "meta.json"
@@ -230,19 +255,29 @@ class GenerationJobServiceTest(unittest.TestCase):
         meta_path.write_text(json.dumps(metadata), encoding="utf-8")
         settings = GenerationSettings(
             dataset_path=self.dataset,
-            output_root=self.root / "runs-routed",
+            output_root=self.root / "runs-legacy-routed",
             dataset_paths=(("v1", self.dataset), ("v2", v2_dataset)),
         )
         service = GenerationJobService(
             {"test-session": self.session},
-            settings=settings,
+            settings,
             runner_func=lambda *_args, **_kwargs: None,
         )
 
         self.assertEqual(
-            service.dataset_path_for_session("test-session"),
             v2_dataset.resolve(),
+            service.dataset_path_for_session("test-session"),
         )
+
+    def test_selected_data_survives_snapshot_restore(self):
+        self.session.experiment_data = "v2_real"
+
+        snapshot = self.session.to_snapshot()
+        restored = Session.restore(snapshot)
+
+        self.assertEqual("v2_real", restored.experiment_data)
+        self.assertEqual("v2_real", restored.view("local")["experiment_data"])
+
 
     def test_batch_import_is_idempotent_and_evaluates_once(self):
         calls = 0

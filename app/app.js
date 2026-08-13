@@ -6,6 +6,7 @@
 let DIMS=["data_accuracy","completeness","insight","conciseness"];
 let ZH={data_accuracy:"数据准确性",completeness:"完整性",insight:"洞察质量",conciseness:"简洁性"};
 let SID=null, STATE=null;
+let DATA_OPTIONS=[];
 let GEN_JOB=null, GEN_CONFIG=null, GEN_POLL=null;
 let JUDGE_SUMMARY=null, JUDGE_RESULTS=[], JUDGE_RUNNING=false, JUDGE_POLL=null;
 const GEN_TERMINAL_SEEN=new Set();
@@ -225,11 +226,25 @@ document.getElementById('sampleBtn').onclick=async()=>{
   const j=await api('/api/data','POST',{id:SID,use_sample:true});
   STATE=j; render(); toast('已导入内置样例：'+j.n_cases+' 条');
 };
-document.getElementById('configuredDataBtn').onclick=async()=>{
+async function selectData(dataId){
   if(!SID){toast('请先生成 V0');return;}
-  const j=await api('/api/data','POST',{id:SID,use_configured:true});
-  STATE=j; render(); toast('已加载当前 WB 数据集：'+j.n_cases+' 条');
-};
+  const j=await api('/api/data','POST',{id:SID,data_id:dataId});
+  STATE=j; render(); toast(`已加载 ${dataId}：${j.n_cases} 条`);
+}
+function renderDataTabs(){
+  const el=document.getElementById('dataTabs');
+  if(!el)return;
+  if(!DATA_OPTIONS.length){
+    el.innerHTML='<span class="small mut">未发现包含 data.json 的 v+数字目录</span>';
+    return;
+  }
+  el.innerHTML=DATA_OPTIONS.map(dataId=>
+    `<button type="button" class="${STATE&&STATE.experiment_data===dataId?'active':''}" data-data-id="${esc(dataId)}">${esc(dataId)}</button>`
+  ).join('');
+  el.querySelectorAll('[data-data-id]').forEach(button=>{
+    button.onclick=()=>selectData(button.dataset.dataId);
+  });
+}
 document.getElementById('importBtn').onclick=async()=>{
   if(!SID){toast('请先生成 V0');return;}
   const raw=document.getElementById('dataInput').value.trim();
@@ -687,6 +702,7 @@ function render(){
   if(!STATE)return;
   if(STATE.dims)DIMS=STATE.dims;
   if(STATE.dim_zh)ZH=STATE.dim_zh;
+  renderDataTabs();
   const v0StrategyLabel=STATE.v0_strategy==='llm_scratch'
     ?'LLM 从零起草（需求 + Rubric）'
     :'从基础 Skill 开始';
@@ -953,6 +969,11 @@ document.getElementById('refreshSessBtn').onclick=loadSessions;
         :('无法读取 WB 运行配置：'+(e.message||'未知错误'))
     };
   }
+  try{
+    const data=await api('/api/data/options','GET');
+    DATA_OPTIONS=Array.isArray(data.options)?data.options:[];
+  }catch(e){DATA_OPTIONS=[];}
+  renderDataTabs();
   renderGenerationPanel();
   await loadSessions();
   const qid=new URLSearchParams(location.search).get('id');

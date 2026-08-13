@@ -96,6 +96,7 @@ class SessionCore:
         self.id = sid
         self.requirement = requirement
         self.product_id = product_id
+        self.experiment_data = None
         self.experiment_user = str(experiment_user or "").strip()
         self.optimizer_mode = optimizer_mode or "switch_search"
         self.v0_strategy = v0_strategy or "base_skill"
@@ -443,6 +444,7 @@ class SessionCore:
         """可序列化的持久态: 只存 durable 输入, 不存可重算的派生量。"""
         return {
             "id": self.id, "requirement": self.requirement, "product_id": self.product_id,
+            "experiment_data": getattr(self, "experiment_data", None),
             "optimizer_mode": getattr(self, "optimizer_mode", "switch_search"),
             "experiment_user": getattr(self, "experiment_user", ""),
             "v0_strategy": getattr(self, "v0_strategy", "base_skill"),
@@ -487,6 +489,7 @@ class SessionCore:
         self.id = snap["id"]
         self.requirement = snap["requirement"]
         self.product_id = snap["product_id"]
+        self.experiment_data = snap.get("experiment_data")
         self.optimizer_mode = snap.get("optimizer_mode", "switch_search")
         self.experiment_user = str(snap.get("experiment_user") or "").strip()
         self.v0_strategy = snap.get("v0_strategy", "base_skill")
@@ -631,6 +634,7 @@ class SessionCore:
             "session_id": self.id,
             "requirement": self.requirement,
             "product_id": self.product_id,
+            "experiment_data": getattr(self, "experiment_data", None),
             "account": account,
             "experiment_user": getattr(self, "experiment_user", ""),
             "backend": self.backend.name,

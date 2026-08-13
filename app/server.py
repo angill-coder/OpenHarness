@@ -10,7 +10,8 @@ API:
   GET  /                      -> index.html
   POST /api/session           {requirement, product_id?}  -> 建会话, 生成 v0 skill+rubric
   GET  /api/session?id=       -> 当前会话完整状态
-  POST /api/data              {id, rows?, use_sample?, use_configured?} -> 导入数据
+  GET  /api/data/options      -> list first-level v<number>* Data packages
+  POST /api/data              {id, data_id? / rows? / use_sample?} -> 导入数据
   POST /api/rubric            {id, weights?, target?}  -> 编辑 rubric(存新版本)
   POST /api/rubric/import     {id, rubric, filename?}  -> 导入 rubric 到当前会话
   POST /api/advance           {id, llm_backend?, llm_model?, llm_reasoning_effort?}  -> 生成下一版 skill(optimizer+gate)
@@ -46,6 +47,7 @@ import session as session_mod  # noqa: E402
 import persistence as persist  # noqa: E402
 import llm_client  # noqa: E402
 import dashboard_api  # noqa: E402
+from data_packages import list_data_packages, resolve_data_json  # noqa: E402
 from generation_jobs import (  # noqa: E402
     GenerationJobError,
     GenerationJobService,
@@ -76,6 +78,7 @@ DATA_DIRS = {
     "research_insight": os.path.join(ROOT, "data", "research_assistant"),
 }
 
+DATA_ROOT = Path(ROOT) / "data"
 SESSIONS = {}          # sid -> Session
 PREFER_REAL = False
 GENERATION_SERVICE = None
@@ -134,15 +137,29 @@ def _load_structured_data(cases, dataset_path):
     for source_case in cases:
         case = dict(source_case)
         case_id = str(case.get("case_id") or "")
-        candidates = set()
+        explicit_candidates = set()
+        inferred_candidates = set()
         for item in case.get("input_files") or []:
             if not isinstance(item, dict) or not item.get("source"):
                 continue
             source = Path(str(item["source"])).expanduser()
             if not source.is_absolute():
                 source = (dataset_root / source).resolve()
-            if source.name == "source":
-                candidates.add(source.parent / "structured_data.json")
+            if source.name.lower() == "structured_data.json":
+                explicit_candidates.add(source)
+                continue
+            source_root = next(
+                (
+                    parent for parent in (source, *source.parents)
+                    if parent.name.lower() == "source"
+                ),
+                None,
+            )
+            if source_root is not None:
+                inferred_candidates.add(
+                    source_root.parent / "structured_data.json"
+                )
+        candidates = explicit_candidates or inferred_candidates
         if len(candidates) != 1:
             errors.append(
                 "%s: 无法从 input_files.source 唯一定位 structured data"
@@ -459,6 +476,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, location, code=308):
+        self.send_response(code)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _dashboard_dataset_path(self, session_id=None):
         configured = None
         if GENERATION_SERVICE is not None:
@@ -474,12 +497,18 @@ class Handler(BaseHTTPRequestHandler):
     def _dashboard_data_version(self, session_id=None):
         if not session_id:
             return "v1"
+        session = SESSIONS.get(session_id)
+        selected = getattr(session, "experiment_data", None)
+        if selected:
+            return str(selected)
+        snapshot = persist.load_snapshot(session_id) or {}
         metadata = persist.load_meta(session_id) or {}
-        marker = metadata.get("experiment_data") or metadata.get("data_version") or "v1"
+        marker = snapshot.get("experiment_data") or metadata.get(
+            "experiment_data"
+        ) or metadata.get("data_version") or "v1"
         if isinstance(marker, dict):
             marker = marker.get("id") or marker.get("label") or "v1"
-        value = str(marker).lower()
-        return next((version for version in ("v1", "v2", "v3") if version in value), "v1")
+        return str(marker).strip() or "v1"
     def _dashboard_sessions_root(self):
         return Path(persist.base_dir()).resolve()
 
@@ -535,7 +564,10 @@ class Handler(BaseHTTPRequestHandler):
             path = os.path.join(HERE, "app.js")
             with open(path, encoding="utf-8") as f:
                 return self._send(200, f.read(), "text/javascript; charset=utf-8")
-        if u.path in ("/dashboard", "/dashboard/"):
+        if u.path == "/dashboard":
+            query = "?" + u.query if u.query else ""
+            return self._redirect("/dashboard/" + query)
+        if u.path == "/dashboard/":
             return self._send_file(
                 Path(HERE) / "dashboard" / "experiment-evaluation-tree.html"
             )
@@ -558,6 +590,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"login_name": acct,
                                     "display_name": ident.get("DisplayName", acct),
                                     "email": ident.get("Email", "")})
+        if u.path == "/api/data/options":
+            return self._send(200, {
+                "options": list_data_packages(DATA_ROOT),
+            })
         if u.path == "/api/local/tree":
             revision, tree = dashboard_api.session_tree(
                 Path(ROOT), self._dashboard_sessions_root()
@@ -568,7 +604,8 @@ class Handler(BaseHTTPRequestHandler):
             session_id = (q.get("session") or [""])[0]
             try:
                 document = dashboard_api.session_summary_document(
-                    self._dashboard_sessions_root(), session_id, Path(ROOT)
+                    self._dashboard_sessions_root(), session_id, Path(ROOT),
+                    self._dashboard_generation_root(),
                 )
                 return self._send(200, document)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -621,6 +658,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._dashboard_sessions_root(),
                     session_id,
                     version,
+                    self._dashboard_generation_root(),
                 )
                 return self._send(200, document)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -639,6 +677,7 @@ class Handler(BaseHTTPRequestHandler):
                     version,
                     case_id,
                     generation_id,
+                    self._dashboard_generation_root(),
                 )
                 return self._send(200, document)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -682,6 +721,7 @@ class Handler(BaseHTTPRequestHandler):
                 matched = dashboard_api.generation_case_report_document(
                     Path(ROOT), self._dashboard_sessions_root(),
                     session_id, version, case_id,
+                    self._dashboard_generation_root(),
                 )
                 return self._send(200, matched)
             except (FileNotFoundError, ValueError, OSError) as exc:
@@ -1042,10 +1082,39 @@ class Handler(BaseHTTPRequestHandler):
                         "job_id": active.job_id,
                     },
                 )
+            data_id = b.get("data_id")
+            if data_id and data_id == getattr(s, "experiment_data", None) and s.cases:
+                with _session_lock(s.id):
+                    return self._send(200, s.view(acct))
+            has_history = (
+                any(s.report_outputs.values())
+                or any(s.report_judgments.values())
+                or any(s.judge_checks.values())
+                or bool(s.generation_imports)
+                or (
+                    GENERATION_SERVICE is not None
+                    and bool(GENERATION_SERVICE.list_for_session(s.id))
+                )
+            )
+            if has_history:
+                return self._send(
+                    409,
+                    {"error": "Session already has generation or Judge records; create a new Session to change Data"},
+                )
             rows = b.get("rows")
-            if b.get("use_sample"):
+            if data_id:
+                try:
+                    rows = load_openharness_rows(
+                        resolve_data_json(DATA_ROOT, data_id)
+                    )
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    return self._send(
+                        400,
+                        {"error": "Data import failed: %s" % exc},
+                    )
+            elif b.get("use_sample"):
                 rows = _load_sample(s.rubric.get("product"))
-            if b.get("use_configured"):
+            elif b.get("use_configured"):
                 if GENERATION_SERVICE is None:
                     return self._send(
                         503,
@@ -1074,7 +1143,11 @@ class Handler(BaseHTTPRequestHandler):
                 )
             try:
                 with _session_lock(s.id):
-                    result = s.import_data(rows, account=acct)
+                    result = s.import_data(
+                        rows,
+                        account=acct,
+                        data_id=data_id,
+                    )
             except ValueError as exc:
                 return self._send(400, {"error": str(exc)})
             return self._send(200, result)
@@ -1459,7 +1532,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     cases = _load_structured_data(
                         cases,
-                        GENERATION_SERVICE.settings.dataset_path,
+                        GENERATION_SERVICE.dataset_path_for_session(s.id),
                     )
                 except ValueError as exc:
                     return self._send(409, {"error": str(exc)})

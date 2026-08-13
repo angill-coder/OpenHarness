@@ -741,6 +741,36 @@ class JudgeBatchTest(unittest.TestCase):
             )
         self.assertEqual(prepared[0]["structured_data"], payload)
 
+    def test_structured_data_prefers_explicit_input_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dataset = root / "data.json"
+            dataset.write_text("{}", encoding="utf-8")
+            case_dir = root / "collection" / "case-a"
+            source_dir = case_dir / "source"
+            source_dir.mkdir(parents=True)
+            payload = {
+                "schema": "openharness-structured-data/v1",
+                "case_id": "case-a",
+                "items": [{"id": "EV-001"}],
+                "unresolved": [],
+            }
+            structured = case_dir / "structured_data.json"
+            structured.write_text(json.dumps(payload), encoding="utf-8")
+
+            prepared = _load_structured_data(
+                [{
+                    "case_id": "case-a",
+                    "input_files": [
+                        {"source": "./collection/case-a/structured_data.json"},
+                        {"source": "./collection/case-a/source/material.xlsx"},
+                    ],
+                }],
+                dataset,
+            )
+
+        self.assertEqual(prepared[0]["structured_data"], payload)
+
     def test_missing_structured_data_fails_preflight(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -387,7 +387,7 @@
         }];
       }));
 
-      const dataId = explicitData.id || (inputModes.length === 1 ? inputModes[0] : (bundle.state.product_id || bundle.meta.product_id || 'experiment-data'));
+      const dataId = (typeof explicitData === 'string' ? explicitData : explicitData.id) || (inputModes.length === 1 ? inputModes[0] : (bundle.state.product_id || bundle.meta.product_id || 'experiment-data'));
       const optimizer = explicitOptimizer.id || bundle.state.optimizer_mode || 'openharness';
       const judge = String(explicitJudge.id || bundle.state.judge_version || bundle.meta.judge_version || 'v1').toLowerCase();
       const judgeBasis = explicitJudge.basis || (judge === 'v3' ? 'source' : 'groundtruth');
@@ -401,7 +401,7 @@
         session: bundle.sessionId,
         sessionLabel: displayTerminology(bundle.state.session_label || bundle.meta.session_label || bundle.sessionId),
         data: dataId,
-        dataLabel: displayTerminology(explicitData.label || (inputModes.length === 1 ? inputModes[0] : (bundle.meta.product_id || bundle.state.product_id || 'OpenHarness Data'))),
+        dataLabel: displayTerminology((typeof explicitData === 'string' ? explicitData : explicitData.label) || (inputModes.length === 1 ? inputModes[0] : (bundle.meta.product_id || bundle.state.product_id || 'OpenHarness Data'))),
         optimizer,
         optimizerLabel: displayTerminology(explicitOptimizer.label || (optimizer === 'openharness' ? 'OpenHarness' : optimizer)),
         optimizerModel: displayTerminology(optimizerModel || ''),
