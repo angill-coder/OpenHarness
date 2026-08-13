@@ -77,8 +77,8 @@
     </div>
 
     <section class="panel history-panel">
-      <div class="panel-head"><div><h2>Rubrics 迭代历史</h2><p class="hint">按当前 Session 和父 Rubrics 版本归档。选择一轮后再打开候选 Rubrics 审核。</p></div></div>
-      <div id="historyEmpty" class="empty">当前 Session 暂无历史记录。</div>
+      <div class="panel-head"><div><h2>Rubrics 迭代历史</h2><p id="historyHint" class="hint">默认展示全部 Session；选择 Session 后查看该会话的详细迭代记录。</p></div></div>
+      <div id="historyEmpty" class="empty">暂无 Rubrics 迭代历史。</div>
       <div id="historyGroups" class="history-groups"></div>
     </section>
 
@@ -112,27 +112,39 @@
     </section>
 
     <section id="experimentPanel" class="panel experiment-panel hidden">
-      <div class="panel-head"><h2>验证与决策</h2><span class="hint">默认迭代 2 轮，再由 AI 逐条验收 Feedback</span></div>
+      <div class="panel-head"><h2>验证与决策</h2><span class="hint">默认迭代 2 轮，再逐条检查反馈是否在新报告中得到落实</span></div>
       <div class="experiment-config">
-        <label>报告 Runner 模型<select id="runnerModel"><option value="">正在读取模型列表…</option></select></label>
-        <label>Skill 迭代轮数<input id="skillIterationRounds" type="number" min="1" max="5" value="2"></label>
-        <label>Skill Optimizer Backend<select id="skillBackend"></select></label>
-        <label>Skill Optimizer 模型<select id="skillModel"></select></label>
-        <label id="skillEffortLabel">Skill Optimizer reasoning<select id="skillEffort"></select></label>
-        <label>Judge Backend<select id="judgeBackend"></select></label>
-        <label>Judge 模型<select id="judgeModel"></select></label>
-        <label id="judgeEffortLabel">Judge reasoning<select id="judgeEffort"></select></label>
-        <label>Feedback AI 验收 Backend<select id="acceptanceBackend"></select></label>
-        <label>Feedback AI 验收模型<select id="acceptanceModel"></select></label>
-        <label id="acceptanceEffortLabel">Feedback AI 验收 reasoning<select id="acceptanceEffort"></select></label>
-        <label>报告并发<input id="generationParallel" type="number" min="1" value="4"></label>
-        <label>Judge 并发<input id="judgeParallel" type="number" min="1" value="20"></label>
+        <div class="experiment-config-row runner-config-row">
+          <div class="config-role"><b>Runner</b><span>生成各轮报告</span></div>
+          <label>模型<select id="runnerModel"><option value="">正在读取模型列表…</option></select></label>
+          <label>报告并发<input id="generationParallel" type="number" min="1" value="4"></label>
+        </div>
+        <div class="experiment-config-row">
+          <div class="config-role"><b>Skill Optimizer</b><span>根据 Judge 结果迭代 Skill</span></div>
+          <label>迭代轮数<input id="skillIterationRounds" type="number" min="1" max="5" value="2"></label>
+          <label>调用方式<select id="skillBackend"></select></label>
+          <label>模型<select id="skillModel"></select></label>
+          <label id="skillEffortLabel">推理强度<select id="skillEffort"></select></label>
+        </div>
+        <div class="experiment-config-row">
+          <div class="config-role"><b>Judge</b><span>按 Rubrics 评估报告</span></div>
+          <label>调用方式<select id="judgeBackend"></select></label>
+          <label>模型<select id="judgeModel"></select></label>
+          <label id="judgeEffortLabel">推理强度<select id="judgeEffort"></select></label>
+          <label>并发<input id="judgeParallel" type="number" min="1" value="20"></label>
+        </div>
+        <div class="experiment-config-row">
+          <div class="config-role"><b>Rubrics 验收</b><span>逐条检查反馈是否在迭代后的报告中得到落实</span></div>
+          <label>调用方式<select id="acceptanceBackend"></select></label>
+          <label>模型<select id="acceptanceModel"></select></label>
+          <label id="acceptanceEffortLabel">推理强度<select id="acceptanceEffort"></select></label>
+        </div>
       </div>
-      <button id="startExperiment" class="primary">启动 Skill 迭代与 AI 验收</button>
+      <button id="startExperiment" class="primary">启动 Skill 迭代与 Rubrics 验收</button>
       <a id="openExperiment" class="button-link hidden" href="#">查看验证实验详情</a>
       <div id="experimentProgress" class="experiment-progress"></div>
       <section id="acceptancePanel" class="acceptance-panel hidden">
-        <div class="panel-head"><h3>Feedback AI 验收</h3><span id="acceptanceSummary"></span></div>
+        <div class="panel-head"><h3>Rubrics 验收</h3><span id="acceptanceSummary"></span></div>
         <div id="acceptanceResults"></div>
       </section>
       <div id="experimentError" class="experiment-error hidden"></div>

@@ -161,6 +161,9 @@ class FrontendContractTest(unittest.TestCase):
         html = (APP / "rubrics_loop_ui" / "index.html").read_text(
             encoding="utf-8"
         )
+        styles = (APP / "rubrics_loop_ui" / "styles.css").read_text(
+            encoding="utf-8"
+        )
         for prefix in ("optimizer", "skill", "judge"):
             self.assertIn('id="%sBackend"' % prefix, html)
             self.assertIn('id="%sModel"' % prefix, html)
@@ -179,6 +182,9 @@ class FrontendContractTest(unittest.TestCase):
         html = (APP / "rubrics_loop_ui" / "index.html").read_text(
             encoding="utf-8"
         )
+        styles = (APP / "rubrics_loop_ui" / "styles.css").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('<select id="runnerModel">', html)
         self.assertNotIn('<input id="runnerModel"', html)
         self.assertIn("state.config.models||state.config.evaluation_models", source)
@@ -189,13 +195,19 @@ class FrontendContractTest(unittest.TestCase):
         self.assertNotIn("打开现有 Skill Loop", html)
         self.assertIn("existingExperiment?'查看验证实验详情':'验证新 Rubrics'", source)
         self.assertIn("if(existing)renderExperiment()", source)
-        self.assertIn("result.loop_completed_at?'仅重试 AI 验收'", source)
+        self.assertIn("result.loop_completed_at?'仅重试 Rubrics 验收'", source)
         self.assertIn("experiment_id:retrying?state.experiment.experiment_id:null", source)
         self.assertIn('id="skillIterationRounds"', html)
         self.assertIn('value="2"', html)
         self.assertIn('id="acceptanceBackend"', html)
         self.assertIn("acceptance:modelPayload('acceptance')", source)
-        self.assertIn("Feedback AI 验收", html)
+        self.assertIn("Rubrics 验收", html)
+        self.assertNotIn("Feedback AI 验收", html)
+        self.assertIn("function skillLoopProgress(result,rounds)", source)
+        self.assertIn("fresh.live_state=await api('/api/session?id='", source)
+        self.assertIn("Skill Optimizer 生成下一版", source)
+        self.assertIn("experiment-running-dots", source)
+        self.assertIn(".experiment-running-dots i", styles)
         self.assertNotIn("配置累计草案验证实验", source)
         self.assertIn("function confirmRedlineChanges(candidate)", source)
         self.assertIn("if(!changes.length)return true", source)
@@ -230,6 +242,11 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("event.key==='Enter'&&!event.shiftKey", source)
         self.assertIn("data-edit-feedback", source)
         self.assertIn('id="historyGroups"', html)
+        self.assertIn('id="historyHint"', html)
+        self.assertIn('class="history-session"', source)
+        self.assertIn("api('/api/rubrics-loop/iterations')", source)
+        self.assertIn('data-history-session=', source)
+        self.assertIn("await switchSession(sessionId)", source)
         self.assertIn("/api/rubrics-loop/iterations", source)
         self.assertIn("restoreWorkflow()", source)
         self.assertIn("data-open-iteration", source)
@@ -305,6 +322,9 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn("当时选中的原文", source)
         self.assertIn("history-quote-tooltip", source)
         self.assertIn(".history-feedback-item.has-quote:hover", styles)
+        self.assertIn("function historyCandidateStatus(candidate)", source)
+        self.assertIn("已随累计草案验证", source)
+        self.assertIn("cumulative-validation-note", source)
         self.assertIn("/api/rubrics-loop/feedback/resolve-selection", source)
         self.assertIn("result.markdown_quote", source)
         self.assertIn("rendered_quote:renderedQuote", source)

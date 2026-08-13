@@ -224,6 +224,22 @@ YouTube 待验证
         self.assertEqual(1, iteration["feedback_count"])
         self.assertEqual(["T1"], iteration["candidates"][0]["modified_check_ids"])
 
+    def test_all_iteration_history_groups_sessions_and_marks_running(self):
+        batch = self.service.create_batch("exp-1", {
+            "skill_version": "v9", "case_id": "case-1",
+        })
+        self.service.add_feedback(
+            "exp-1", batch["batch_id"], "report", "表格需要拆分",
+            {"skill_version": "v9", "case_id": "case-1"},
+        )
+
+        history = self.service.list_all_iterations()
+
+        self.assertEqual(1, len(history["sessions"]))
+        self.assertEqual("exp-1", history["sessions"][0]["session_id"])
+        self.assertEqual(1, history["sessions"][0]["iteration_count"])
+        self.assertEqual(0, history["sessions"][0]["active_experiment_count"])
+
     def test_imported_rubric_does_not_restore_candidate_from_old_parent(self):
         batch = self.service.create_batch("exp-1", {
             "skill_version": "v9", "case_id": "case-1",
@@ -380,6 +396,39 @@ YouTube 待验证
         self.assertEqual(
             first["candidate_rubric_sha256"],
             second["working_parent_rubric_sha256"],
+        )
+        second_staged = self.service.stage_candidate(
+            "exp-1", second["candidate_id"], "owner",
+            history_conflict_confirmed=True,
+        )
+        experiment = self.service.create_experiment(
+            "exp-1", second["candidate_id"], {
+                "skill_iteration_rounds": 2,
+            }, "owner",
+        )
+        self.service.update_experiment(
+            "exp-1", experiment["experiment_id"], {"status": "completed"}
+        )
+
+        history = self.service.list_iterations("exp-1")
+        summaries = [
+            candidate
+            for group in history["groups"]
+            for iteration in group["iterations"]
+            for candidate in iteration["candidates"]
+        ]
+        first_summary = next(
+            item for item in summaries
+            if item["candidate_id"] == first["candidate_id"]
+        )
+        self.assertEqual(2, len(second_staged["draft"]["revisions"]))
+        self.assertTrue(first_summary["cumulative_validation"]["included"])
+        self.assertFalse(
+            first_summary["cumulative_validation"]["is_latest_revision"]
+        )
+        self.assertEqual(
+            "completed",
+            first_summary["cumulative_validation"]["experiment_status"],
         )
 
     def test_legacy_candidate_without_working_parent_can_start_draft(self):

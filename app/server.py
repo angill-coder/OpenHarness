@@ -866,9 +866,13 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/rubrics-loop/iterations":
             q = parse_qs(u.query)
             try:
-                return self._send(200, _rubrics_loop_service().list_iterations(
-                    (q.get("session_id") or [""])[0]
-                ))
+                session_id = (q.get("session_id") or [""])[0]
+                value = (
+                    _rubrics_loop_service().list_iterations(session_id)
+                    if session_id
+                    else _rubrics_loop_service().list_all_iterations()
+                )
+                return self._send(200, value)
             except rubrics_loop_mod.RubricsLoopError as exc:
                 return self._send(400, {"error": str(exc)})
         if u.path == "/api/rubrics-loop/candidate":

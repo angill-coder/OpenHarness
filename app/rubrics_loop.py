@@ -680,6 +680,21 @@ class RubricsLoopService:
             experiments_by_candidate.setdefault(
                 str(experiment.get("candidate_id") or ""), []
             ).append(experiment)
+        draft_revision_candidate_ids = {
+            str(revision.get("candidate_id") or "")
+            for revision in (rubric_draft or {}).get("revisions") or []
+            if revision.get("candidate_id")
+        }
+        draft_latest_candidate_id = str(
+            (rubric_draft or {}).get("latest_candidate_id") or ""
+        )
+        draft_experiment_id = str(
+            (rubric_draft or {}).get("experiment_id") or ""
+        )
+        draft_experiment = next((
+            item for item in experiments
+            if str(item.get("experiment_id") or "") == draft_experiment_id
+        ), None)
 
         iterations = []
         for batch in batches:
@@ -727,6 +742,24 @@ class RubricsLoopService:
                     ),
                     "experiment_id": candidate.get("experiment_id"),
                     "adopted_version": candidate.get("adopted_version"),
+                    "cumulative_validation": (
+                        {
+                            "included": True,
+                            "is_latest_revision": (
+                                candidate_id == draft_latest_candidate_id
+                            ),
+                            "experiment_id": draft_experiment_id,
+                            "experiment_status": (
+                                (draft_experiment or {}).get("status")
+                            ),
+                            "draft_revision_count": len(
+                                (rubric_draft or {}).get("revisions") or []
+                            ),
+                        }
+                        if candidate_id in draft_revision_candidate_ids
+                        and draft_experiment_id
+                        else None
+                    ),
                 })
                 experiment_summaries.extend({
                     "experiment_id": item.get("experiment_id"),
@@ -870,6 +903,51 @@ class RubricsLoopService:
                 ),
             },
         }
+
+    def list_all_iterations(self) -> Dict[str, Any]:
+        """Return persisted Rubrics Loop history grouped by source Session."""
+        sessions = []
+        for summary in self.context().get("sessions") or []:
+            session_id = str(summary.get("session_id") or "")
+            if not session_id:
+                continue
+            try:
+                history = self.list_iterations(session_id)
+            except (OSError, ValueError, RubricsLoopError):
+                continue
+            groups = history.get("groups") or []
+            draft = history.get("active_draft")
+            if not groups and not draft:
+                continue
+            updated_at = max(
+                [group.get("updated_at") or 0 for group in groups]
+                + [draft.get("updated_at") or 0 if draft else 0]
+            )
+            experiments = [
+                experiment
+                for group in groups
+                for iteration in group.get("iterations") or []
+                for experiment in iteration.get("experiments") or []
+            ]
+            active_experiments = [
+                experiment for experiment in experiments
+                if experiment.get("status") in {"queued", "running"}
+            ]
+            sessions.append({
+                "session_id": session_id,
+                "rubric_version": summary.get("rubric_version"),
+                "updated_at": updated_at,
+                "iteration_count": sum(
+                    len(group.get("iterations") or []) for group in groups
+                ),
+                "active_experiment_count": len(active_experiments),
+                "groups": copy.deepcopy(groups),
+                "active_draft": copy.deepcopy(draft),
+            })
+        sessions.sort(
+            key=lambda item: item.get("updated_at") or 0, reverse=True
+        )
+        return {"sessions": sessions}
 
     def create_batch(
         self,
