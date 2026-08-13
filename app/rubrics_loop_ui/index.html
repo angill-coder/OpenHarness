@@ -112,23 +112,37 @@
     </section>
 
     <section id="experimentPanel" class="panel experiment-panel hidden">
-      <div class="panel-head"><h2>验证实验</h2><span class="hint">运行与恢复复用现有 Skill Loop</span></div>
+      <div class="panel-head"><h2>验证与决策</h2><span class="hint">默认迭代 2 轮，再由 AI 逐条验收 Feedback</span></div>
       <div class="experiment-config">
         <label>报告 Runner 模型<select id="runnerModel"><option value="">正在读取模型列表…</option></select></label>
+        <label>Skill 迭代轮数<input id="skillIterationRounds" type="number" min="1" max="5" value="2"></label>
         <label>Skill Optimizer Backend<select id="skillBackend"></select></label>
         <label>Skill Optimizer 模型<select id="skillModel"></select></label>
         <label id="skillEffortLabel">Skill Optimizer reasoning<select id="skillEffort"></select></label>
         <label>Judge Backend<select id="judgeBackend"></select></label>
         <label>Judge 模型<select id="judgeModel"></select></label>
         <label id="judgeEffortLabel">Judge reasoning<select id="judgeEffort"></select></label>
+        <label>Feedback AI 验收 Backend<select id="acceptanceBackend"></select></label>
+        <label>Feedback AI 验收模型<select id="acceptanceModel"></select></label>
+        <label id="acceptanceEffortLabel">Feedback AI 验收 reasoning<select id="acceptanceEffort"></select></label>
         <label>报告并发<input id="generationParallel" type="number" min="1" value="4"></label>
         <label>Judge 并发<input id="judgeParallel" type="number" min="1" value="20"></label>
       </div>
-      <button id="startExperiment" class="primary">创建隔离验证实验</button>
+      <button id="startExperiment" class="primary">启动 Skill 迭代与 AI 验收</button>
       <a id="openExperiment" class="button-link hidden" href="#">查看验证实验详情</a>
-      <button id="adoptCandidate" class="primary hidden">采纳为新 Rubrics 版本</button>
-      <button id="setDefaultRubric" class="hidden">设为 Rubrics Loop 默认版本</button>
-      <pre id="experimentResult"></pre>
+      <div id="experimentProgress" class="experiment-progress"></div>
+      <section id="acceptancePanel" class="acceptance-panel hidden">
+        <div class="panel-head"><h3>Feedback AI 验收</h3><span id="acceptanceSummary"></span></div>
+        <div id="acceptanceResults"></div>
+      </section>
+      <div id="experimentError" class="experiment-error hidden"></div>
+      <div id="experimentDecision" class="experiment-decision hidden">
+        <button id="adoptCandidate" class="primary">采纳新 Rubrics</button>
+        <button id="continueOptimization">继续优化 Rubrics</button>
+        <button id="keepOriginalRubric" class="danger">保留原 Rubrics 并结束</button>
+        <button id="setDefaultRubric" class="hidden">设为 Rubrics Loop 默认版本</button>
+      </div>
+      <details class="advanced-json"><summary>查看实验原始记录</summary><pre id="experimentResult"></pre></details>
     </section>
 
   </main>

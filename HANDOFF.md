@@ -262,3 +262,15 @@ python3 server.py --host 127.0.0.1 --port <独立端口>
 - PR 分支：`codex/rubric-v23-and-structured-data`；目标 Main；包含 v2.2、用户篇幅、v2.3 和 Structured Data 清洗四个功能 commit，未重复包含 PR #23 的 Codex Provider。
 - 相关回归：App 96 项、Harness 30 项通过；Python compileall、`node --check app/app.js`、`git diff --check` 通过。
 - 当前 Main 基线有两项 Dashboard 路径契约测试同样失败；本机安装的 macOS WorkBuddy 还会影响一项 Windows CLI 发现测试。相关文件未被 PR #24 修改，不能把这三项误判为本次回归。
+
+---
+
+## 13. 2026-08-13 增量（Rubrics Loop Feedback AI 验收）
+
+- 验证实验默认运行 **2 轮 Skill 迭代**，每轮仍完整复用现有 Runner → Judge → Skill Optimizer → Gate；`skill_iteration_rounds` 可在 1–5 之间调整，默认 2。
+- 两轮完成后进入 `Feedback Acceptance Evaluator`：逐条读取原始 Feedback、baseline 报告、两轮迭代报告、对应 Rubrics 变更与 Judge 信号，返回 `followed / partially_followed / not_followed / unable_to_judge`、稳定性、失败层级、报告原文证据和下一步建议。它不自动改 Rubrics。
+- 验收证据必须逐字存在于对应 Markdown 报告；模型返回的虚构引文会被过滤。结果落在 `sessions/<sid>/rubrics_loop/acceptance/<experiment_id>.json`，并同步到 Experiment 记录和历史列表。
+- 断点续跑是硬约束：Skill Loop 完成后先落 `loop_completed_at`；AI 验收失败时只重试验收，不重跑 Runner/Judge。每条 Feedback 独立落盘，重试只补未完成条目。服务重启后，旧的 queued/running Experiment 会自动标记为可从断点重试。
+- 同一 Candidate + Rubric SHA 禁止重复创建验证实验，失败必须原地重试原 Experiment Session，避免重复消耗 Runner/Judge/Optimizer token。
+- Rubrics Loop 第三阶段现为“验证与决策”，展示 Skill 迭代进度、Feedback AI 验收证据和三个人工动作：采纳新 Rubrics、继续优化、保留原 Rubrics。
+- 关键文件：`app/feedback_acceptance.py`、`app/rubrics_loop.py`、`app/server.py`、`app/rubrics_loop_ui/`、`app/tests/test_feedback_acceptance.py`。

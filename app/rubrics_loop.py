@@ -19,6 +19,7 @@ import uuid
 from typing import Any, Callable, Dict, Iterable, Optional
 
 import dashboard_api
+import feedback_acceptance
 import llm_client
 
 
@@ -561,6 +562,13 @@ class RubricsLoopService:
             / (_safe_segment(experiment_id, " Experiment ID") + ".json")
         )
 
+    def _acceptance_path(self, session_id: str, experiment_id: str) -> Path:
+        return (
+            self._loop_root(session_id)
+            / "acceptance"
+            / (_safe_segment(experiment_id, " Experiment ID") + ".json")
+        )
+
     def _draft_path(self, session_id: str, draft_id: str) -> Path:
         return (
             self._loop_root(session_id)
@@ -724,6 +732,11 @@ class RubricsLoopService:
                     "experiment_id": item.get("experiment_id"),
                     "candidate_id": candidate_id,
                     "status": item.get("status"),
+                    "phase": item.get("phase"),
+                    "acceptance_status": (
+                        (item.get("acceptance") or {}).get("overall_status")
+                        or (item.get("acceptance") or {}).get("status")
+                    ),
                     "experiment_session_id": item.get("experiment_session_id"),
                     "created_at": item.get("created_at"),
                     "updated_at": item.get("updated_at"),
@@ -1405,6 +1418,17 @@ class RubricsLoopService:
         state = self._state(session_id)
         if json_sha256(state.get("rubric") or {}) != candidate["parent_rubric_sha256"]:
             raise RubricsLoopError("父 Rubrics 已变化，Candidate 已过期")
+        for existing in self._list_loop_documents(session_id, "experiments"):
+            if (
+                existing.get("candidate_id") == candidate_id
+                and existing.get("candidate_rubric_sha256")
+                == candidate.get("candidate_rubric_sha256")
+            ):
+                raise RubricsLoopError(
+                    "该候选 Rubrics 已有验证实验 %s，请打开或原地重试，不能重复新建"
+                    % existing.get("experiment_id")
+                )
+        config = self._normalize_experiment_config(config)
         experiment_id = "rx-" + uuid.uuid4().hex[:10]
         experiment = {
             "experiment_id": experiment_id,
@@ -1413,6 +1437,7 @@ class RubricsLoopService:
             "candidate_rubric_sha256": candidate["candidate_rubric_sha256"],
             "config": copy.deepcopy(config),
             "status": "created",
+            "phase": "skill_loop",
             "created_by": account,
             "created_at": _now(),
             "updated_at": _now(),
@@ -1429,6 +1454,21 @@ class RubricsLoopService:
             draft["updated_at"] = _now()
             _atomic_write(self._draft_path(session_id, draft["draft_id"]), draft)
         return experiment
+
+    @staticmethod
+    def _normalize_experiment_config(config: Dict[str, Any]) -> Dict[str, Any]:
+        value = copy.deepcopy(config or {})
+        try:
+            rounds = int(value.get("skill_iteration_rounds") or 2)
+        except (TypeError, ValueError):
+            rounds = 2
+        value["skill_iteration_rounds"] = max(1, min(rounds, 5))
+        value["feedback_acceptance_enabled"] = value.get(
+            "feedback_acceptance_enabled", True
+        ) is not False
+        if not isinstance(value.get("acceptance"), dict):
+            value["acceptance"] = copy.deepcopy(value.get("judge") or {})
+        return value
 
     def get_experiment(
         self, session_id: str, experiment_id: str
@@ -1482,8 +1522,19 @@ class RubricsLoopService:
             "finished_at": experiment.get("finished_at"),
             "recorded_at": _now(),
         })
+        retry_config = self._normalize_experiment_config(config)
+        if experiment.get("loop_completed_at"):
+            previous_config = copy.deepcopy(experiment.get("config") or {})
+            previous_config["acceptance"] = copy.deepcopy(
+                retry_config.get("acceptance")
+                or previous_config.get("acceptance")
+                or previous_config.get("judge")
+                or {}
+            )
+            previous_config["feedback_acceptance_enabled"] = True
+            retry_config = self._normalize_experiment_config(previous_config)
         experiment.update({
-            "config": copy.deepcopy(config),
+            "config": retry_config,
             "status": "created",
             "attempts": attempts,
             "retry_count": int(experiment.get("retry_count") or 0) + 1,
@@ -1491,11 +1542,14 @@ class RubricsLoopService:
             "retried_at": _now(),
             "updated_at": _now(),
         })
-        for key in (
-            "error", "started_at", "finished_at", "result_code",
-            "feedback_results", "comparison", "final_state",
-        ):
+        for key in ("error", "started_at", "finished_at", "result_code"):
             experiment.pop(key, None)
+        if experiment.get("loop_completed_at"):
+            experiment["phase"] = "feedback_acceptance"
+        else:
+            for key in ("feedback_results", "comparison", "final_state"):
+                experiment.pop(key, None)
+            experiment["phase"] = "skill_loop"
         _atomic_write(
             self._experiment_path(session_id, experiment_id), experiment
         )
@@ -1512,6 +1566,239 @@ class RubricsLoopService:
             draft["updated_at"] = _now()
             _atomic_write(self._draft_path(session_id, draft["draft_id"]), draft)
         return experiment
+
+    def get_acceptance(
+        self, session_id: str, experiment_id: str
+    ) -> Optional[Dict[str, Any]]:
+        path = self._acceptance_path(session_id, experiment_id)
+        if not path.is_file():
+            return None
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RubricsLoopError("AI 验收记录损坏") from exc
+        return value if isinstance(value, dict) else None
+
+    def _experiment_report(
+        self, experiment_session_id: str, skill_version: str, case_id: str
+    ) -> str:
+        try:
+            output = dashboard_api.generation_case_report_document(
+                self.root,
+                self.sessions_root,
+                experiment_session_id,
+                skill_version,
+                case_id,
+                generation_root=self.generation_root,
+            )
+        except (OSError, ValueError, FileNotFoundError) as exc:
+            raise RubricsLoopError(str(exc)) from exc
+        return str(output.get("report_text") or "")
+
+    def _candidate_feedback_links(
+        self, candidate: Dict[str, Any]
+    ) -> tuple[Dict[str, str], Dict[str, set[str]]]:
+        categories: Dict[str, str] = {}
+        checks: Dict[str, set[str]] = {}
+        analyses = candidate.get("cumulative_feedback_analysis") or (
+            candidate.get("feedback_analysis") or []
+        )
+        operations = candidate.get("cumulative_operations") or (
+            candidate.get("operations") or []
+        )
+        for item in analyses:
+            feedback_id = str(item.get("feedback_id") or "")
+            if not feedback_id:
+                continue
+            categories[feedback_id] = str(item.get("category") or "")
+            checks.setdefault(feedback_id, set()).update(
+                str(value) for value in item.get("existing_check_ids") or []
+                if value
+            )
+        for operation in operations:
+            operation_checks = self._operation_check_ids(operation)
+            for feedback_id in operation.get("feedback_ids") or []:
+                checks.setdefault(str(feedback_id), set()).update(
+                    operation_checks
+                )
+        return categories, checks
+
+    def evaluate_feedback_acceptance(
+        self,
+        session_id: str,
+        experiment_id: str,
+        call_model: Optional[Callable[..., str]] = None,
+    ) -> Dict[str, Any]:
+        """Compare baseline and two Skill iterations against each Feedback."""
+        experiment = self.get_experiment(session_id, experiment_id)
+        if not experiment.get("loop_completed_at"):
+            raise RubricsLoopError("Skill Loop 尚未完成，不能启动 AI 验收")
+        candidate = self.get_candidate(session_id, experiment["candidate_id"])
+        batch_ids = candidate.get("feedback_batch_ids") or [
+            candidate["source_batch_id"]
+        ]
+        batches = [self.get_batch(session_id, value) for value in batch_ids]
+        feedback = [
+            item for batch in batches for item in batch.get("feedback") or []
+        ]
+        report_refs = []
+        for batch in batches:
+            for ref in batch.get("report_refs") or []:
+                key = (ref.get("skill_version"), ref.get("case_id"))
+                if not any(
+                    (item.get("skill_version"), item.get("case_id")) == key
+                    for item in report_refs
+                ):
+                    report_refs.append(ref)
+
+        curve = ((experiment.get("final_state") or {}).get("curve") or [])
+        curve_versions = [
+            str(item.get("version")) for item in curve if item.get("version")
+        ]
+        rounds = int((experiment.get("config") or {}).get(
+            "skill_iteration_rounds", 2
+        ))
+        iteration_versions = curve_versions[1:1 + rounds]
+        if len(iteration_versions) < rounds:
+            raise RubricsLoopError(
+                "Skill Loop 只完成 %d/%d 轮，不能启动 AI 验收"
+                % (len(iteration_versions), rounds)
+            )
+        categories, check_links = self._candidate_feedback_links(candidate)
+        feedback_analysis = candidate.get("cumulative_feedback_analysis") or (
+            candidate.get("feedback_analysis") or []
+        )
+        operations = candidate.get("cumulative_operations") or (
+            candidate.get("operations") or []
+        )
+        ref_index = {
+            (ref.get("skill_version"), ref.get("case_id")): ref
+            for ref in report_refs
+        }
+        contexts: Dict[str, Dict[str, Any]] = {}
+        experiment_session_id = str(experiment.get("experiment_session_id") or "")
+        for item in feedback:
+            feedback_id = str(item.get("feedback_id") or "")
+            linked_refs = report_refs if item.get("scope") == "batch" else []
+            if not linked_refs:
+                source_ref = item.get("report_ref") or {}
+                ref = ref_index.get((
+                    source_ref.get("skill_version"), source_ref.get("case_id")
+                ))
+                linked_refs = [ref] if ref else []
+            reports = []
+            judge_signals = []
+            for ref in linked_refs:
+                source_report = self.report(
+                    session_id,
+                    ref["skill_version"],
+                    ref["case_id"],
+                    ref.get("report_sha256") or "",
+                    ref.get("rubric_sha256") or "",
+                )
+                reports.append({
+                    "phase": "baseline",
+                    "skill_version": ref["skill_version"],
+                    "case_id": ref["case_id"],
+                    "report_text": source_report["report_text"],
+                })
+                for number, version in enumerate(iteration_versions, start=1):
+                    reports.append({
+                        "phase": "iteration_%d" % number,
+                        "skill_version": version,
+                        "case_id": ref["case_id"],
+                        "report_text": self._experiment_report(
+                            experiment_session_id, version, ref["case_id"]
+                        ),
+                    })
+                    try:
+                        judgment = dashboard_api.case_judgment_document(
+                            self.sessions_root,
+                            experiment_session_id,
+                            version,
+                            ref["case_id"],
+                        )
+                    except (OSError, ValueError, FileNotFoundError):
+                        judgment = {}
+                    linked_checks = sorted(check_links.get(feedback_id) or [])
+                    judge_signals.append({
+                        "skill_version": version,
+                        "case_id": ref["case_id"],
+                        "checks": {
+                            check_id: (judgment.get("checks") or {}).get(check_id)
+                            for check_id in linked_checks
+                        },
+                    })
+            contexts[feedback_id] = {
+                "category": categories.get(feedback_id),
+                "skill_versions": ["baseline"] + iteration_versions,
+                "rubric_changes": [
+                    operation for operation in operations
+                    if feedback_id in (operation.get("feedback_ids") or [])
+                ],
+                "feedback_analysis": [
+                    analysis for analysis in feedback_analysis
+                    if str(analysis.get("feedback_id") or "") == feedback_id
+                ],
+                "reports": reports,
+                "judge_signals": judge_signals,
+            }
+
+        model_config = copy.deepcopy(
+            (experiment.get("config") or {}).get("acceptance")
+            or (experiment.get("config") or {}).get("judge")
+            or {}
+        )
+        stored = self.get_acceptance(session_id, experiment_id) or {}
+        partial = {}
+        if stored.get("model_config") == model_config:
+            partial = {
+                str(item.get("feedback_id")): item
+                for item in stored.get("feedback_results") or []
+                if item.get("feedback_id")
+            }
+        record = {
+            "experiment_id": experiment_id,
+            "session_id": session_id,
+            "experiment_session_id": experiment_session_id,
+            "status": "running",
+            "skill_versions": ["baseline"] + iteration_versions,
+            "model_config": model_config,
+            "feedback_results": list(partial.values()),
+            "started_at": stored.get("started_at") or _now(),
+            "updated_at": _now(),
+        }
+        _atomic_write(self._acceptance_path(session_id, experiment_id), record)
+
+        def persist_result(result: Dict[str, Any]):
+            partial[result["feedback_id"]] = result
+            record["feedback_results"] = list(partial.values())
+            record["updated_at"] = _now()
+            _atomic_write(self._acceptance_path(session_id, experiment_id), record)
+
+        try:
+            result = feedback_acceptance.evaluate(
+                feedback,
+                contexts,
+                model_config,
+                existing_results=partial,
+                on_result=persist_result,
+                call_model=call_model,
+            )
+        except Exception as exc:
+            record.update({
+                "status": "failed",
+                "error": str(exc),
+                "feedback_results": list(partial.values()),
+                "updated_at": _now(),
+            })
+            _atomic_write(self._acceptance_path(session_id, experiment_id), record)
+            raise
+        record.update(result)
+        record["finished_at"] = _now()
+        record["updated_at"] = _now()
+        _atomic_write(self._acceptance_path(session_id, experiment_id), record)
+        return record
 
     def update_experiment(
         self, session_id: str, experiment_id: str, updates: Dict[str, Any]

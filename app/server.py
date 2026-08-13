@@ -87,6 +87,7 @@ RUBRICS_LOOP_SERVICE = None
 _JUDGE_ACTIVE = set()
 _JUDGE_ACTIVE_LOCK = threading.Lock()
 _INTERNAL_TOKEN = uuid.uuid4().hex
+_PROCESS_STARTED_AT = time.time()
 
 
 def _session_lock(sid):
@@ -527,134 +528,104 @@ def _start_rubric_experiment_worker(
 ):
     def run():
         try:
+            experiment = service.get_experiment(
+                source_session_id, experiment_id
+            )
+            loop_completed = bool(experiment.get("loop_completed_at"))
             service.update_experiment(source_session_id, experiment_id, {
                 "status": "running",
+                "phase": (
+                    "feedback_acceptance" if loop_completed else "skill_loop"
+                ),
                 "experiment_session_id": experiment_session_id,
                 "started_at": round(time.time(), 3),
             })
-            skill_cfg = config.get("skill_optimizer") or {}
-            judge_cfg = config.get("judge") or {}
-            loop = ExperimentLoop(
-                base_url=base_url,
-                session_id=experiment_session_id,
-                poll_seconds=2,
-                request_timeout=900,
-                max_generation_jobs_per_version=3,
-                max_judge_rounds=3,
-                max_optimizer_attempts=3,
-                generation_parallel=config.get("generation_parallel"),
-                judge_parallel=config.get("judge_parallel"),
-                max_settled_candidates=1,
-                generation_model=config.get("runner_model") or None,
-                judge_llm_backend=judge_cfg.get("llm_backend"),
-                judge_llm_model=judge_cfg.get("llm_model"),
-                judge_llm_reasoning_effort=judge_cfg.get("llm_reasoning_effort"),
-                optimizer_llm_backend=skill_cfg.get("llm_backend"),
-                optimizer_llm_model=skill_cfg.get("llm_model"),
-                optimizer_llm_reasoning_effort=skill_cfg.get("llm_reasoning_effort"),
-                request_headers={"X-OpenHarness-Internal-Token": _INTERNAL_TOKEN},
-                log_path=(
-                    Path(persist.base_dir()) / experiment_session_id
-                    / "rubrics_loop_automation.jsonl"
-                ),
-            )
-            result_code = loop.run()
-            final_state = SESSIONS[experiment_session_id].view("rubrics-loop")
-            candidate = service.get_candidate(source_session_id, candidate_id)
-            batch_ids = candidate.get("feedback_batch_ids") or [
-                candidate["source_batch_id"]
-            ]
-            batches = [
-                service.get_batch(source_session_id, batch_id)
-                for batch_id in batch_ids
-            ]
-            target_checks = {}
-            category_by_feedback = {}
-            analyses = candidate.get("cumulative_feedback_analysis") or (
-                candidate.get("feedback_analysis") or []
-            )
-            operations = candidate.get("cumulative_operations") or (
-                candidate.get("operations") or []
-            )
-            for item in analyses:
-                feedback_id = str(item.get("feedback_id") or "")
-                if not feedback_id:
-                    continue
-                category_by_feedback[feedback_id] = item.get("category")
-                target_checks.setdefault(feedback_id, set()).update(
-                    str(value) for value in item.get("existing_check_ids") or []
-                    if value
+            result_code = int(experiment.get("result_code") or 0)
+            if not loop_completed:
+                skill_cfg = config.get("skill_optimizer") or {}
+                judge_cfg = config.get("judge") or {}
+                loop = ExperimentLoop(
+                    base_url=base_url,
+                    session_id=experiment_session_id,
+                    poll_seconds=2,
+                    request_timeout=900,
+                    max_generation_jobs_per_version=3,
+                    max_judge_rounds=3,
+                    max_optimizer_attempts=3,
+                    generation_parallel=config.get("generation_parallel"),
+                    judge_parallel=config.get("judge_parallel"),
+                    max_settled_candidates=int(
+                        config.get("skill_iteration_rounds") or 2
+                    ),
+                    generation_model=config.get("runner_model") or None,
+                    judge_llm_backend=judge_cfg.get("llm_backend"),
+                    judge_llm_model=judge_cfg.get("llm_model"),
+                    judge_llm_reasoning_effort=judge_cfg.get(
+                        "llm_reasoning_effort"
+                    ),
+                    optimizer_llm_backend=skill_cfg.get("llm_backend"),
+                    optimizer_llm_model=skill_cfg.get("llm_model"),
+                    optimizer_llm_reasoning_effort=skill_cfg.get(
+                        "llm_reasoning_effort"
+                    ),
+                    request_headers={
+                        "X-OpenHarness-Internal-Token": _INTERNAL_TOKEN
+                    },
+                    log_path=(
+                        Path(persist.base_dir()) / experiment_session_id
+                        / "rubrics_loop_automation.jsonl"
+                    ),
                 )
-            for operation in operations:
-                check_ids = {
-                    str(operation.get(key))
-                    for key in ("check_id", "target_id", "new_id", "merged_id")
-                    if operation.get(key)
-                }
-                for feedback_id in operation.get("feedback_ids") or []:
-                    target_checks.setdefault(str(feedback_id), set()).update(check_ids)
-            exp_session = SESSIONS[experiment_session_id]
-            final_version = final_state.get("current_version")
-            final_judgments = exp_session.judge_checks.get(final_version, {})
-
-            def check_number(value):
-                return {"met": 1.0, "partial": 0.5, "miss": 0.0}.get(
-                    value, float(value) if isinstance(value, (int, float)) else None
-                )
-
-            feedback_results = []
-            feedback_items = [
-                feedback
-                for batch in batches
-                for feedback in batch.get("feedback") or []
-            ]
-            for feedback in feedback_items:
-                feedback_id = feedback["feedback_id"]
-                category = category_by_feedback.get(feedback_id)
-                check_ids = sorted(target_checks.get(feedback_id) or [])
-                values = []
-                for judgment in final_judgments.values():
-                    checks = (judgment or {}).get("checks") or {}
-                    values.extend(
-                        number for number in (
-                            check_number(checks.get(check_id))
-                            for check_id in check_ids
-                        ) if number is not None
+                result_code = loop.run()
+                if result_code != 0:
+                    raise RuntimeError(
+                        "Skill Loop 未正常完成，result_code=%s" % result_code
                     )
-                average = sum(values) / len(values) if values else None
-                if category and category != "rubric":
-                    status = "non_rubric_issue"
-                elif not check_ids:
-                    status = "uncovered"
-                elif average is not None and average >= 0.75:
-                    status = "covered_and_improved"
-                else:
-                    status = "covered_not_improved"
-                feedback_results.append({
-                    "feedback_id": feedback_id,
-                    "category": category,
-                    "check_ids": check_ids,
-                    "final_check_average": average,
-                    "status": status,
+                final_state = SESSIONS[experiment_session_id].view(
+                    "rubrics-loop"
+                )
+                source_state = SESSIONS[source_session_id].view("rubrics-loop")
+                service.update_experiment(source_session_id, experiment_id, {
+                    "phase": "feedback_acceptance",
+                    "result_code": result_code,
+                    "loop_completed_at": round(time.time(), 3),
+                    "final_state": {
+                        "current_version": final_state.get("current_version"),
+                        "best_version": final_state.get("best_version"),
+                        "curve": final_state.get("curve"),
+                        "version_status": final_state.get("version_status"),
+                        "judge_progress": final_state.get("judge_progress"),
+                    },
+                    "comparison": {
+                        "source_old_rubric_curve": source_state.get("curve"),
+                        "candidate_rubric_curve": final_state.get("curve"),
+                    },
                 })
-            source_state = SESSIONS[source_session_id].view("rubrics-loop")
+
+            acceptance = {"status": "skipped"}
+            if config.get("feedback_acceptance_enabled", True):
+                service.update_experiment(source_session_id, experiment_id, {
+                    "phase": "feedback_acceptance",
+                    "acceptance": {
+                        "status": "running",
+                        "model_config": copy.deepcopy(
+                            config.get("acceptance")
+                            or config.get("judge")
+                            or {}
+                        ),
+                    },
+                })
+                acceptance = service.evaluate_feedback_acceptance(
+                    source_session_id, experiment_id
+                )
             service.update_experiment(source_session_id, experiment_id, {
-                "status": "completed" if result_code == 0 else "failed",
+                "status": "completed",
+                "phase": "decision",
                 "result_code": result_code,
-                "final_state": {
-                    "current_version": final_state.get("current_version"),
-                    "best_version": final_state.get("best_version"),
-                    "curve": final_state.get("curve"),
-                    "version_status": final_state.get("version_status"),
-                    "judge_progress": final_state.get("judge_progress"),
-                },
-                "comparison": {
-                    "source_old_rubric_curve": source_state.get("curve"),
-                    "candidate_rubric_curve": final_state.get("curve"),
-                },
-                "feedback_results": feedback_results,
+                "acceptance": acceptance,
                 "finished_at": round(time.time(), 3),
             })
+            candidate = service.get_candidate(source_session_id, candidate_id)
             service.update_candidate(source_session_id, candidate_id, {
                 "status": "awaiting_review",
                 "experiment_id": experiment_id,
@@ -665,8 +636,16 @@ def _start_rubric_experiment_worker(
                     {"status": "awaiting_review"},
                 )
         except Exception as exc:
+            failed_experiment = service.get_experiment(
+                source_session_id, experiment_id
+            )
             service.update_experiment(source_session_id, experiment_id, {
                 "status": "failed",
+                "phase": (
+                    "feedback_acceptance"
+                    if failed_experiment.get("loop_completed_at")
+                    else "skill_loop"
+                ),
                 "error": str(exc),
                 "finished_at": round(time.time(), 3),
             })
@@ -917,10 +896,40 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/rubrics-loop/experiment":
             q = parse_qs(u.query)
             try:
-                return self._send(200, _rubrics_loop_service().get_experiment(
-                    (q.get("session_id") or [""])[0],
-                    (q.get("experiment_id") or [""])[0],
-                ))
+                service = _rubrics_loop_service()
+                session_id = (q.get("session_id") or [""])[0]
+                experiment_id = (q.get("experiment_id") or [""])[0]
+                value = service.get_experiment(session_id, experiment_id)
+                activity_at = float(
+                    value.get("started_at") or value.get("updated_at") or 0
+                )
+                if (
+                    value.get("status") in {"queued", "running"}
+                    and activity_at
+                    and activity_at < _PROCESS_STARTED_AT
+                ):
+                    value = service.update_experiment(session_id, experiment_id, {
+                        "status": "failed",
+                        "error": "服务重启中断了后台任务；可从当前断点重试",
+                        "finished_at": round(time.time(), 3),
+                    })
+                    interrupted_candidate = service.get_candidate(
+                        session_id, value["candidate_id"]
+                    )
+                    service.update_candidate(
+                        session_id,
+                        value["candidate_id"],
+                        {
+                            "status": (
+                                "staged"
+                                if interrupted_candidate.get("draft_id")
+                                else "validated"
+                            ),
+                            "experiment_id": experiment_id,
+                            "experiment_error": value["error"],
+                        },
+                    )
+                return self._send(200, value)
             except rubrics_loop_mod.RubricsLoopError as exc:
                 return self._send(400, {"error": str(exc)})
         if u.path == "/api/local/tree":

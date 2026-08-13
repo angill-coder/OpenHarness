@@ -550,6 +550,141 @@ YouTube 待验证
                 candidate["candidate_id"], {},
             )
 
+    def test_acceptance_retry_preserves_completed_skill_loop(self):
+        batch = self.service.create_batch("exp-1", {
+            "skill_version": "v9", "case_id": "case-1",
+        })
+        batch = self.service.add_feedback(
+            "exp-1", batch["batch_id"], "report", "强化 T1",
+            {"skill_version": "v9", "case_id": "case-1"},
+        )
+        candidate = self.service.propose_candidate(
+            "exp-1", batch["batch_id"], {},
+            call_model=lambda *args, **kwargs: json.dumps({
+                "candidate_rubric": sample_rubric(),
+                "operations": [{
+                    "op": "update_check", "check_id": "T1",
+                    "feedback_ids": [batch["feedback"][0]["feedback_id"]],
+                }],
+                "feedback_analysis": [], "summary": "强化 T1",
+            }, ensure_ascii=False),
+        )
+        experiment = self.service.create_experiment(
+            "exp-1", candidate["candidate_id"], {
+                "judge": {"llm_backend": "codex", "llm_model": "judge-old"},
+            }
+        )
+        self.assertEqual(2, experiment["config"]["skill_iteration_rounds"])
+        self.assertEqual(
+            experiment["config"]["judge"], experiment["config"]["acceptance"]
+        )
+        self.service.update_experiment("exp-1", experiment["experiment_id"], {
+            "status": "failed",
+            "phase": "feedback_acceptance",
+            "experiment_session_id": "existing-validation-session",
+            "loop_completed_at": 456.0,
+            "final_state": {"curve": [{"version": "v9"}, {"version": "v10"}, {"version": "v11"}]},
+            "comparison": {"kept": True},
+            "error": "acceptance timeout",
+        })
+        self.service.update_candidate(
+            "exp-1", candidate["candidate_id"], {"status": "validated"}
+        )
+
+        retried = self.service.retry_experiment(
+            "exp-1", experiment["experiment_id"], candidate["candidate_id"],
+            {"skill_iteration_rounds": 5, "acceptance": {
+                "llm_backend": "codex", "llm_model": "acceptance-new",
+            }},
+        )
+
+        self.assertEqual("feedback_acceptance", retried["phase"])
+        self.assertEqual(456.0, retried["loop_completed_at"])
+        self.assertEqual(2, retried["config"]["skill_iteration_rounds"])
+        self.assertEqual("acceptance-new", retried["config"]["acceptance"]["llm_model"])
+        self.assertEqual(3, len(retried["final_state"]["curve"]))
+        self.assertEqual({"kept": True}, retried["comparison"])
+
+    def test_acceptance_result_is_persisted_and_reused(self):
+        batch = self.service.create_batch("exp-1", {
+            "skill_version": "v9", "case_id": "case-1",
+        })
+        batch = self.service.add_feedback(
+            "exp-1", batch["batch_id"], "report", "正文不要中间稿表述",
+            {"skill_version": "v9", "case_id": "case-1"},
+        )
+        feedback_id = batch["feedback"][0]["feedback_id"]
+        candidate = self.service.propose_candidate(
+            "exp-1", batch["batch_id"], {},
+            call_model=lambda *args, **kwargs: json.dumps({
+                "candidate_rubric": sample_rubric(),
+                "operations": [{
+                    "op": "update_check", "check_id": "T1",
+                    "feedback_ids": [feedback_id],
+                }],
+                "feedback_analysis": [{
+                    "feedback_id": feedback_id,
+                    "category": "rubric",
+                    "existing_check_ids": ["T1"],
+                    "decision": "update",
+                    "reason": "强化终稿要求",
+                }],
+                "summary": "强化 T1",
+            }, ensure_ascii=False),
+        )
+        experiment = self.service.create_experiment(
+            "exp-1", candidate["candidate_id"], {
+                "acceptance": {"llm_backend": "codex", "llm_model": "gpt-test"},
+            }
+        )
+        self.service.update_experiment("exp-1", experiment["experiment_id"], {
+            "experiment_session_id": "validation-session",
+            "loop_completed_at": 1.0,
+            "final_state": {"curve": [
+                {"version": "v9"}, {"version": "v10"}, {"version": "v11"},
+            ]},
+        })
+        self.service._experiment_report = (
+            lambda session_id, version, case_id:
+            "# 报告\n\n已转为最终汇报语言。"
+        )
+        calls = []
+
+        def fake_acceptance(prompt, **kwargs):
+            calls.append(prompt)
+            return json.dumps({
+                "feedback_id": feedback_id,
+                "status": "followed",
+                "stability": "stable",
+                "failure_layer": "none",
+                "reason": "两轮均遵循",
+                "evidence": [{
+                    "phase": "iteration_2", "skill_version": "v11",
+                    "case_id": "case-1", "quote": "已转为最终汇报语言。",
+                    "assessment": "符合反馈",
+                }],
+                "next_action": "人工确认",
+                "rubric_suggestions": [],
+            }, ensure_ascii=False)
+
+        result = self.service.evaluate_feedback_acceptance(
+            "exp-1", experiment["experiment_id"], fake_acceptance
+        )
+        reused = self.service.evaluate_feedback_acceptance(
+            "exp-1", experiment["experiment_id"],
+            lambda *args, **kwargs: self.fail("已完成结果不应重复调用模型"),
+        )
+
+        self.assertEqual(1, len(calls))
+        self.assertEqual("followed", result["overall_status"])
+        self.assertEqual("followed", reused["overall_status"])
+        self.assertEqual(
+            "completed",
+            self.service.get_acceptance(
+                "exp-1", experiment["experiment_id"]
+            )["status"],
+        )
+
     def test_candidate_summary_extracts_result_from_mapping_text(self):
         self.assertEqual(
             "只修改 E3",
