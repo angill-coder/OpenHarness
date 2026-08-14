@@ -23,9 +23,10 @@ from directive_registry import (
     executable_directive_text,
     load_skill_directives,
 )
+import production_skill_policy
 
 
-COMPILER_VERSION = "session-skill/v3"
+COMPILER_VERSION = "session-skill/v4-production-boundary"
 
 
 @dataclass(frozen=True)
@@ -100,19 +101,11 @@ def _render_version_rules(
 ) -> str:
     lines = [VERSION_RULES_START]
     if additional:
-        lines.extend(["", "## 当前版本新增优化规则", ""])
-        lines.extend("- **%s**：%s" % item for item in additional)
-    if few_shots:
-        lines.extend(["", "## 当前版本 Few-shot 约束", ""])
-        for item in few_shots:
-            kind = (
-                item.get("kind", "unknown")
-                if isinstance(item, dict)
-                else str(item)
-            )
-            lines.append("- `%s`" % kind)
-    if not additional and not few_shots:
-        lines.append("<!-- 当前基线没有 optimizer 增量规则。 -->")
+        lines.extend(["", "## 补充执行规则", ""])
+        # directive_id 是 Harness 的实验索引，生产 Skill 只写可执行文本。
+        lines.extend("- %s" % executable for _, executable in additional)
+    # 当前 few_shots 只保存 kind 等 Harness 选择器，没有可直接执行的
+    # 示例内容，因此不得把这些内部 ID 编译到生产文件。
     lines.append(VERSION_RULES_END)
     return "\n".join(lines)
 
@@ -143,7 +136,7 @@ def _replace_editable_region(
 ) -> str:
     """freeform 策略:把冻结需求契约 + LLM 正文写进 EDITABLE 区。
 
-    requirement_contract 由 v0 基于需求与 rubric 确定，后续版本只改 prose，
+    requirement_contract 由 v0 基于需求确定，后续版本只改 prose，
     从结构上避免 LLM 优化时把受众、交互、输出结构或素材边界改丢。
     """
     if EDITABLE_REGION_RE.search(text) is None:
@@ -161,6 +154,33 @@ def _replace_editable_region(
         EDITABLE_END,
     )
     return EDITABLE_REGION_RE.sub(lambda _match: rendered, text, count=1)
+
+
+def _strip_compiler_metadata(text: str) -> str:
+    """删除只用于编译的占位符和 Harness manifest。
+
+    基础 Skill 源文件必须保留这些标记，供下次编译定位；冻结后的
+    运行产物不应暴露 OpenHarness、directive ID 或版本优化过程。
+    """
+    cleaned = DIRECTIVE_MANIFEST_RE.sub("", str(text or ""), count=1)
+    for marker in (
+        EDITABLE_START,
+        EDITABLE_END,
+        VERSION_RULES_START,
+        VERSION_RULES_END,
+    ):
+        cleaned = cleaned.replace(marker, "")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    production_skill_policy.validate_production_text(cleaned)
+    return cleaned + "\n"
+
+
+def _validate_production_bundle(root: Path) -> None:
+    """冻结产物的所有 Markdown 都必须满足生产边界。"""
+    for document in root.rglob("*.md"):
+        production_skill_policy.validate_production_text(
+            document.read_text(encoding="utf-8")
+        )
 
 
 def compile_session_skill(
@@ -224,12 +244,22 @@ def compile_session_skill(
         instructions = temp_dir / "references" / "instructions.md"
         text = instructions.read_text(encoding="utf-8")
         if skill.instructions.get("mode") == "freeform":
-            # freeform 策略(optimizer02):LLM 整段改写可编辑区;
+            # freeform 策略(optimizer02):本地应用结构化 patch 后替换可编辑区；
             # manifest/version_rules 保持基线原样,不做 per-directive 注入。
+            production_contract = (
+                production_skill_policy.sanitize_legacy_production_text(
+                    skill.instructions.get("requirement_contract", "")
+                )
+            )
+            production_prose = (
+                production_skill_policy.sanitize_legacy_production_text(
+                    skill.instructions.get("prose", "")
+                )
+            )
             text = _replace_editable_region(
                 text,
-                skill.instructions.get("prose", ""),
-                skill.instructions.get("requirement_contract", ""),
+                production_prose,
+                production_contract,
             )
         else:
             text = _replace_directive_manifest(text, effective_enabled)
@@ -238,7 +268,9 @@ def compile_session_skill(
                 additional,
                 skill.few_shots,
             )
+        text = _strip_compiler_metadata(text)
         instructions.write_text(text, encoding="utf-8")
+        _validate_production_bundle(temp_dir)
 
         expected_hash = directory_hash(temp_dir)
         if final_dir.exists():

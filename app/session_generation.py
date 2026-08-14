@@ -7,6 +7,7 @@ import hashlib
 from typing import Any, Dict
 
 import persistence as persist
+import iteration_trace
 
 
 class SessionGeneration:
@@ -22,16 +23,23 @@ class SessionGeneration:
     ):
         if not generation_id:
             return {"error": "缺少 generation_id"}
-        version_ids = {item["version"] for item in self.versions}
-        if version not in version_ids:
+        version_entry = next(
+            (
+                item
+                for item in self.versions
+                if item.get("version") == version
+            ),
+            None,
+        )
+        if version_entry is None:
             return {"error": "Skill 版本不存在: %s" % version}
 
-        known_cases = {item["case_id"] for item in self.cases}
-        unknown = sorted(set(outputs) - known_cases)
-        if unknown:
+        eligible_case_ids = self._case_ids_for(version_entry)
+        out_of_scope = sorted(set(outputs or {}) - eligible_case_ids)
+        if out_of_scope:
             return {
-                "error": "报告包含 Session 中不存在的 case: "
-                + ", ".join(unknown)
+                "error": "报告包含当前 Skill 版本绑定数据集之外的 case: "
+                + ", ".join(out_of_scope)
             }
 
         imported_for_job = self.generation_imports.setdefault(
@@ -76,6 +84,13 @@ class SessionGeneration:
                 generation_id=generation_id,
                 traces=traces,
             )
+            dialogue_trace = iteration_trace.record_dialogue_contract(
+                self,
+                version,
+                clean,
+                traces=traces,
+                source="generation",
+            )
             persist.append_event(
                 self.id,
                 "generation_import",
@@ -85,6 +100,7 @@ class SessionGeneration:
                     "case_ids": sorted(clean),
                     "n_cases": len(clean),
                     "skipped_case_ids": skipped,
+                    "iteration_id": dialogue_trace.get("iteration_id"),
                 },
             )
             # 批量只重评和保存一次，避免 N 个 case 导入造成 N 次 Mock 跑分。

@@ -148,6 +148,9 @@ def append_check_judgments(sid: str, version: str, judgments: Dict[str, Dict]):
                 "rubric_sha256": judgment.get("rubric_sha256"),
                 "llm_backend": judgment.get("llm_backend"),
                 "model": judgment.get("model"),
+                "reasoning_effort": judgment.get("reasoning_effort"),
+                "judge_run_id": judgment.get("judge_run_id"),
+                "iteration_id": judgment.get("iteration_id"),
                 "judge_trace": judgment.get("judge_trace"),
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")

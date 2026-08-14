@@ -91,8 +91,10 @@ class SkillCompilerTest(unittest.TestCase):
         instructions = (
             first.path / "references" / "instructions.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("require_source_ref", instructions)
+        self.assertNotIn("require_source_ref", instructions)
         self.assertIn("回溯到真实素材", instructions)
+        self.assertNotIn("OPENHARNESS", instructions)
+        self.assertNotIn("directive", instructions.lower())
 
     def test_different_versions_apply_cumulative_directives(self):
         v0 = _skill()
@@ -117,13 +119,19 @@ class SkillCompilerTest(unittest.TestCase):
 
         self.assertNotEqual(frozen_v0.path, frozen_v1.path)
         self.assertNotIn(
-            "**require_source_ref**",
+            "回溯到真实素材",
             (
                 frozen_v0.path / "references" / "instructions.md"
             ).read_text(encoding="utf-8"),
         )
         self.assertIn(
-            "**require_source_ref**",
+            "回溯到真实素材",
+            (
+                frozen_v1.path / "references" / "instructions.md"
+            ).read_text(encoding="utf-8"),
+        )
+        self.assertNotIn(
+            "require_source_ref",
             (
                 frozen_v1.path / "references" / "instructions.md"
             ).read_text(encoding="utf-8"),
@@ -147,6 +155,21 @@ class SkillCompilerTest(unittest.TestCase):
                 self.root / "runs",
                 "real-eval",
                 forbidden,
+                self.base,
+            )
+
+    def test_harness_metadata_in_any_markdown_is_rejected(self):
+        skill_doc = self.base / "SKILL.md"
+        skill_doc.write_text(
+            skill_doc.read_text(encoding="utf-8")
+            + "\n候选版本通过 holdout 后才采纳。\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "评测元数据"):
+            compile_session_skill(
+                self.root / "runs",
+                "real-eval",
+                _skill(),
                 self.base,
             )
 

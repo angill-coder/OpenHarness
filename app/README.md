@@ -1,6 +1,6 @@
 # OpenHarness · Skill 评测与迭代平台（Web）
 
-页面化工作台把「需求 → 生成 v0 → 导入数据 → WB CLI 批量生成/导入报告 → 模型批量 Judge → 迭代出下一版」串成一条链路。Web 层为 Python 标准库 + 单页原生 JS；真实报告生成需要本机可用的 WorkBuddy CLI，真实评分需要配置 Judge 模型。
+页面化工作台把「需求 → 生成 v0 → 导入数据 → Runner CLI 批量生成/导入报告 → 模型批量 Judge → 迭代出下一版」串成一条链路。Web 层为 Python 标准库 + 单页原生 JS；真实报告生成可选 WorkBuddy CLI 或 Codex CLI，真实评分需要配置 Judge 模型。
 
 ## 启动
 
@@ -10,7 +10,7 @@ python3 server.py                 # 默认 http://127.0.0.1:8080
 # 可选: --port 8000  --host 0.0.0.0
 ```
 
-打开浏览器访问 `http://127.0.0.1:8080`。Mock 评测无需 API key；真实报告既可以手工粘贴，也可以通过页面一键调用 WB CLI 自动生成并导入。
+打开浏览器访问 `http://127.0.0.1:8080`。Mock 评测无需 API key；真实报告既可以手工粘贴，也可以通过页面一键调用 Runner CLI 自动生成并导入。
 
 ### 实时评测看板与数据契约
 
@@ -30,7 +30,7 @@ row. A Judge import writes checks, reasoning, hashes, and `judge_trace` into the
 corresponding `check_judgments.jsonl` row. The Dashboard therefore has no
 owner-specific or data-version-specific ingestion branch.
 
-### 一键 WB CLI 配置
+### 一键 Runner CLI 配置
 
 默认配置已经对应当前仓库；需要覆盖时设置：
 
@@ -46,6 +46,12 @@ export OPENHARNESS_WB_OUTPUT=../generation_runs
 
 # WorkBuddy CLI 不在 PATH 时设置
 export OPENHARNESS_WB_CLI_PATH=/path/to/workbuddy
+
+# 改用 Codex CLI Runner（默认 gpt-5.6-sol / medium）
+export OPENHARNESS_RUNNER_LLM_BACKEND=codex
+export OPENHARNESS_RUNNER_CODEX_MODEL=gpt-5.6-sol
+export OPENHARNESS_RUNNER_CODEX_REASONING_EFFORT=medium
+export OPENHARNESS_CODEX_CLI_PATH=/path/to/codex  # 已在 PATH 时可省略
 
 python3 server.py --host 127.0.0.1 --port 8080
 ```
@@ -67,9 +73,30 @@ export LLM_API_STYLE=anthropic          # 第三方 OpenAI 兼容网关填 opena
 export OPENHARNESS_JUDGE_PARALLEL=20    # 默认 20；可在 Web UI 调整
 ```
 
+API 后端的输出 token 预算可按角色拆分，避免为了长篇 Optimizer 改写而把
+Judge 的并发预留也一起放大：
+
+```bash
+export LLM_MAX_TOKENS=8000                 # Judge/其它 API 调用的 fallback
+export LLM_DIAGNOSIS_MAX_TOKENS=6000       # Optimizer 全局失败诊断
+export LLM_OPTIMIZER_MAX_TOKENS=12000      # Optimizer 目标级结构化 Patch
+export LLM_GUARD_MAX_TOKENS=2000           # 仅 llm_scratch V0 红线检查
+export OPTIMIZER_MAX_INSTRUCTION_CHARS=8000 # 候选 Skill 正文总字符上限
+export OPTIMIZER_MAX_NET_GROWTH_CHARS=200   # 单轮相对 champion 净增长上限
+export OPTIMIZER_MAX_PATCH_OPERATIONS=6     # 单轮 add/replace/delete 总操作数
+```
+
+Optimizer 空响应会在调用层按 `LLM_REWRITE_RETRIES` 重试；若仍为空，API
+返回 `code=empty_llm_response`，并在 Session、event 与迭代资源日志中记录
+`finish_reason`、token 用量和耗时等脱敏元数据，不保存 reasoning 原文。
+
 Judge 与 LLM Optimizer 都支持三种调用方式：`api`、`workbuddy`、`codex`。
 选择 Codex CLI 时默认使用 `gpt-5.6-sol` 和 `medium` 推理力度；Web UI
 可分别为 Judge 与 Optimizer 调整推理力度。Codex CLI 不在 `PATH` 时设置：
+
+选择 `llm_scratch` 生成 V0 时，V0 正文起草及其红线完整性守卫固定使用
+Codex CLI `gpt-5.6-sol`、`medium`；Rubric 仍从仓库受控模板加载，不由
+模型自由改写。
 
 ```bash
 export OPENHARNESS_CODEX_CLI_PATH=/path/to/codex
@@ -79,16 +106,18 @@ export OPENHARNESS_OPTIMIZER_CODEX_MODEL=gpt-5.6-sol
 export OPENHARNESS_OPTIMIZER_CODEX_REASONING_EFFORT=medium
 ```
 
-Codex 调用使用非交互、临时会话和只读沙箱；Prompt 通过 stdin 传入，最终文本
-通过 `--output-last-message` 回收，不写入 OpenHarness 工作区。
+Judge/Optimizer 的 Codex 调用使用非交互、临时会话和只读沙箱。Codex Runner
+同样使用无状态临时会话，但只对每个 case 的隔离 workspace 开启
+`workspace-write`，以便写入 `deliverables/report.md`；冻结 Skill 与材料之外的
+OpenHarness 文件不会放进该 workspace。
 
 调研汇报数据统一安装在 `data/research-report/v1|v2|v3/`，每个目录的 `data.json` 是 Runner、Judge 和 Dashboard 共用的唯一入口。Session `meta.json` 中的 `experiment_data.id` 决定使用 v1、v2 还是 v3；原始 source 始终以 `data.json` 所在目录为相对路径根。这些目录已被 Git 忽略，只用于本地运行。`GET /api/generation/config` 可检查三个实际路径。
 
 `OPENHARNESS_WB_DATASET_V1/V2/V3` 可分别覆盖三个入口。旧的 `OPENHARNESS_WB_DATASET` 仍保留兼容；若设置，会作为未单独配置版本的统一 fallback。页面显示“运行配置不可用”时，优先检查 dataset、Skill 和 CLI 路径。
 
-报告生成和 Judge 的默认并发均为 20。当前版本不设置人为安全上限；实际并发不会超过待处理 case 数量，并受本机资源、WB CLI 和模型服务容量约束。
+报告生成和 Judge 的默认并发均为 20。当前版本不设置人为安全上限；实际并发不会超过待处理 case 数量，并受本机资源、Runner CLI 和模型服务容量约束。
 
-Web UI 可为每次报告生成任务从 WorkBuddy 支持列表中选择模型并设置最大并发；默认模型为 `deepseek-v4-pro-ioa`。任务会记录实际模型；「仅重试失败 case」默认显示原任务配置，也允许在点击前改用新的模型或并发。一次任务耗尽内部重试后，仍可创建新的失败 case 重试任务。
+Web UI 可从当前 Runner 后端支持列表中选择模型并设置最大并发；WorkBuddy 默认 `deepseek-v4-pro-ioa`，Codex 默认 `gpt-5.6-sol` / `medium`。任务会记录后端、模型和推理力度；「仅重试失败 case」默认显示原任务模型和并发。一次任务耗尽内部重试后，仍可创建新的失败 case 重试任务。
 
 > 内置样例：算数字型读 `data/report_assistant/dataset.jsonl`（没有先跑 `python3 ../data/report_assistant/build_dataset.py`）；调研洞察型读 `data/research_assistant/dataset.sample.jsonl`。「用内置样例」按钮按会话产品自动选。
 
@@ -156,7 +185,8 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 ## 核心交互节奏
 
 - 每导入/推进一次，中列展示**当前版本的 skill**（打开了哪些 directive、来自什么优化提议、结构冻结部分），右列刷新分数曲线、失败模式和当前 rubric。
-- 当前版本全部 case Judge 完成后，点 **「▶ 生成下一版 skill」**：optimizer 读当前失败模式 → 提一个最便宜的改动（L1 打开某 directive）→ dev gate 验证（目标维度↑ 且其它不塌且不引红线）→ 通过则成为新版本，否则记为被拒版本。
+- `llm_rewrite` 会话的当前版本全部 case Judge 完成后，点 **「▶ 生成下一版 skill」**：optimizer 先汇总全部 case 的 check 级 Failure Inventory，并为最多 5 个主要候选按 check 等额抽取可回放证据。第一次调用 Diagnosis LLM，要求覆盖所有主要候选、结合历史冷却信息完成归因并选择唯一主目标；若根因是 `data`、`judge`、`replay_protocol` 或 `mixed`，到此阻断且不浪费 Patch 调用。第二次调用 Patch LLM，只提供该主目标的 3–5 条完整「报告原句—素材证据—Judge 判定—期望改法」，且不得重新选目标，只能返回 `add/replace/delete` 结构化 patch。平台本地校验目标一致性、证据逐字复制、红线保留声明、唯一锚点及总字符/净增长/操作数预算；任何 `add` 都必须配套删除一条重复规则。候选随后进入真实生成与 Judge，Gate 始终与历史 champion 比较。硬失败持平时，dev overall 至少提升 0.02 且通过 `test` holdout 才允许采纳；新建 LLM loop 默认连续 8 个候选未产生新 champion 后停止。
+- **生产 Skill 与 Harness 严格隔离**：V0 起草只接收去标识化的内容要求，不接收 rubric 结构、权重、分数、Gate、champion、holdout 或采纳策略；Patch LLM 也只接收可执行的目标规则。`production_skill_policy.py` 在 V0、Patch 和编译三层拒绝评测元数据；编译器会清理旧会话的历史评分章节，并从最终 `instructions.md` 删除 OpenHarness 占位标记和 directive ID。完整 rubric、Diagnosis、Judge 和 Gate 记录仅存于 Harness 状态与迭代日志。
 - **每一版 skill 和 rubric 都呈现在页面上**：版本条可点，看板分数曲线逐版累积。
 - 优化器无更多可提议 → 提示**收敛/平台期**，并诊断是否需要回去改结构。
 
@@ -192,9 +222,9 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 | `POST /api/advance` `{id}` | 全部 case 模型 Judge 完成后生成下一版 skill |
 | `POST /api/import_output` `{id, case_id, report_text, version?}` | 存平台跑出的真实报告文本 |
 | `POST /api/import_judgment` `{id, case_id, scores:{dim:score}, reasoning?, version?}` | 存平台 LLM-judge 六维分（覆盖 mock）|
-| `POST /api/run_judge_batch` `{id, version?}` | 并发 Judge 当前版本全部 case，返回 summary/results/state |
+| `POST /api/run_judge_batch` `{id, version?, case_ids?}` | 并发 Judge 当前版本绑定数据集（可选子集）；越界 case_id 会被拒绝，返回 summary/results/state |
 | `GET /api/generation/config` | 查看 WB 运行配置与预检状态 |
-| `POST /api/generation/start` `{id, case_ids?, idempotency_key?, model?, parallel?}` | 按本次指定模型/并发后台生成并自动导入 |
+| `POST /api/generation/start` `{id, case_ids?, idempotency_key?, model?, parallel?}` | 仅在当前版本绑定数据集内，按指定模型/并发后台生成并自动导入；越界 case_id 会被拒绝 |
 | `GET /api/generation?id=<job_id>` | 查询任务/逐 case 状态 |
 | `GET /api/generation?session_id=<sid>` | 查询 Session 最近任务和历史 |
 | `POST /api/generation/retry` `{job_id, idempotency_key?, model?, parallel?}` | 按可选新模型/并发仅重跑未导入 case |
@@ -223,8 +253,14 @@ Web UI 已切换为 `model_only`：不再提供人工维度评分、人工逐-ch
 | `judgments.jsonl` | 平台 LLM-judge 对真实报告的**六维评分**（按 版本×case 追加）。恢复时重建 `report_judgments`。|
 | `check_judgments.jsonl` | 批量模型 Judge 的逐-check结果与 reasoning。|
 | `generation_jobs/<job_id>.json` | WB 后台任务状态、冻结版本/hash、逐 case attempt 与导入结果。|
+| `iterations/<version>/manifest.json` | 单轮关联 ID、父子版本、输入 hash、生成/Judge run ID 与状态。|
+| `iterations/<version>/optimizer_summary.json` | Optimizer 的全量 Failure Inventory 摘要、Diagnosis 候选与唯一主目标、完整 3–5 条目标实验样例、结构化 patch、字符预算实耗、指令 diff 与两阶段模型调用摘要；未生成候选的阻断诊断也追加在 champion 版本。|
+| `iterations/<version>/dialogue_contract.json` | 各 case 的追问/回答/缺失字段、交付完整性与报告静态指标。|
+| `iterations/<version>/gate_decision.json` | 候选 vs 历史 champion 的完整分数向量、词典序硬失败、holdout、失败 case 变化及 current/champion 指针。|
+| `iterations/<version>/resource_usage.json` | 生成、Judge、Optimizer 的调用数、重试、耗时与字符量汇总。|
 
 - **每次变更即写盘**（create/import/rubric/judge/advance 之后立即），崩溃/重启不丢。
+- **迭代日志不复制大文本**：报告、Prompt 和完整 Judge 明细仍以现有 JSONL/job 文件为准；五个迭代文件只保存 hash、统计和相对引用，便于按 `iteration_id` 串起整轮。
 - **重启自动恢复**：`server.py` 启动时扫描 `sessions/` 全部载入，页面可继续之前的迭代。
 - 右列「操作历史（已落盘）」面板实时展示 events 时间线。
 - `GET /api/sessions` 列出所有已恢复会话。

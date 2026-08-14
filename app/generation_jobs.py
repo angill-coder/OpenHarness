@@ -30,7 +30,10 @@ from external_run_models import (  # noqa: E402
     ReportOutputContract,
 )
 import runner as runner_mod  # noqa: E402
-from workbuddy_batch.adapter import discover_command  # noqa: E402
+import codex_runner as codex_runner_mod  # noqa: E402
+from workbuddy_batch.adapter import (  # noqa: E402
+    discover_command as discover_workbuddy_command,
+)
 from workbuddy_batch.dataset import load_cases  # noqa: E402
 
 from generation_models import (  # noqa: E402
@@ -39,10 +42,17 @@ from generation_models import (  # noqa: E402
     GenerationJob,
 )
 from model_config import (  # noqa: E402
+    DEFAULT_CODEX_REASONING_EFFORT,
+    DEFAULT_GENERATION_CODEX_MODEL,
     DEFAULT_GENERATION_WB_MODEL,
+    SUPPORTED_CODEX_MODELS,
+    SUPPORTED_CODEX_REASONING_EFFORTS,
     SUPPORTED_WB_MODELS,
 )
 import persistence as persist  # noqa: E402
+import iteration_trace  # noqa: E402
+
+
 def _read_trace_json(path: Path, default):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -151,8 +161,11 @@ class GenerationSettings:
     dataset_paths: tuple[tuple[str, Path], ...] = ()
     skill_path: Optional[Path] = None
     skill_name: Optional[str] = None
+    backend: str = "workbuddy"
     model: Optional[str] = DEFAULT_GENERATION_WB_MODEL
     models: tuple[str, ...] = SUPPORTED_WB_MODELS
+    reasoning_effort: Optional[str] = None
+    reasoning_efforts: tuple[str, ...] = ()
     parallel: int = 20
     max_report_retries: int = 3
     timeout_seconds: float = 900.0
@@ -165,6 +178,16 @@ class GenerationSettings:
 
     @classmethod
     def from_env(cls) -> "GenerationSettings":
+        backend = str(
+            os.environ.get("OPENHARNESS_RUNNER_LLM_BACKEND")
+            or os.environ.get("OPENHARNESS_RUNNER_BACKEND")
+            or "workbuddy"
+        ).strip().lower()
+        backend = {
+            "wb": "workbuddy",
+            "workbuddy_cli": "workbuddy",
+            "codex_cli": "codex",
+        }.get(backend, backend)
         legacy_dataset = os.environ.get("OPENHARNESS_WB_DATASET")
         dataset_root = ROOT / "data" / "research-report"
         dataset_paths = tuple(
@@ -198,35 +221,64 @@ class GenerationSettings:
                 )
             )
         command_path = (
-            os.environ.get("OPENHARNESS_WB_CLI_PATH") or None
-        )
+            os.environ.get("OPENHARNESS_CODEX_CLI_PATH")
+            if backend == "codex"
+            else os.environ.get("OPENHARNESS_WB_CLI_PATH")
+        ) or None
+        if backend == "codex":
+            default_model = DEFAULT_GENERATION_CODEX_MODEL
+            selected_model = os.environ.get(
+                "OPENHARNESS_RUNNER_CODEX_MODEL",
+                default_model,
+            )
+            models = SUPPORTED_CODEX_MODELS
+            reasoning_effort = os.environ.get(
+                "OPENHARNESS_RUNNER_CODEX_REASONING_EFFORT",
+                DEFAULT_CODEX_REASONING_EFFORT,
+            )
+            reasoning_efforts = SUPPORTED_CODEX_REASONING_EFFORTS
+        else:
+            selected_model = os.environ.get(
+                "OPENHARNESS_WB_MODEL",
+                DEFAULT_GENERATION_WB_MODEL,
+            )
+            models = SUPPORTED_WB_MODELS
+            reasoning_effort = None
+            reasoning_efforts = ()
         return cls(
             dataset_path=dataset,
             output_root=output,
             dataset_paths=dataset_paths,
             skill_path=skill_path,
             skill_name=skill_name,
-            model=os.environ.get(
-                "OPENHARNESS_WB_MODEL",
-                DEFAULT_GENERATION_WB_MODEL,
-            )
-            or None,
-            parallel=_env_int("OPENHARNESS_WB_PARALLEL", 20),
+            backend=backend,
+            model=selected_model or None,
+            models=models,
+            reasoning_effort=reasoning_effort,
+            reasoning_efforts=reasoning_efforts,
+            parallel=_env_int(
+                "OPENHARNESS_RUNNER_PARALLEL",
+                _env_int("OPENHARNESS_WB_PARALLEL", 20),
+            ),
             max_report_retries=_env_int(
-                "OPENHARNESS_WB_MAX_REPORT_RETRIES",
-                3,
+                "OPENHARNESS_RUNNER_MAX_REPORT_RETRIES",
+                _env_int("OPENHARNESS_WB_MAX_REPORT_RETRIES", 3),
             ),
             timeout_seconds=_env_float(
-                "OPENHARNESS_WB_TIMEOUT",
-                900.0,
+                "OPENHARNESS_RUNNER_TIMEOUT",
+                _env_float("OPENHARNESS_WB_TIMEOUT", 900.0),
             ),
             stall_timeout_seconds=_env_float(
-                "OPENHARNESS_WB_STALL_TIMEOUT",
-                180.0,
+                "OPENHARNESS_RUNNER_STALL_TIMEOUT",
+                (
+                    900.0
+                    if backend == "codex"
+                    else _env_float("OPENHARNESS_WB_STALL_TIMEOUT", 180.0)
+                ),
             ),
             max_concurrent_jobs=_env_int(
-                "OPENHARNESS_WB_MAX_CONCURRENT_JOBS",
-                1,
+                "OPENHARNESS_RUNNER_MAX_CONCURRENT_JOBS",
+                _env_int("OPENHARNESS_WB_MAX_CONCURRENT_JOBS", 1),
             ),
             command=(command_path,) if command_path else None,
             workbuddy_home=(
@@ -252,6 +304,10 @@ class GenerationSettings:
         return dict(self.dataset_paths).get(key, self.dataset_path)
 
     def validate(self) -> None:
+        if self.backend not in {"workbuddy", "codex"}:
+            raise GenerationJobError(
+                "Runner 后端仅支持 workbuddy 或 codex"
+            )
         configured = self.dataset_paths or (("v1", self.dataset_path),)
         for data_version, dataset_path in configured:
             if not dataset_path.expanduser().is_file():
@@ -283,6 +339,14 @@ class GenerationSettings:
             raise GenerationJobError(
                 "默认报告生成模型不在支持列表中: %s" % self.model
             )
+        if self.backend == "codex":
+            if not self.reasoning_effort:
+                raise GenerationJobError("Codex Runner 推理力度不能为空")
+            if self.reasoning_effort not in self.reasoning_efforts:
+                raise GenerationJobError(
+                    "不支持的 Codex Runner 推理力度: %s"
+                    % self.reasoning_effort
+                )
         if self.max_report_retries < 0:
             raise GenerationJobError(
                 "max_report_retries 不能小于 0"
@@ -307,8 +371,11 @@ class GenerationSettings:
                 if self.skill_path
                 else self.skill_name
             ),
+            "backend": self.backend,
             "model": self.model,
             "models": list(self.models),
+            "reasoning_effort": self.reasoning_effort,
+            "reasoning_efforts": list(self.reasoning_efforts),
             "parallel": self.parallel,
             "max_report_retries": self.max_report_retries,
             "max_attempts": self.max_report_retries + 1,
@@ -382,7 +449,11 @@ class GenerationJobService:
         self.sessions = sessions
         self.settings = settings or GenerationSettings.from_env()
         self._uses_real_runner = runner_func is None
-        self.runner_func = runner_func or runner_mod.run_external_cases
+        self.runner_func = runner_func or (
+            codex_runner_mod.run_external_cases
+            if self.settings.backend == "codex"
+            else runner_mod.run_external_cases
+        )
         self._lock = threading.RLock()
         self._session_locks: Dict[str, threading.RLock] = {}
         self._jobs: Dict[str, GenerationJob] = {}
@@ -435,7 +506,11 @@ class GenerationJobService:
         if not self._uses_real_runner:
             return
         try:
-            command = self.settings.command or discover_command()
+            command = self.settings.command or (
+                codex_runner_mod.discover_command()
+                if self.settings.backend == "codex"
+                else discover_workbuddy_command()
+            )
         except FileNotFoundError as exc:
             raise GenerationJobError(str(exc)) from exc
         executable = Path(command[0]).expanduser()
@@ -444,7 +519,8 @@ class GenerationJobService:
             and not executable.is_file()
         ):
             raise GenerationJobError(
-                "WorkBuddy CLI 不存在: %s" % executable
+                "%s CLI 不存在: %s"
+                % (self.settings.backend, executable)
             )
 
     def dataset_path_for_session(self, session_id: str) -> Path:
@@ -557,11 +633,15 @@ class GenerationJobService:
 
     def _persist(self, job: GenerationJob) -> None:
         job.updated_at = time.time()
+        payload = job.to_dict()
         persist.save_generation_job(
             job.session_id,
             job.job_id,
-            job.to_dict(),
+            payload,
         )
+        session = self.sessions.get(job.session_id)
+        if session is not None:
+            iteration_trace.record_generation_job(session, payload)
 
     def get(self, job_id: str) -> GenerationJob:
         with self._lock:
@@ -659,6 +739,22 @@ class GenerationJobService:
                 "不支持的报告生成模型: %s" % selected_model
             )
 
+        # 先做版本数据集边界校验，再处理幂等/活跃任务复用，避免无效
+        # case_ids 借复用分支绕过 API 校验。
+        if case_ids is not None:
+            case_ids = list(dict.fromkeys(str(item) for item in case_ids))
+            if not case_ids:
+                raise GenerationJobError("case_ids 不能为空")
+            with self.session_lock(session_id):
+                target = session._eval_target()
+                eligible_case_ids = session._case_ids_for(target)
+            out_of_scope = sorted(set(case_ids) - eligible_case_ids)
+            if out_of_scope:
+                raise GenerationJobError(
+                    "case 不属于当前 Skill 版本绑定的数据集: "
+                    + ", ".join(out_of_scope)
+                )
+
         with self._lock:
             if idempotency_key:
                 for existing in self._jobs.values():
@@ -681,16 +777,27 @@ class GenerationJobService:
                 raise GenerationJobError(
                     "请先给 Session 导入评测数据"
                 )
+            target = session._eval_target()
+            eligible_cases = session._cases_for(target)
+            eligible_case_ids = session._case_ids_for(target)
+            if not eligible_case_ids:
+                raise GenerationJobError(
+                    "当前 Skill 版本绑定的数据集没有有效 case"
+                )
             session_case_rows = {
                 str(item["case_id"]): item
-                for item in session.cases
+                for item in eligible_cases
             }
             session_cases = {
                 case_id: str(item.get("split") or "dev")
                 for case_id, item in session_case_rows.items()
             }
-            version = session._eval_target()["version"]
+            version = target["version"]
             skill = _skill_for_version(session, version)
+            iteration = iteration_trace.ensure_iteration(
+                session,
+                version,
+            )
             try:
                 frozen_skill = compile_session_skill(
                     self.settings.output_root,
@@ -715,11 +822,11 @@ class GenerationJobService:
         )
         if not requested:
             raise GenerationJobError("没有要执行的 case")
-        unknown_session = sorted(set(requested) - set(session_cases))
-        if unknown_session:
+        out_of_scope = sorted(set(requested) - eligible_case_ids)
+        if out_of_scope:
             raise GenerationJobError(
-                "case 不属于当前 Session: "
-                + ", ".join(unknown_session)
+                "case 不属于当前 Skill 版本绑定的数据集: "
+                + ", ".join(out_of_scope)
             )
         missing_dataset = sorted(set(requested) - set(dataset))
         if missing_dataset:
@@ -758,9 +865,12 @@ class GenerationJobService:
             stall_timeout_seconds=self.settings.stall_timeout_seconds,
             created_at=now,
             updated_at=now,
+            backend=self.settings.backend,
+            reasoning_effort=self.settings.reasoning_effort,
             dataset_sha256=_file_hash(dataset_path),
             compiler_version=frozen_skill.compiler_version,
             base_skill_hash=frozen_skill.base_skill_hash,
+            iteration_id=iteration.get("iteration_id"),
             cases=[
                 GenerationCaseState(
                     case_id=case_id,
@@ -812,6 +922,18 @@ class GenerationJobService:
         previous = self.get(job_id)
         if previous.active:
             raise GenerationJobError("任务仍在执行，不能创建重试")
+        session = self.sessions.get(previous.session_id)
+        if session is None:
+            raise GenerationJobError(
+                "会话不存在: %s" % previous.session_id
+            )
+        with self.session_lock(previous.session_id):
+            current_version = session._eval_target()["version"]
+        if previous.skill_version != current_version:
+            raise GenerationJobError(
+                "只能重试当前 Skill 版本的任务；原任务版本为 %s，当前为 %s"
+                % (previous.skill_version, current_version)
+            )
         failed_ids = previous.failed_case_ids
         if not failed_ids:
             raise GenerationJobError("该任务没有失败 case")
@@ -855,6 +977,7 @@ class GenerationJobService:
             skill_name=None,
             skill_path=Path(job.skill_ref),
             model=job.model,
+            effort=job.reasoning_effort,
             parallel=job.parallel,
             timeout_seconds=job.timeout_seconds,
             stall_timeout_seconds=job.stall_timeout_seconds,

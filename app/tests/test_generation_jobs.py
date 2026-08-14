@@ -220,6 +220,24 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertNotIn("echo", settings.models)
         self.assertEqual(settings.models, SUPPORTED_WB_MODELS)
 
+    def test_codex_runner_environment_selects_sol_medium(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENHARNESS_RUNNER_LLM_BACKEND": "codex",
+                "OPENHARNESS_RUNNER_CODEX_MODEL": "gpt-5.6-sol",
+                "OPENHARNESS_RUNNER_CODEX_REASONING_EFFORT": "medium",
+            },
+            clear=True,
+        ):
+            settings = GenerationSettings.from_env()
+
+        self.assertEqual(settings.backend, "codex")
+        self.assertEqual(settings.model, "gpt-5.6-sol")
+        self.assertEqual(settings.models, ("gpt-5.6-sol",))
+        self.assertEqual(settings.reasoning_effort, "medium")
+        self.assertIn("medium", settings.reasoning_efforts)
+
     def test_session_metadata_routes_to_versioned_dataset(self):
         v2_dataset = self.root / "v2" / "data.json"
         v2_dataset.parent.mkdir()
@@ -336,6 +354,55 @@ class GenerationJobServiceTest(unittest.TestCase):
         self.assertIn('"brief": "A"', prompt)
         self.assertNotIn("ground_truth", prompt)
 
+    def test_generation_uses_only_version_bound_dataset(self):
+        dataset_id = self.session.add_dataset(
+            ["case-a"],
+            name="当前版本数据集",
+        )
+        self.session.active_dataset_id = dataset_id
+        self.session.versions[0]["dataset_id"] = dataset_id
+        fake = FakeRunner()
+        service = GenerationJobService(
+            {"test-session": self.session},
+            self.settings,
+            fake,
+        )
+
+        job, _ = service.start("test-session", "tester")
+        done = service.wait(job.job_id)
+
+        self.assertEqual(done.status, "completed")
+        self.assertEqual(fake.calls, [["case-a"]])
+        self.assertEqual(
+            [case.case_id for case in done.cases],
+            ["case-a"],
+        )
+        self.assertIn("case-a", self.session.report_outputs["v0"])
+        self.assertNotIn("case-b", self.session.report_outputs["v0"])
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "当前 Skill 版本绑定的数据集",
+        ):
+            service.start(
+                "test-session",
+                "tester",
+                case_ids=["case-b"],
+            )
+
+    def test_generated_import_rejects_case_outside_version_dataset(self):
+        dataset_id = self.session.add_dataset(["case-a"])
+        self.session.versions[0]["dataset_id"] = dataset_id
+
+        result = self.session.import_generated_outputs(
+            {"case-b": _artifact("case-b").text},
+            "v0",
+            "gen-out-of-scope",
+        )
+
+        self.assertIn("绑定数据集之外", result["error"])
+        self.assertNotIn("v0", self.session.report_outputs)
+
     def test_job_completes_and_imports_all_reports(self):
         fake = FakeRunner()
         service = GenerationJobService(
@@ -366,7 +433,10 @@ class GenerationJobServiceTest(unittest.TestCase):
                 / "instructions.md"
             ).is_file()
         )
-        self.assertEqual(done.compiler_version, "session-skill/v3")
+        self.assertEqual(
+            done.compiler_version,
+            "session-skill/v4-production-boundary",
+        )
         self.assertIsNotNone(done.base_skill_hash)
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
@@ -492,6 +562,33 @@ class GenerationJobServiceTest(unittest.TestCase):
                 model="not-a-workbuddy-model",
             )
 
+    def test_job_records_codex_backend_and_passes_reasoning_effort(self):
+        fake = FakeRunner()
+        settings = GenerationSettings(
+            dataset_path=self.dataset,
+            output_root=self.root / "codex-runs",
+            skill_path=self.skill,
+            backend="codex",
+            model="gpt-5.6-sol",
+            models=("gpt-5.6-sol",),
+            reasoning_effort="medium",
+            reasoning_efforts=("medium",),
+            parallel=1,
+            min_report_bytes=10,
+        )
+        service = GenerationJobService(
+            {"test-session": self.session},
+            settings,
+            fake,
+        )
+
+        job, _ = service.start("test-session", "tester")
+        done = service.wait(job.job_id)
+
+        self.assertEqual(done.backend, "codex")
+        self.assertEqual(done.reasoning_effort, "medium")
+        self.assertEqual(fake.requests[0].effort, "medium")
+
     def test_partial_job_can_retry_only_failed_case(self):
         fake = FakeRunner(fail_once={"case-b"})
         service = GenerationJobService(
@@ -525,6 +622,24 @@ class GenerationJobServiceTest(unittest.TestCase):
         )
         self.assertEqual(fake.calls[-1], ["case-b"])
         self.assertIn("case-b", self.session.report_outputs["v0"])
+
+    def test_retry_rejects_job_from_non_current_version(self):
+        fake = FakeRunner(fail_once={"case-b"})
+        service = GenerationJobService(
+            {"test-session": self.session},
+            self.settings,
+            fake,
+        )
+        first, _ = service.start("test-session", "tester")
+        first = service.wait(first.job_id)
+        self.assertEqual(first.status, "partial")
+
+        self.session.versions[0]["version"] = "v1"
+        with self.assertRaisesRegex(
+            ValueError,
+            "只能重试当前 Skill 版本",
+        ):
+            service.retry(first.job_id, "tester")
 
     def test_second_start_reuses_active_session_job(self):
         fake = FakeRunner()

@@ -37,6 +37,16 @@ TERMINAL_GENERATION = {
     "interrupted",
 }
 RETRYABLE_HTTP = {408, 409, 429, 500, 502, 503, 504}
+RETRYABLE_OPTIMIZER_CODES = {
+    "llm_rewrite_no_change",
+    "invalid_structured_patch",
+    "invalid_experiment_design",
+    "invalid_root_cause_evidence",
+    "optimizer_self_check_failed",
+    "patch_validation_failed",
+    "invalid_patch_targets",
+    "redline_guard_failed",
+}
 
 
 class LoopError(RuntimeError):
@@ -52,6 +62,16 @@ class APIError(LoopError):
         super().__init__("HTTP %s: %s" % (status, message))
         self.status = status
         self.payload = payload
+
+
+def _is_retryable_loop_error(exc: Exception) -> bool:
+    if isinstance(exc, TransientLoopError):
+        return True
+    if not isinstance(exc, APIError) or exc.status not in RETRYABLE_HTTP:
+        return False
+    # 空响应已经在 llm_client 内按配置完成重试；这里再次重试会形成
+    # “调用层 retries × 自动 loop retries”的乘法放大。
+    return (exc.payload or {}).get("code") != "empty_llm_response"
 
 
 def _now_text() -> str:
@@ -426,7 +446,7 @@ class ExperimentLoop:
             return
         if (
             status == "blocked"
-            and advance.get("code") == "llm_rewrite_no_change"
+            and advance.get("code") in RETRYABLE_OPTIMIZER_CODES
         ):
             time.sleep(min(2 ** (attempt - 1), 8))
             return
@@ -450,6 +470,9 @@ class ExperimentLoop:
         self.emit(
             "automation_started",
             session_id=self.session_id,
+            runner_backend=config.get("backend"),
+            runner_model=config.get("model"),
+            runner_reasoning_effort=config.get("reasoning_effort"),
             generation_parallel=self.generation_parallel,
             judge_parallel=self.judge_parallel,
             max_generation_jobs_per_version=(
@@ -508,13 +531,7 @@ class ExperimentLoop:
                     raise LoopError("未知动作: %s" % kind)
                 transient_errors = 0
             except (APIError, LoopError) as exc:
-                retryable = (
-                    isinstance(exc, TransientLoopError)
-                    or (
-                        isinstance(exc, APIError)
-                        and exc.status in RETRYABLE_HTTP
-                    )
-                )
+                retryable = _is_retryable_loop_error(exc)
                 transient_errors += 1
                 if retryable and transient_errors <= 5:
                     delay = min(2 ** (transient_errors - 1), 20)

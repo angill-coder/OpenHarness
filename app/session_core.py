@@ -26,11 +26,14 @@ import clustering as clustering_mod              # noqa: E402
 
 import generator as generator_mod                 # noqa: E402
 import persistence as persist                      # noqa: E402
+import iteration_trace                             # noqa: E402
+import optimizer_pipeline                          # noqa: E402
 
 
 DIMS = ["data_accuracy", "completeness", "insight", "conciseness"]
 DIM_ZH = {"data_accuracy": "数据准确性", "completeness": "完整性",
           "insight": "洞察质量", "conciseness": "简洁性"}
+DEFAULT_MAX_NO_IMPROVEMENT = 8
 
 
 def _dims_from_rubric(rubric):
@@ -44,7 +47,10 @@ def _normalize_optimizer_stop(value=None):
     """校验会话级 early-stop；它独立于 rubric.target，不改评分标准。"""
     value = value or {}
     target = value.get("overall_target")
-    patience = value.get("max_no_improvement")
+    patience = value.get(
+        "max_no_improvement",
+        DEFAULT_MAX_NO_IMPROVEMENT,
+    )
     if target in ("", None):
         target = None
     else:
@@ -113,6 +119,8 @@ class SessionCore:
         )
         self.rubric = gen["rubric"]
         generator_mod.hydrate_research_optimizer_metadata(self.rubric)
+        if self.optimizer_mode == "llm_rewrite":
+            optimizer_pipeline.hydrate_gate_policy(self.rubric)
         clustering_mod.validate_optimizer_mappings(self.rubric)
         self.gen_rationale = gen["rationale"]
         self.detected = gen["detected"]
@@ -170,6 +178,26 @@ class SessionCore:
     def _current(self):
         return self.versions[self.current_idx]
 
+    def _champion(self):
+        """词典序历史 champion（不等于最近一个 adopted 版本）。"""
+        return optimizer_pipeline.champion_entry(self)
+
+    def _sync_current_to_champion(self):
+        """修复旧 Gate 可能造成的 current/champion 指针分叉。"""
+        champion = self._champion()
+        if champion is None:
+            return None
+        champion_idx = self.versions.index(champion)
+        if champion_idx == self.current_idx:
+            return None
+        before = self._current().get("version")
+        self.current_idx = champion_idx
+        return {
+            "before": before,
+            "after": champion.get("version"),
+            "reason": "historical_champion_enforced",
+        }
+
     # ---------- 数据集分组 ----------
     def _new_dataset_id(self) -> str:
         import time as _t
@@ -222,12 +250,11 @@ class SessionCore:
         return self._current()
 
     def settle_pending_candidate(self, account=None):
-        """llm_rewrite 异步 gate 结算:候选真实判分完 -> 对比当前最优 -> 采纳或回滚。
+        """llm_rewrite 异步 gate 结算:候选真实判分完 -> 对比历史 champion。
 
         判分未全完则不结算(幂等,返回 None)。采纳则 current_idx 移到候选;
-        回滚则 current_idx 留在 parent(候选标 rejected)。两种结果都写 opt_history。
+        拒绝则 current_idx 回到历史 champion(候选标 rejected)。两种结果都写 opt_history。
         """
-        import optimizer_pipeline
         pidx = getattr(self, "pending_idx", None)
         if pidx is None:
             return None
@@ -237,6 +264,7 @@ class SessionCore:
             return None  # 判分未全完 -> 不结算
 
         saved = self.current_idx
+        current_before = self.versions[saved]["version"]
         # 父版 = 候选分叉自的当前最优(按版本号定位;兜底用 saved)
         parent_idx = saved
         for i, v in enumerate(self.versions):
@@ -247,16 +275,59 @@ class SessionCore:
         self.current_idx = pidx
         self.evaluate(account)
         cand_dims = cand.get("dev") or {}
-        # 算/取父版(当前最优)真实分
+        # 算/取候选的分叉父版，仅用于轨迹和 diff。
         self.current_idx = parent_idx
         self.evaluate(account)
         parent = self.versions[parent_idx]
         parent_dims = parent.get("dev") or {}
 
+        # Gate 基线永远是历史 champion，不是最近 adopted/分叉父版。
+        champion = self._champion() or parent
+        champion_idx = self.versions.index(champion)
+        self.current_idx = champion_idx
+        self.evaluate(account)
+        champion_dims = champion.get("dev") or {}
+        champion_before = champion.get("version")
+
         target_dims = (cand.get("proposal") or {}).get("affected_dims") or []
         tol = optimizer_pipeline.no_regression_tol(self.rubric)
+        min_delta = optimizer_pipeline.min_overall_improvement(self.rubric)
+        champion_hard = optimizer_pipeline.hard_failure_metrics(
+            self, champion, "dev",
+        )
+        candidate_hard = optimizer_pipeline.hard_failure_metrics(
+            self, cand, "dev",
+        )
+        holdout_available = bool(champion.get("test") and cand.get("test"))
+        holdout = {
+            "available": holdout_available,
+            "champion_scores": champion.get("test") or {},
+            "candidate_scores": cand.get("test") or {},
+            "champion_hard": optimizer_pipeline.hard_failure_metrics(
+                self, champion, "test",
+            ),
+            "candidate_hard": optimizer_pipeline.hard_failure_metrics(
+                self, cand, "test",
+            ),
+        }
+        target_check = optimizer_pipeline.target_check_metrics(
+            self,
+            champion,
+            cand,
+            cand.get("proposal"),
+            "dev",
+        )
         adopt, verdict, reasons = optimizer_pipeline.evaluate_gate(
-            parent_dims, cand_dims, target_dims, tol, list(self.dims)
+            champion_dims,
+            cand_dims,
+            target_dims,
+            tol,
+            list(self.dims),
+            champion_hard=champion_hard,
+            candidate_hard=candidate_hard,
+            holdout=holdout,
+            target_check=target_check,
+            min_overall_improvement=min_delta,
         )
         cand["verdict"] = verdict
         cand["verdict_reasons"] = reasons
@@ -266,7 +337,7 @@ class SessionCore:
             self.current_idx = pidx
         else:
             cand["candidate_state"] = "rejected"
-            self.current_idx = parent_idx   # 天然回滚:指针留在最优
+            self.current_idx = champion_idx
 
         # 回写 opt_history 中该候选那条 pending 记录
         for h in reversed(self.opt_history):
@@ -276,25 +347,42 @@ class SessionCore:
                 break
 
         self.pending_idx = None
+        optimizer_stop = self._record_optimizer_outcome(
+            cand,
+            champion,
+            adopt,
+        )
+        gate_trace = iteration_trace.record_gate_decision(
+            self,
+            cand,
+            champion,
+            verdict,
+            reasons,
+            target_dims,
+            tol,
+            current_before,
+            champion_before,
+            source_parent=parent,
+        )
         persist.append_event(self.id, "candidate_settled", {
             "candidate": cand_ver,
             "parent": parent["version"],
+            "gate_baseline": champion["version"],
             "verdict": verdict,
             "reasons": reasons,
             "cand_dev": cand_dims,
-            "parent_dev": parent_dims,
-            "optimizer_stop": self._record_optimizer_outcome(
-                cand,
-                parent,
-                adopt,
-            ),
+            "champion_dev": champion_dims,
+            "source_parent_dev": parent_dims,
+            "optimizer_stop": optimizer_stop,
+            "iteration_id": gate_trace.get("iteration_id"),
         })
         self._save()
         return {
             "candidate": cand_ver,
             "verdict": verdict,
             "reasons": reasons,
-            "optimizer_stop": self._optimizer_stop_state(),
+            "optimizer_stop": optimizer_stop,
+            "iteration_id": gate_trace.get("iteration_id"),
         }
 
     def _optimizer_stop_state(self):
@@ -343,13 +431,13 @@ class SessionCore:
         stopped = bool(reached_target or plateau)
         if reached_target:
             reason = (
-                "当前最佳已采纳版 overall %.2f ≥ 停止目标 %.2f"
+                "当前词典序 champion overall %.2f ≥ 停止目标 %.2f"
                 % (current_overall, target)
             )
             code = "overall_target_reached"
         elif plateau:
             reason = (
-                "连续 %d 个候选版本未提升已采纳最佳 overall"
+                "连续 %d 个候选版本未产生新的词典序 champion"
                 % patience
             )
             code = "no_improvement_patience_reached"
@@ -373,21 +461,19 @@ class SessionCore:
             ),
         }
 
-    def _record_optimizer_outcome(self, candidate, parent, adopted):
-        """候选结算后更新 patience：只有已采纳版 overall 创新高才算提升。"""
+    def _record_optimizer_outcome(self, candidate, champion, adopted):
+        """候选结算后更新 patience：任一合法的词典序 champion 提升都清零。"""
         progress = self.optimization_progress
-        parent_overall = (parent.get("dev") or {}).get("overall")
+        champion_overall = (champion.get("dev") or {}).get("overall")
         candidate_overall = (candidate.get("dev") or {}).get("overall")
         best = progress.get("best_overall")
         if best is None:
-            best = parent_overall
-        improved = (
-            bool(adopted)
-            and candidate_overall is not None
-            and (best is None or candidate_overall - best > 0.001)
-        )
+            best = champion_overall
+        improved = bool(adopted)
         if improved:
-            best = candidate_overall
+            # best_overall 现表示“当前词典序 champion 的 overall”，
+            # 硬红线减少时它允许低于旧 champion overall。
+            best = candidate_overall if candidate_overall is not None else best
             progress["no_improvement_streak"] = 0
         else:
             progress["no_improvement_streak"] = (
@@ -400,7 +486,7 @@ class SessionCore:
         progress["last_candidate"] = candidate.get("version")
         progress["last_candidate_overall"] = candidate_overall
         progress["last_outcome"] = (
-            "overall_improved" if improved else "overall_not_improved"
+            "champion_improved" if improved else "champion_not_improved"
         )
 
         state = self._optimizer_stop_state()
@@ -422,6 +508,27 @@ class SessionCore:
             persist.append_event(self.id, "optimization_stopped", state)
             self._save()
         return state
+
+    def reset_optimization_progress(self, reason, account=None):
+        """更换 Runner/数据口径后重建 patience 基线，不改版本与历史。"""
+        if self.pending_idx is not None:
+            return {"error": "存在待结算候选，不能重置优化进度"}
+        message = str(reason or "").strip()
+        if not message:
+            return {"error": "缺少重置原因"}
+        previous = dict(self.optimization_progress)
+        self.optimization_progress = _new_optimization_progress()
+        persist.append_event(
+            self.id,
+            "optimization_progress_reset",
+            {
+                "reason": message,
+                "baseline_version": self._current().get("version"),
+                "previous": previous,
+            },
+        )
+        self._save()
+        return self.view(account)
 
     # ---------- 落盘 / 恢复 ----------
     def _save(self):
@@ -452,11 +559,14 @@ class SessionCore:
             "current_idx": self.current_idx,
             "opt_history": self.opt_history,
             "cases": self.cases,
+            "datasets": self.datasets,
+            "active_dataset_id": self.active_dataset_id,
             "generation_imports": self.generation_imports,
             "versions": [{
                 "skill": v["skill"].to_dict(),
                 "adopted": v["adopted"],
                 "proposal": v["proposal"],
+                "dataset_id": v.get("dataset_id"),
                 "failure_report": v.get("failure_report"),
                 "failure_mapping_error": v.get(
                     "failure_mapping_error",
@@ -491,6 +601,8 @@ class SessionCore:
         self.rubric = generator_mod.hydrate_research_optimizer_metadata(
             snap["rubric"]
         )
+        if self.optimizer_mode == "llm_rewrite":
+            optimizer_pipeline.hydrate_gate_policy(self.rubric)
         clustering_mod.validate_optimizer_mappings(self.rubric)
         self.gen_rationale = snap.get("gen_rationale", "")
         self.detected = snap.get("detected", {})
@@ -521,6 +633,7 @@ class SessionCore:
                     [],
                 ),
                 "workflow_block": vd.get("workflow_block"),
+                "dataset_id": vd.get("dataset_id"),
                 "candidate_state": vd.get("candidate_state"),
                 "verdict": vd.get("verdict"),
                 "verdict_reasons": vd.get("verdict_reasons"),
@@ -541,7 +654,15 @@ class SessionCore:
                 except Exception:
                     pass
             self.current_idx = saved_idx
+        repaired = self._sync_current_to_champion()
         self._persist = True
+        if repaired:
+            persist.append_event(
+                self.id,
+                "current_pointer_repaired",
+                repaired,
+            )
+            self._save()
         return self
 
     # ---------- 视图 ----------
@@ -611,6 +732,33 @@ class SessionCore:
                 "enabled": False,
                 "reason": optimizer_stop["reason"],
             }
+        champion = self._champion() or self._current()
+        if getattr(self, "optimizer_mode", "switch_search") == "llm_rewrite":
+            gate_policy = {
+                "rule": "net_hard_improvement_champion/v4",
+                "comparison_baseline": "historical_champion",
+                "champion_version": champion["version"],
+                "dimension_drop_tolerance": optimizer_pipeline.no_regression_tol(
+                    self.rubric,
+                ),
+                "target_check_drop_tolerance": (
+                    optimizer_pipeline.TARGET_CHECK_DROP_TOLERANCE
+                ),
+                "holdout_overall_drop_tolerance": (
+                    optimizer_pipeline.HOLDOUT_OVERALL_DROP_TOLERANCE
+                ),
+                "min_overall_improvement": optimizer_pipeline.min_overall_improvement(
+                    self.rubric,
+                ),
+                "holdout_split": "test",
+                "holdout_cases": self._split_counts().get("test", 0),
+                "overall_path_holdout_ready": self._split_counts().get("test", 0) > 0,
+            }
+        else:
+            gate_policy = {
+                "rule": "legacy_switch_search",
+                "comparison_baseline": "current_version",
+            }
         return {
             "session_id": self.id,
             "requirement": self.requirement,
@@ -663,6 +811,7 @@ class SessionCore:
             "opt_history": self.opt_history,
             "optimizer_mode": getattr(self, "optimizer_mode", "switch_search"),
             "v0_strategy": getattr(self, "v0_strategy", "base_skill"),
+            "gate_policy": gate_policy,
             "optimizer_stop": optimizer_stop,
             "pending_candidate": (
                 {
@@ -674,7 +823,7 @@ class SessionCore:
                 if getattr(self, "pending_idx", None) is not None
                 else None
             ),
-            "best_version": self._current()["version"],
+            "best_version": champion["version"],
             "history": persist.load_events(self.id),
         }
 
@@ -699,7 +848,17 @@ class SessionCore:
         }
 
     def _version_real_judge_complete(self, version):
-        case_ids = {str(case["case_id"]) for case in self.cases}
+        version_entry = next(
+            (
+                item
+                for item in self.versions
+                if item.get("version") == version
+            ),
+            None,
+        )
+        if version_entry is None:
+            return False
+        case_ids = self._case_ids_for(version_entry)
         if not case_ids:
             return False
         checks = self.judge_checks.get(version, {})
@@ -722,7 +881,7 @@ class SessionCore:
 
     def _version_status(self, version_entry):
         version = version_entry["version"]
-        case_ids = {str(case["case_id"]) for case in self.cases}
+        case_ids = self._case_ids_for(version_entry)
         reports = self.report_outputs.get(version, {})
         ready = {
             case_id

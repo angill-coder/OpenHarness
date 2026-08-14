@@ -15,8 +15,8 @@ API:
   POST /api/advance           {id, llm_backend?, llm_model?, llm_reasoning_effort?}  -> 生成下一版 skill(optimizer+gate)
   POST /api/import_output     {id, case_id, report_text, version?}  -> 存平台跑出的真实报告文本
   POST /api/import_judgment   {id, case_id, scores:{dim:score}, reasoning?, version?}  -> 存平台LLM-judge六维分(覆盖mock)
-  POST /api/run_judge_batch   {id, version?, parallel?, judge_strategy?, llm_backend?, llm_model?, llm_reasoning_effort?} -> 并发 Judge 当前版本全部 case
-  POST /api/generation/start  {id, idempotency_key?, parallel?, model?} -> 后台调用 WB 并自动批量导入
+  POST /api/run_judge_batch   {id, version?, case_ids?, parallel?, judge_strategy?, llm_backend?, llm_model?, llm_reasoning_effort?} -> 并发 Judge 当前版本数据集
+  POST /api/generation/start  {id, case_ids?, idempotency_key?, parallel?, model?} -> 后台调用 Runner CLI 并自动批量导入
   GET  /api/generation?id=    -> 查询生成任务
   POST /api/generation/retry  {job_id, parallel?, model?} -> 仅重跑未导入的 case
   POST /api/generation/cancel {job_id} -> 请求取消
@@ -43,6 +43,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import session as session_mod  # noqa: E402
 import persistence as persist  # noqa: E402
+import iteration_trace  # noqa: E402
 import llm_client  # noqa: E402
 import dashboard_api  # noqa: E402
 from generation_jobs import (  # noqa: E402
@@ -831,6 +832,16 @@ class Handler(BaseHTTPRequestHandler):
                             DEFAULT_JUDGE_MAX_RETRIES,
                         )
                     ),
+                    "api_max_tokens_default": llm_client._max_tokens(),
+                    "optimizer_max_tokens": llm_client._max_tokens(
+                        os.environ.get(
+                            "LLM_OPTIMIZER_MAX_TOKENS",
+                            "12000",
+                        )
+                    ),
+                    "optimizer_guard_max_tokens": llm_client._max_tokens(
+                        os.environ.get("LLM_GUARD_MAX_TOKENS", "2000")
+                    ),
                     "llm_backends": ["api", "workbuddy", "codex"],
                     "evaluation_models": list(SUPPORTED_WB_MODELS),
                     "evaluation_model_default": DEFAULT_EVALUATION_WB_MODEL,
@@ -1124,6 +1135,15 @@ class Handler(BaseHTTPRequestHandler):
                         llm_model=llm_model,
                         llm_reasoning_effort=llm_reasoning_effort,
                     )
+            except llm_client.EmptyLLMResponseError as exc:
+                return self._send(
+                    502,
+                    {
+                        "error": "LLM 改写失败: %s" % exc,
+                        "code": exc.error_code,
+                        "details": exc.diagnostics,
+                    },
+                )
             except llm_client.LLMClientError as exc:
                 return self._send(
                     502,
@@ -1169,6 +1189,24 @@ class Handler(BaseHTTPRequestHandler):
                 200 if reused else 202,
                 {"reused": reused, "job": job.to_dict()},
             )
+
+        if u.path == "/api/optimization/reset_progress":
+            s = self._sess(b.get("id"))
+            if not s:
+                return
+            if _active_generation(s.id) or _active_judge(s.id):
+                return self._send(
+                    409,
+                    {"error": "生成或 Judge 进行中，不能重置优化进度"},
+                )
+            with _session_lock(s.id):
+                result = s.reset_optimization_progress(
+                    b.get("reason"),
+                    account=acct,
+                )
+            if "error" in result:
+                return self._send(409, result)
+            return self._send(200, result)
 
         if u.path == "/api/generation/retry":
             if GENERATION_SERVICE is None:
@@ -1281,6 +1319,8 @@ class Handler(BaseHTTPRequestHandler):
                     b.get("version"),
                     account=acct,
                 )
+            if "error" in result:
+                return self._send(400, result)
             return self._send(200, result)
 
         if u.path == "/api/run_judge":
@@ -1322,19 +1362,72 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except (ValueError, llm_client.LLMClientError) as exc:
                 return self._send(400, {"error": str(exc)})
-            ver = b.get("version") or s._eval_target()["version"]
-            if ver != s._eval_target()["version"]:
-                return self._send(409, {"error": "只能批量 Judge 当前 Skill 版本"})
+            requested_case_ids = b.get("case_ids")
+            if requested_case_ids is not None and not isinstance(
+                requested_case_ids,
+                (list, tuple),
+            ):
+                return self._send(400, {"error": "case_ids 必须是数组"})
+            if requested_case_ids is not None:
+                requested_case_ids = list(
+                    dict.fromkeys(str(item) for item in requested_case_ids)
+                )
+                if not requested_case_ids:
+                    return self._send(400, {"error": "case_ids 不能为空"})
+            with _session_lock(s.id):
+                target = s._eval_target()
+                ver = b.get("version") or target["version"]
+                if ver != target["version"]:
+                    return self._send(
+                        409,
+                        {"error": "只能批量 Judge 当前 Skill 版本"},
+                    )
+                eligible_case_ids = s._case_ids_for(target)
+                out_of_scope = sorted(
+                    set(requested_case_ids or ()) - eligible_case_ids
+                )
+                if out_of_scope:
+                    return self._send(
+                        409,
+                        {
+                            "error": (
+                                "case 不属于当前 Skill 版本绑定的数据集: "
+                                + ", ".join(out_of_scope)
+                            )
+                        },
+                    )
             if not _claim_judge(s.id):
                 return self._send(409, {"error": "该 Session 已有批量 Judge 正在执行"})
+            judge_run_id = "judge-%s" % uuid.uuid4().hex[:12]
             try:
+                with _session_lock(s.id):
+                    if s._eval_target()["version"] != ver:
+                        return self._send(
+                            409,
+                            {"error": "Judge 启动前 Skill 版本已变化"},
+                        )
+                    iteration = iteration_trace.ensure_iteration(s, ver)
+                iteration_id = iteration.get("iteration_id")
                 if _active_generation(s.id):
                     return self._send(
                         409,
                         {"error": "真实报告生成中，请等待批量导入完成后再 Judge"},
                     )
                 with _session_lock(s.id):
-                    cases = [dict(case) for case in s.cases]
+                    target = s._eval_target()
+                    if target["version"] != ver:
+                        return self._send(
+                            409,
+                            {"error": "Judge 启动前 Skill 版本已变化"},
+                        )
+                    cases = [dict(case) for case in s._cases_for(target)]
+                    if requested_case_ids is not None:
+                        requested_set = set(requested_case_ids)
+                        cases = [
+                            case
+                            for case in cases
+                            if str(case["case_id"]) in requested_set
+                        ]
                     reports = dict(s.report_outputs.get(ver, {}))
                     rubric = dict(s.rubric)
                     existing = dict(s.judge_checks.get(ver, {}))
@@ -1343,7 +1436,10 @@ class Handler(BaseHTTPRequestHandler):
                     for dimension in rubric.get("dimensions", [])
                 )
                 if not cases:
-                    return self._send(400, {"error": "尚未导入评测 case"})
+                    return self._send(
+                        400,
+                        {"error": "当前 Skill 版本绑定的数据集没有有效 case"},
+                    )
                 missing_reports = [
                     case["case_id"]
                     for case in cases
@@ -1454,7 +1550,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "Judge 期间 Rubric 已变化，结果未写入"
                                 ),
                             }
-                        s.set_judge_checks_batch(
+                        write_result = s.set_judge_checks_batch(
                             {
                                 case_id: {
                                     "checks": item["checks"],
@@ -1474,12 +1570,25 @@ class Handler(BaseHTTPRequestHandler):
                                         judge_llm_reasoning_effort
                                     ),
                                     "judge_trace": item.get("judge_trace"),
+                                    "judge_run_id": judge_run_id,
+                                    "iteration_id": iteration_id,
                                 }
                             },
                             ver,
                             account=acct,
                             evaluate_now=False,
                         )
+                        if isinstance(write_result, dict) and write_result.get(
+                            "error"
+                        ):
+                            return {
+                                **item,
+                                "status": "stale_report",
+                                "error": (
+                                    "Judge 结果写入被拒绝: "
+                                    + write_result["error"]
+                                ),
+                            }
                     return item
 
                 def call_judge_model(prompt):
@@ -1509,6 +1618,25 @@ class Handler(BaseHTTPRequestHandler):
                 with _session_lock(s.id):
                     s.evaluate(acct)
                     s._save()
+                    iteration_trace.record_judge_run(
+                        s,
+                        ver,
+                        judge_run_id,
+                        results,
+                        {
+                            "strategy": judge_strategy,
+                            "backend": judge_llm_backend,
+                            "model": (
+                                judge_llm_model
+                                or DEFAULT_EVALUATION_API_MODEL
+                            ),
+                            "reasoning_effort": (
+                                judge_llm_reasoning_effort
+                            ),
+                            "parallel": judge_parallel,
+                            "max_retries": judge_max_retries,
+                        },
+                    )
                     # llm_rewrite:候选判分完成 -> 自动 gate 结算(采纳/回滚)
                     settle = s.settle_pending_candidate(acct)
                     state = s.view(acct)
@@ -1529,6 +1657,8 @@ class Handler(BaseHTTPRequestHandler):
                     summary["status"] = "completed"
                 if settle:
                     summary["candidate_settled"] = settle
+                summary["judge_run_id"] = judge_run_id
+                summary["iteration_id"] = iteration_id
                 return self._send(
                     200,
                     {

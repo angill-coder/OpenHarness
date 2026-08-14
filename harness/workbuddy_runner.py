@@ -144,6 +144,8 @@ def _normalize_cases(
     cases: list[CaseSpec],
     request: ExternalRunRequest,
     requested_skill_name: str,
+    execution_directive: Optional[str] = None,
+    runner_name: str = "WorkBuddy",
 ) -> tuple[list[CaseSpec], Dict[str, Dict[str, str]]]:
     roots = tuple(
         item.expanduser().resolve()
@@ -258,8 +260,10 @@ def _normalize_cases(
                 "skill_version": request.skill_version,
                 "source_turns": source_turns,
                 "execution_directive_sha256": sha256_text(
-                    compile_execution_directive(request.output_contract)
+                    execution_directive
+                    or compile_execution_directive(request.output_contract)
                 ),
+                "runner_name": runner_name,
             }
         )
         normalized_case = replace(

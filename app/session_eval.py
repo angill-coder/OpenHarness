@@ -29,8 +29,10 @@ import optimizer as optimizer_mod                   # noqa: E402
 from workbuddy_batch.dataset import openharness_rows  # noqa: E402
 
 import persistence as persist                        # noqa: E402
+import llm_client                                    # noqa: E402
 import optimizer_registry                            # noqa: E402
 import optimizer_pipeline                            # noqa: E402
+import iteration_trace                               # noqa: E402
 
 
 class SessionEval:
@@ -106,8 +108,19 @@ class SessionEval:
         )
         if self.rubric.get("product") == "research_insight":
             try:
+                # test 是 Gate 的独立 holdout，不得泄漏进 Optimizer 失败上下文。
+                optimizer_case_ids = {
+                    str(case["case_id"])
+                    for case in eval_cases
+                    if case["split"] in ("train", "dev")
+                }
+                optimizer_judgments = {
+                    case_id: payload
+                    for case_id, payload in self.judge_checks.get(ver, {}).items()
+                    if str(case_id) in optimizer_case_ids
+                }
                 failure_report = clustering_mod.analyze_real_judgments(
-                    self.judge_checks.get(ver, {}),
+                    optimizer_judgments,
                     self.rubric,
                 )
                 cur["failure_mapping_error"] = []
@@ -278,7 +291,15 @@ class SessionEval:
         llm_model=None,
         llm_reasoning_effort=None,
     ):
-        """LLM 自由改写整段 instructions -> 候选态(不动 current_idx)-> 待真实判分后 settle。"""
+        """Diagnosis + Patch 生成候选态(不动 current_idx)，待真实判分后 settle。"""
+        repaired = self._sync_current_to_champion()
+        if repaired:
+            persist.append_event(
+                self.id,
+                "current_pointer_repaired",
+                repaired,
+            )
+            self._save()
         cur = self._current()
         if cur["failures"] is None:
             self.evaluate(account)
@@ -307,24 +328,60 @@ class SessionEval:
         failures = (cur.get("failure_report") or cur.get("failures")) or []
         strategy = optimizer_registry.get_strategy("llm_rewrite")
         context = optimizer_pipeline.build_optimizer_context(self, account)
-        proposal = strategy.propose(
-            self,
-            skill,
-            failures,
-            context,
-            llm_backend=llm_backend,
-            llm_model=llm_model,
-            llm_reasoning_effort=llm_reasoning_effort,
-        )
+        try:
+            proposal = strategy.propose(
+                self,
+                skill,
+                failures,
+                context,
+                llm_backend=llm_backend,
+                llm_model=llm_model,
+                llm_reasoning_effort=llm_reasoning_effort,
+            )
+        except llm_client.EmptyLLMResponseError as exc:
+            diagnostic = getattr(exc, "optimizer_trace", {})
+            iteration_trace.record_optimizer_failure(
+                self,
+                cur["version"],
+                context,
+                diagnostic,
+            )
+            persist.append_event(self.id, "optimizer_error", {
+                "version": cur["version"],
+                "error_code": exc.error_code,
+                "llm_backend": llm_backend,
+                "model": llm_model,
+                "stage": diagnostic.get("stage"),
+                "model_calls": diagnostic.get("model_calls"),
+                "diagnostics": exc.diagnostics,
+            })
+            self._save()
+            raise
         if proposal is None:
-            # propose 内部(红线守卫/无产出)已把拒绝原因写进 opt_history
-            note = (self.opt_history[-1].get("reason")
-                    if self.opt_history else None) or "LLM 未产出可用改写"
+            # propose 内部已写入结构化阻断诊断；同步落到版本轨迹和事件流。
+            diagnostic = (
+                dict(self.opt_history[-1]) if self.opt_history else {}
+            )
+            note = diagnostic.get("reason") or "LLM 未产出可用结构化 patch"
+            iteration_trace.record_optimizer_failure(
+                self,
+                cur["version"],
+                context,
+                diagnostic,
+            )
+            persist.append_event(self.id, "optimizer_blocked", {
+                "version": cur["version"],
+                "error_code": diagnostic.get("error_code"),
+                "reason": note,
+                "target": diagnostic.get("target", "instructions_patch"),
+                "stage": diagnostic.get("stage"),
+                "model_calls": diagnostic.get("model_calls", 0),
+            })
             self._save()
             v = self.view(account)
             v["advance_result"] = {
                 "status": "blocked",
-                "code": "llm_rewrite_no_change",
+                "code": diagnostic.get("error_code") or "llm_rewrite_no_change",
                 "message": note,
             }
             return v
@@ -337,19 +394,42 @@ class SessionEval:
                 continue
         cand_ver = "v%d" % (max(version_nums, default=0) + 1)
         candidate = strategy.apply_proposal(skill, proposal, cand_ver)
-        self._add_version(candidate, adopted=False, proposal=proposal)
+        # 编译后的全文已进入 candidate skill，不再在 proposal/state 中重复保存。
+        stored_proposal = {
+            key: value for key, value in proposal.items()
+            if not str(key).startswith("_")
+        }
+        self._add_version(candidate, adopted=False, proposal=stored_proposal)
         self.versions[-1]["candidate_state"] = "pending"
         self.pending_idx = len(self.versions) - 1   # 关键:不动 current_idx(防回退)
+        iteration = iteration_trace.record_optimizer_proposal(
+            self,
+            cand_ver,
+            context,
+            proposal,
+        )
         self.opt_history.append({
-            "target": "instructions_freeform",
+            "target": "instructions_patch",
             "parent": skill.version,
             "candidate": cand_ver,
             "change_summary": proposal.get("change_summary", ""),
             "targets": proposal.get("targets_failures", []),
+            "selected_target": proposal.get("selected_target"),
+            "root_cause_type": (proposal.get("root_cause") or {}).get("type"),
+            "diagnosis_candidate_count": len(
+                (proposal.get("diagnosis") or {}).get("diagnoses") or []
+            ),
+            "experiment_evidence_ids": [
+                item.get("evidence_id")
+                for item in (proposal.get("experiment") or {}).get("examples", [])
+            ],
+            "patch": proposal.get("patch"),
+            "budget": proposal.get("budget"),
             "result": "pending_real_evaluation",
             "llm_backend": llm_backend,
             "model": llm_model,
             "reasoning_effort": llm_reasoning_effort,
+            "iteration_id": iteration.get("iteration_id"),
         })
         persist.append_event(self.id, "version_proposed", {
             "version": cand_ver,
@@ -357,18 +437,21 @@ class SessionEval:
             "strategy": "llm_rewrite",
             "proposal": {k: proposal.get(k) for k in
                          ("change_summary", "targets_failures", "preserved",
-                          "hypothesis", "self_check_no_hack")},
+                          "hypothesis", "diagnosis", "selected_target",
+                          "root_cause", "experiment", "patch", "budget",
+                          "redline_preservation", "self_check_no_hack")},
             "validation": "pending_real_evaluation",
             "llm_backend": llm_backend,
             "model": llm_model,
             "reasoning_effort": llm_reasoning_effort,
+            "iteration_id": iteration.get("iteration_id"),
         })
         self._save()
         v = self.view(account)
         v["advance_result"] = {
             "status": "proposed",
             "version": cand_ver,
-            "proposal": proposal,
+            "proposal": stored_proposal,
             "requires_real_evaluation": True,
             "message": ("已生成待验证候选 %s(LLM 改写)。请对该候选执行 WB 生成 + 批量真实 Judge,"
                         "判分完成后平台自动结算采纳/回滚。" % cand_ver),

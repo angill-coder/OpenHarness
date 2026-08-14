@@ -786,6 +786,60 @@ class ModelOnlySessionTest(unittest.TestCase):
         self.assertNotIn("check_human", record)
         self.assertNotIn("dims_human", record)
 
+    def test_version_dataset_scopes_reports_judge_and_restore(self):
+        session = Session(
+            "judge-dataset-scope",
+            "生成调研洞察报告",
+            "research_insight",
+        )
+        session.import_data(
+            [
+                {"case_id": "case-a", "input": {"brief": "A"}},
+                {"case_id": "case-b", "input": {"brief": "B"}},
+            ]
+        )
+        dataset_id = session.add_dataset(
+            ["case-a"],
+            name="v0 数据集",
+        )
+        session.active_dataset_id = dataset_id
+        session.versions[0]["dataset_id"] = dataset_id
+
+        rejected = session.import_output("case-b", "report B")
+        self.assertIn("版本绑定的数据集", rejected["error"])
+        state = session.import_output("case-a", "report A")
+        self.assertEqual(state["judge_progress"]["total_cases"], 1)
+        self.assertEqual(
+            state["judge_progress"]["judgeable_case_ids"],
+            ["case-a"],
+        )
+
+        checks = {
+            check["id"]: "met"
+            for dimension in session.rubric["dimensions"]
+            for check in dimension.get("checks", [])
+        }
+        rejected_judge = session.set_judge_checks_batch(
+            {"case-b": {"checks": checks}}
+        )
+        self.assertIn("版本绑定的数据集", rejected_judge["error"])
+        state = session.set_judge_checks_batch(
+            {"case-a": {"checks": checks}}
+        )
+        self.assertTrue(state["judge_progress"]["complete"])
+        self.assertTrue(session._version_real_judge_complete("v0"))
+
+        restored = Session.restore(session.to_snapshot())
+        self.assertEqual(
+            restored.versions[0]["dataset_id"],
+            dataset_id,
+        )
+        self.assertEqual(
+            restored._case_ids_for(restored.versions[0]),
+            {"case-a"},
+        )
+        self.assertTrue(restored._version_real_judge_complete("v0"))
+
     def test_restore_ignores_legacy_human_judge_state(self):
         session = Session(
             "legacy-human-state",
@@ -860,7 +914,7 @@ class ModelOnlySessionTest(unittest.TestCase):
         )
         self.assertEqual(
             state["failure_report"][0]["pattern_id"],
-            "trace_fabrication",
+            "trace_faithfulness",
         )
 
         # 本用例只验证真实 failure → optimizer proposal 的状态流，

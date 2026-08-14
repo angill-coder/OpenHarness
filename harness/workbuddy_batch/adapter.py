@@ -93,11 +93,11 @@ def discover_command(explicit: str | None = None) -> tuple[str, ...]:
     workbuddy = shutil.which("workbuddy")
     if workbuddy:
         return (workbuddy,)
-    if MAC_WORKBUDDY_CLI.exists():
-        return (str(MAC_WORKBUDDY_CLI),)
     windows_desktop = _windows_desktop_command()
     if windows_desktop:
         return windows_desktop
+    if MAC_WORKBUDDY_CLI.exists():
+        return (str(MAC_WORKBUDDY_CLI),)
     for name in ("codebuddy", "cbc"):
         candidate = shutil.which(name)
         if candidate:

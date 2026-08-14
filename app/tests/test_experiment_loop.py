@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 APP = Path(__file__).resolve().parents[1]
@@ -11,7 +12,10 @@ if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
 
 from run_experiment_loop import (  # noqa: E402
+    APIError,
     ExperimentLoop,
+    LoopError,
+    _is_retryable_loop_error,
     _safe_session_id,
     plan_next_action,
 )
@@ -153,6 +157,48 @@ class ExperimentLoopPlanTest(unittest.TestCase):
         loop._advance({"version": "v1"})
 
         self.assertEqual(loop._optimizer_attempts["v1"], 0)
+
+    def test_invalid_structured_patch_retries_without_resetting_counter(self):
+        loop = ExperimentLoop(
+            "http://127.0.0.1:8080",
+            "president-report-llm",
+        )
+        loop.api = lambda *args, **kwargs: {
+            "advance_result": {
+                "status": "blocked",
+                "code": "patch_validation_failed",
+                "message": "patch 锚点不唯一",
+            }
+        }
+        loop.emit = lambda *args, **kwargs: None
+        with mock.patch("run_experiment_loop.time.sleep"):
+            loop._advance({"version": "v1"})
+        self.assertEqual(loop._optimizer_attempts["v1"], 1)
+
+    def test_non_skill_root_cause_stops_automation(self):
+        loop = ExperimentLoop(
+            "http://127.0.0.1:8080",
+            "president-report-llm",
+        )
+        loop.api = lambda *args, **kwargs: {
+            "advance_result": {
+                "status": "blocked",
+                "code": "non_skill_root_cause",
+                "message": "根因属于 judge",
+            }
+        }
+        loop.emit = lambda *args, **kwargs: None
+        with self.assertRaisesRegex(LoopError, "根因属于 judge"):
+            loop._advance({"version": "v1"})
+
+    def test_empty_llm_502_is_not_retried_by_outer_loop(self):
+        error = APIError(
+            502,
+            "LLM 改写失败",
+            {"code": "empty_llm_response"},
+        )
+        self.assertFalse(_is_retryable_loop_error(error))
+        self.assertTrue(_is_retryable_loop_error(APIError(502, "bad gateway")))
 
 
 if __name__ == "__main__":

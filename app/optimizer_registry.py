@@ -8,7 +8,8 @@
   switch_search —— 翻开关搜索(harness/optimizer.py)。为保证行为逐字不变,
     session_eval 的 switch_search 路径仍直接调 optimizer_mod、不经本注册表编排;
     这里的 _SwitchSearchAdapter 只是纯透传登记,供将来统一编排时使用。
-  llm_rewrite   —— LLM 自由改写整段 instructions(app/optimizer02.py)。
+  llm_rewrite   —— Diagnosis LLM 选目标 + Patch LLM 局部结构化修改
+                  (app/optimizer02.py)。
 """
 
 from __future__ import annotations

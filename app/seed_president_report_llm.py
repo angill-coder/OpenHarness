@@ -3,7 +3,7 @@
 
 会话使用当前 research_insight 六维 rubric 的原样副本，导入 20 条统一
 openharness-wb/v1 真实项目 case，并配置会话级 early-stop：
-overall >= 4.8，或连续 4 个候选版本未提升已采纳最佳 overall。
+overall >= 4.8，或连续 8 个候选版本未提升已采纳最佳 overall。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ REQUIREMENT = (
 )
 OPTIMIZER_STOP = {
     "overall_target": 4.8,
-    "max_no_improvement": 4,
+    "max_no_improvement": 8,
 }
 
 

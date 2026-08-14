@@ -60,6 +60,12 @@ def _portable_generation_path(generation_root: Path, raw_path: str) -> Path:
     if "generation_runs" in lowered:
         tail = parts[lowered.index("generation_runs") + 1:]
         candidate = generation_root.joinpath(*tail).resolve()
+    elif "_session_skills" in lowered:
+        # Session Skill references may outlive both the repository location and
+        # a custom generation output directory name.  The artifact namespace
+        # is the stable portion of those stored absolute paths.
+        tail = parts[lowered.index("_session_skills"):]
+        candidate = generation_root.joinpath(*tail).resolve()
     else:
         path = Path(raw).expanduser()
         candidate = (path if path.is_absolute() else generation_root / path).resolve()
@@ -338,7 +344,15 @@ def _portable_trace_string(value: object, case_root: Path) -> str:
     )
     if generation_root is None:
         return text
-    for source in {str(generation_root), generation_root.as_posix()}:
+    sources = {str(generation_root), generation_root.as_posix()}
+    # macOS resolves /var and /tmp through /private, while trace payloads may
+    # retain the unresolved spelling.  Sanitize both aliases consistently.
+    for source in tuple(sources):
+        if source.startswith("/private/"):
+            sources.add(source[len("/private"):])
+        elif source.startswith(("/var/", "/tmp/")):
+            sources.add("/private" + source)
+    for source in sorted(sources, key=len, reverse=True):
         text = text.replace(source, "runtime:generation_runs")
         text = text.replace(source.replace("\\", "\\\\"), "runtime:generation_runs")
     text = re.sub(

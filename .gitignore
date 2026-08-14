@@ -25,3 +25,11 @@ nohup.out
 *.bak
 *.bak-*
 ~$*
+
+# 大体积会话/生成数据导出包、报告产物（勿提交）
+openharness-*-sessions-*/
+*_reports/
+*_reports.zip
+*.zip
+*.docx
+openharness-sessions-*/

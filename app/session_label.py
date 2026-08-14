@@ -19,18 +19,49 @@ if HARNESS not in sys.path:
     sys.path.insert(0, HARNESS)
 
 import persistence as persist                        # noqa: E402
+import iteration_trace                               # noqa: E402
 
 
 class SessionLabel:
     """真实产物与模型 Judge 结果导入 mixin。"""
 
+    def _label_version_scope(self, version):
+        """返回版本和其绑定数据集；所有报告/Judge 写入口共用。"""
+        selected = version or self._eval_target()["version"]
+        version_entry = next(
+            (
+                item
+                for item in self.versions
+                if item.get("version") == selected
+            ),
+            None,
+        )
+        if version_entry is None:
+            return selected, None, {
+                "error": "Skill 版本不存在: %s" % selected
+            }
+        return selected, self._case_ids_for(version_entry), None
+
+    @staticmethod
+    def _out_of_scope_error(case_ids):
+        return {
+            "error": "case 不属于该 Skill 版本绑定的数据集: "
+            + ", ".join(sorted(str(item) for item in case_ids))
+        }
+
     # ---------- 导入平台真实报告文本(app 粘贴) ----------
     def import_output(self, case_id: str, report_text: str, version: str = None, account=None):
         """存一条平台跑出的真实报告文本, 关联到 (version, case_id)。默认当前版本。"""
-        version = version or self._current()["version"]
+        version, eligible_case_ids, scope_error = self._label_version_scope(
+            version
+        )
+        if scope_error:
+            return scope_error
         report_text = (report_text or "").strip()
         if not case_id or not report_text:
             return {"error": "缺少 case_id 或 report_text"}
+        if str(case_id) not in eligible_case_ids:
+            return self._out_of_scope_error([case_id])
         previous = self.report_outputs.get(version, {}).get(case_id)
         if previous is not None and previous != report_text:
             self._invalidate_judge_checks(
@@ -40,8 +71,18 @@ class SessionLabel:
             )
         self.report_outputs.setdefault(version, {})[case_id] = report_text
         persist.append_output(self.id, version, case_id, report_text)
+        dialogue_trace = iteration_trace.record_dialogue_contract(
+            self,
+            version,
+            {case_id: report_text},
+            source="manual_import",
+        )
         persist.append_event(self.id, "import_output", {
-            "version": version, "case_id": case_id, "n_chars": len(report_text)})
+            "version": version,
+            "case_id": case_id,
+            "n_chars": len(report_text),
+            "iteration_id": dialogue_trace.get("iteration_id"),
+        })
         # 重新组装视图(把真实报告文本带进 eval 行, 供标注对照)
         self.evaluate(account)
         self._save()
@@ -52,7 +93,11 @@ class SessionLabel:
                         reasoning: Dict[str, str] = None, version: str = None, account=None):
         """存一条平台 LLM-as-judge 对真实报告的六维评分, 关联到 (version, case_id)。
         它会覆盖该 case 的 mock 分, 参与分数曲线和红线判定。默认当前版本。"""
-        version = version or self._current()["version"]
+        version, eligible_case_ids, scope_error = self._label_version_scope(
+            version
+        )
+        if scope_error:
+            return scope_error
         clean = {
             d: round(float(s), 3)
             for d, s in (scores or {}).items()
@@ -60,6 +105,8 @@ class SessionLabel:
         }
         if not case_id or not clean:
             return {"error": "缺少 case_id 或有效的六维分(需属于: %s)" % ", ".join(self.dims)}
+        if str(case_id) not in eligible_case_ids:
+            return self._out_of_scope_error([case_id])
         reasoning = {d: str(t) for d, t in (reasoning or {}).items() if d in self.dims}
         self.report_judgments.setdefault(version, {})[case_id] = {
             "scores": clean, "reasoning": reasoning, "flagged": []}
@@ -86,10 +133,16 @@ class SessionLabel:
 
     def set_judge_checks(self, case_id, checks, reasoning=None, version=None, account=None):
         """存 LLM-judge 的逐 check 判分(供 /api/run_judge 调用)。judge 是机器分, 不分账号。"""
-        version = version or self._current()["version"]
+        version, eligible_case_ids, scope_error = self._label_version_scope(
+            version
+        )
+        if scope_error:
+            return scope_error
         clean = self._norm_checks(checks)
         if not case_id or not clean:
             return {"error": "judge 未产出有效 check 评分"}
+        if str(case_id) not in eligible_case_ids:
+            return self._out_of_scope_error([case_id])
         self.judge_checks.setdefault(version, {})[case_id] = {"checks": clean, "reasoning": reasoning or {}}
         persist.append_check_judgment(self.id, version, case_id, clean, reasoning)
         persist.append_event(self.id, "run_judge",
@@ -111,8 +164,14 @@ class SessionLabel:
         ``{case_id: {"checks": {...}, "reasoning": {...}}}``。
         无有效判分时不改变 Session。
         """
-        version = version or self._current()["version"]
-        valid_case_ids = {case["case_id"] for case in self.cases}
+        version, valid_case_ids, scope_error = self._label_version_scope(
+            version
+        )
+        if scope_error:
+            return scope_error
+        out_of_scope = sorted(set(judgments or {}) - valid_case_ids)
+        if out_of_scope:
+            return self._out_of_scope_error(out_of_scope)
         clean_batch = {}
         for case_id, judgment in (judgments or {}).items():
             if case_id not in valid_case_ids:
@@ -144,6 +203,8 @@ class SessionLabel:
                     "reasoning_effort"
                 ),
                 "judge_trace": (judgment or {}).get("judge_trace"),
+                "judge_run_id": (judgment or {}).get("judge_run_id"),
+                "iteration_id": (judgment or {}).get("iteration_id"),
             }
         if not clean_batch:
             return {"error": "批量 Judge 未产出有效评分"}
@@ -177,6 +238,22 @@ class SessionLabel:
                         item.get("reasoning_effort")
                         for item in clean_batch.values()
                         if item.get("reasoning_effort")
+                    ),
+                    None,
+                ),
+                "judge_run_id": next(
+                    (
+                        item.get("judge_run_id")
+                        for item in clean_batch.values()
+                        if item.get("judge_run_id")
+                    ),
+                    None,
+                ),
+                "iteration_id": next(
+                    (
+                        item.get("iteration_id")
+                        for item in clean_batch.values()
+                        if item.get("iteration_id")
                     ),
                     None,
                 ),

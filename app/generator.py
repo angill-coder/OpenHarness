@@ -24,6 +24,12 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import llm_client
+import production_skill_policy
+from model_config import (
+    DEFAULT_V0_CODEX_MODEL,
+    DEFAULT_V0_CODEX_REASONING_EFFORT,
+    DEFAULT_V0_LLM_BACKEND,
+)
 from directive_registry import (
     RESEARCH_DIRECTIVES,
     load_editable_region,
@@ -225,17 +231,21 @@ def _draft_research_v0_from_scratch(
     requirement_contract: str,
     rubric: Dict[str, Any],
 ) -> str:
-    """仅基于需求与 Rubric 起草可编辑规则，不读取基础 Skill 正文。"""
+    """仅基于需求与去标识化内容规则起草，不读取基础 Skill 正文。"""
+    production_requirements = production_skill_policy.quality_requirements(
+        rubric
+    )
     prompt = "\n".join([
         "你是 Skill 架构师。请从零起草一份调研洞察汇报 Skill 的可执行质量规则。",
         "这是 V0 初稿，不存在可继承的旧 instructions；禁止假设或复用任何基础 Skill 正文。",
         "系统会把冻结任务契约自动放在你的输出之前，因此不要复写任务契约，只输出其后的质量规则。",
         "",
         "要求：",
-        "1. 将 Rubric 的每个维度、check、红线、目标和 gate 转化为明确可执行的写作与交付前自检规则。",
-        "2. 所有 redline check 必须逐条明确保留，不得弱化；规则应能直接指导模型处理原始素材并生成报告。",
+        "1. 将下面的生产内容要求转化为明确、可执行的写作与交付前自检规则。",
+        "2. mandatory_requirements 中每条义务必须明确保留，不得弱化。",
         "3. 输出应自包含、无历史版本引用，包含硬规则、自检清单和必要正反例。",
-        "4. 不为了讨好评分堆砌术语，不输出分析过程，不引用本提示词。",
+        "4. 不堆砌术语，不输出分析过程，不引用本提示词。",
+        "5. 输出只包含可直接指导报告生成和交付自检的内容规则。",
         "",
         "## 用户需求",
         requirement,
@@ -243,8 +253,8 @@ def _draft_research_v0_from_scratch(
         "## 冻结任务契约（仅供理解，不要复写）",
         requirement_contract,
         "",
-        "## Rubric（唯一质量依据）",
-        json.dumps(rubric, ensure_ascii=False, indent=2),
+        "## 生产内容要求",
+        json.dumps(production_requirements, ensure_ascii=False, indent=2),
         "",
         "## 输出格式",
         "只输出一个 ```json 代码块，代码块内是可被 json.loads 解析的单个对象，代码块外不要写文字。",
@@ -252,18 +262,11 @@ def _draft_research_v0_from_scratch(
         "```json",
         json.dumps({
             "instructions_text": "<从零起草的完整质量规则 Markdown>",
-            "draft_summary": "<如何依据需求和 Rubric 设计本初稿>",
-            "covered_redlines": ["<逐项列出已覆盖的红线 check id>"],
         }, ensure_ascii=False),
         "```",
     ])
-    raw = llm_client.call_llm(
+    raw = _call_v0_llm(
         prompt,
-        timeout_seconds=os.environ.get(
-            "LLM_REWRITE_TIMEOUT_SECONDS",
-            "600",
-        ),
-        retries=os.environ.get("LLM_REWRITE_RETRIES", "2"),
     )
     parsed = llm_client.extract_json(raw)
     instructions_text = (
@@ -275,10 +278,13 @@ def _draft_research_v0_from_scratch(
         raise llm_client.LLMClientError(
             "LLM 未产出有效 instructions_text"
         )
+    try:
+        production_skill_policy.validate_production_text(instructions_text)
+    except ValueError as exc:
+        raise llm_client.LLMClientError(str(exc)) from exc
 
-    # V0 也必须通过与后续候选相同的红线守卫，避免从零起草时漏掉硬约束。
-    import optimizer02
-    guard = optimizer02._redline_guard(instructions_text, rubric)
+    # 仅 llm_scratch V0 使用独立守卫；迭代 Optimizer 固定为 Diagnosis + Patch 两次调用。
+    guard = _guard_scratch_v0_redlines(instructions_text, rubric)
     redline_ids = [
         check["id"]
         for dimension in rubric.get("dimensions", [])
@@ -298,6 +304,68 @@ def _draft_research_v0_from_scratch(
     return instructions_text
 
 
+def _call_v0_llm(prompt: str, max_tokens=None) -> str:
+    """V0 起草与红线守卫统一使用 Codex CLI gpt-5.6-sol medium。"""
+    return llm_client.call_llm(
+        prompt,
+        timeout_seconds=os.environ.get(
+            "LLM_REWRITE_TIMEOUT_SECONDS",
+            "600",
+        ),
+        retries=os.environ.get("LLM_REWRITE_RETRIES", "2"),
+        backend=DEFAULT_V0_LLM_BACKEND,
+        model=DEFAULT_V0_CODEX_MODEL,
+        reasoning_effort=DEFAULT_V0_CODEX_REASONING_EFFORT,
+        max_tokens=max_tokens,
+    )
+
+
+def _guard_scratch_v0_redlines(
+    instructions_text: str,
+    rubric: Dict[str, Any],
+) -> Dict[str, Any]:
+    """从零起草 V0 的独立红线检查，不参与后续两阶段 Optimizer。"""
+    redlines = [
+        {
+            "id": check["id"],
+            "label": check.get("label", check["id"]),
+            "desc": check.get("desc", ""),
+        }
+        for dimension in rubric.get("dimensions", [])
+        for check in dimension.get("checks", [])
+        if check.get("redline") and check.get("id")
+    ]
+    if not redlines:
+        return {"ok": True, "dropped": [], "raw": {}}
+    prompt = "\n".join([
+        "判断下面的 V0 Skill 是否明确保留每条红线义务。",
+        "未明确、不可执行、删除或弱化均判 false。只输出严格 JSON。",
+        "",
+        "## 红线义务",
+        *(
+            "- %s (%s): %s"
+            % (item["id"], item["label"], item["desc"])
+            for item in redlines
+        ),
+        "",
+        "## V0 正文",
+        instructions_text,
+        "",
+        "## 输出",
+        json.dumps(
+            {item["id"]: True for item in redlines},
+            ensure_ascii=False,
+        ),
+    ])
+    raw_response = _call_v0_llm(
+        prompt,
+        max_tokens=os.environ.get("LLM_GUARD_MAX_TOKENS", "2000"),
+    )
+    raw = llm_client.extract_json(raw_response) or {}
+    dropped = [item["id"] for item in redlines if raw.get(item["id"]) is not True]
+    return {"ok": not dropped, "dropped": dropped, "raw": raw}
+
+
 def _generate_research(requirement: str, product_id: str,
                        optimizer_mode: str = "switch_search",
                        v0_strategy: str = "base_skill") -> Dict[str, Any]:
@@ -314,10 +382,7 @@ def _generate_research(requirement: str, product_id: str,
     rubric = _build_rubric_research()
     directives = load_skill_directives(Path(base_skill))
     if optimizer_mode == "llm_rewrite":
-        requirement_contract = _research_requirement_contract(
-            requirement,
-            rubric,
-        )
+        requirement_contract = _research_requirement_contract(requirement)
         prose = (
             _draft_research_v0_from_scratch(
                 requirement,
@@ -386,9 +451,8 @@ def _generate_research(requirement: str, product_id: str,
 
 def _research_requirement_contract(
     requirement: str,
-    rubric: Dict[str, Any],
 ) -> str:
-    """把产品需求与当前 rubric 固化成 freeform v0 的不可变任务契约。
+    """把产品需求固化成 freeform v0 的不可变生产任务契约。
 
     这里不调用 LLM，保证新建会话离线、确定性可复现；自由改写策略只优化
     契约之后的质量规则。契约使用语义化表述，不把用户原文机械复读进 Skill。
@@ -415,18 +479,8 @@ def _research_requirement_contract(
             "材料重点分布",
         ]
 
-    dimension_names = "、".join(
-        d.get("name_zh", d.get("name", ""))
-        for d in rubric.get("dimensions", [])
-    )
-    redline_ids = "、".join(
-        c.get("id", "")
-        for d in rubric.get("dimensions", [])
-        for c in d.get("checks", [])
-        if c.get("redline")
-    )
     lines = [
-        "## 本会话任务契约（冻结，不由优化器改写）",
+        "## 本次报告任务约束",
         "",
         "- **受众与目标**：面向%s，围绕用户给定的话题形成可直接用于决策的汇报。" % audience,
         "- **初始输入**：接收用户给定的话题与原始素材；原始素材文件只读，不修改。",
@@ -436,10 +490,10 @@ def _research_requirement_contract(
         "- **素材边界**：所有结论与数据只来自原始素材，不新增、篡改或偷换事实与数据口径。允许为高管阅读做有据的筛选、压缩和重组，但关键 claim 不遗漏、噪音不充数、原意不改变。",
         "- **图表规则**：数据密集或多组对比处优先用 markdown 表格或清晰图表；图表中的每个数字仍须来自素材，禁止补数或推算未给出的数值。",
         "- **写作方式**：结论先行、金字塔展开、信息组织 MECE；整体简洁、严谨，避免铺陈和术语注水。",
-        "- **质量基线**：严格满足当前 rubric 的%s六维要求；红线检查 %s 必须始终保留。"
-        % (dimension_names, redline_ids or "无"),
     ]
-    return "\n".join(lines)
+    contract = "\n".join(lines)
+    production_skill_policy.validate_production_text(contract)
+    return contract
 
 
 def _build_rubric_research() -> Dict[str, Any]:

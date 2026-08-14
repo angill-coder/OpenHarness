@@ -49,7 +49,7 @@ class RealFailureAnalysisTest(unittest.TestCase):
             self.rubric,
         )
 
-        self.assertEqual(failures[0]["pattern_id"], "trace_fabrication")
+        self.assertEqual(failures[0]["pattern_id"], "trace_faithfulness")
         self.assertEqual(failures[0]["hit_count"], 1)
         self.assertEqual(
             failures[0]["directive_hint"],

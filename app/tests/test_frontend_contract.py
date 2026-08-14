@@ -79,6 +79,7 @@ class FrontendContractTest(unittest.TestCase):
         self.assertIn('id="v0StrategySel"', html)
         self.assertIn('value="base_skill"', html)
         self.assertIn('value="llm_scratch"', html)
+        self.assertIn('Codex CLI · gpt-5.6-sol · medium', html)
         self.assertIn("v0_strategy:v0Strategy", source)
         self.assertIn("syncV0StrategyVisibility", source)
         self.assertIn("LLM 正在起草 V0", source)

@@ -138,7 +138,7 @@ function syncLlmBackendControls(kind){
   if(codexModelWrap)codexModelWrap.style.display=isCodex?'block':'none';
   if(codexReasoningWrap)codexReasoningWrap.style.display=isCodex?'block':'none';
 }
-function readLlmSelection(kind){
+async function readLlmSelection(kind){
   const backend=(document.getElementById(kind+'LlmBackend')||{}).value||'workbuddy';
   const result={llm_backend:backend};
   const inputId=kind+(
@@ -152,6 +152,14 @@ function readLlmSelection(kind){
   }
   result.llm_model=model;
   if(backend==='codex'){
+    // Codex may be installed or reconfigured after this page was opened.
+    // Refresh the server-side discovery result instead of trusting startup state.
+    try{
+      GEN_CONFIG=await api('/api/generation/config','GET');
+      renderGenerationPanel();
+    }catch(e){
+      return null; // api() has already surfaced the concrete error.
+    }
     if(GEN_CONFIG&&GEN_CONFIG.codex_cli_ready===false){
       toast(GEN_CONFIG.codex_cli_error||'Codex CLI 当前不可用');
       return null;
@@ -291,7 +299,7 @@ document.getElementById('runJudgeBtn').onclick=async()=>{
     'Judge'
   );
   if(parallel==null)return;
-  const llm=readLlmSelection('judge');
+  const llm=await readLlmSelection('judge');
   if(!llm)return;
   JUDGE_RUNNING=true;renderJudgeStatus();startJudgeProgressPoll();
   toast(`正在以并发 ${parallel} Judge ${progress.reports_ready}/${progress.total_cases} 份报告…`,9000);
@@ -332,7 +340,7 @@ document.getElementById('advanceBtn').onclick=async()=>{
   btn.textContent=llmMode?'⏳ 改写中…':'⏳ 生成中…';
   if(msg)msg.innerHTML='<span class="mut">⏳ '+(llmMode?'正在调用 LLM 改写下一版，通常需数十秒，请稍候…':'正在生成下一版，请稍候…')+'</span>';
   try{
-    const llm=readLlmSelection('optimizer');
+    const llm=await readLlmSelection('optimizer');
     if(!llm){btn.disabled=false;btn.textContent=oldText;return;}
     const j=await api('/api/advance','POST',{id:SID,...llm}); STATE=j; render();
     const r=j.advance_result;
@@ -357,7 +365,7 @@ document.getElementById('advanceBtn').onclick=async()=>{
   }
 };
 
-// ---- 真实运行 · WB CLI ----
+// ---- 真实运行 · Runner CLI ----
 const GEN_JOB_STATUS_ZH={
   queued:'等待任务执行槽',running:'生成中',retrying:'自动重试中',importing:'导入中',
   cancel_requested:'等待安全停止',completed:'已完成',partial:'部分成功',
@@ -429,7 +437,8 @@ document.getElementById('runGenerationBtn').onclick=async()=>{
       id:SID,idempotency_key:key,parallel,model
     });
     GEN_JOB=j.job;renderGenerationPanel();scheduleGenerationPoll();
-    toast(j.reused?'已有任务正在执行':`WB CLI 任务已启动：${model}，并发 ${parallel}`);
+    const runner=llmBackendLabel(j.job.backend||(GEN_CONFIG&&GEN_CONFIG.backend));
+    toast(j.reused?'已有任务正在执行':`${runner} Runner 任务已启动：${model}，并发 ${parallel}`);
   }catch(e){renderGenerationPanel();}
 };
 document.getElementById('retryGenerationBtn').onclick=async()=>{
@@ -574,10 +583,11 @@ function renderGenerationPanel(){
     cfg.innerHTML='<span class="warn-txt">运行配置不可用：'+esc(GEN_CONFIG.error)+'</span>';
   }else{
     cfg.innerHTML=`<div class="kv"><span>执行 Skill</span><span>启动时编译当前 Session 版本</span></div>`+
+      `<div class="kv"><span>Runner 后端</span><span>${esc(llmBackendLabel(GEN_CONFIG.backend))}${GEN_CONFIG.reasoning_effort?' · '+esc(GEN_CONFIG.reasoning_effort):''}</span></div>`+
       `<div class="kv"><span>模型 / 默认并发</span><span>${esc(GEN_CONFIG.model||'CLI默认')} / ${GEN_CONFIG.parallel}</span></div>`+
       `<div class="kv"><span>报告重试</span><span>最多额外 ${GEN_CONFIG.max_report_retries} 次</span></div>`+
       `<div class="kv"><span>Judge 重试</span><span>最多额外 ${GEN_CONFIG.judge_max_retries} 次</span></div>`+
-      `<div class="small mut" style="margin-top:5px">每个任务冻结完整 Skill 目录、版本和哈希，WB CLI 只执行该副本。</div>`;
+      `<div class="small mut" style="margin-top:5px">每个任务冻结完整 Skill 目录、版本和哈希，Runner 只执行该副本。</div>`;
   }
   const active=generationActive();
   if(parallelInput&&GEN_CONFIG){
@@ -633,6 +643,7 @@ function renderGenerationPanel(){
   const historical=STATE&&GEN_JOB.skill_version!==STATE.current_version;
   status.innerHTML=`<div class="kv"><span>状态</span><b class="${GEN_JOB.status==='completed'?'ok-txt':GEN_JOB.status==='failed'?'warn-txt':''}">${esc(GEN_JOB_STATUS_ZH[GEN_JOB.status]||GEN_JOB.status)}</b></div>`+
     `<div class="kv"><span>实际执行版本</span><span>${esc(GEN_JOB.skill_version)} · ${esc((GEN_JOB.execution_skill_hash||'').slice(0,10))}</span></div>`+
+    `<div class="kv"><span>Runner 后端</span><span>${esc(llmBackendLabel(GEN_JOB.backend))}${GEN_JOB.reasoning_effort?' · '+esc(GEN_JOB.reasoning_effort):''}</span></div>`+
     `<div class="kv"><span>报告生成模型</span><span>${esc(GEN_JOB.model||'CLI 默认')}</span></div>`+
     `<div class="kv"><span>报告生成并发</span><span>${GEN_JOB.parallel}</span></div>`+
     (historical?`<div class="warn-txt" style="margin-top:5px">这是历史任务；当前 Session 已是 ${esc(STATE.current_version)}。</div>`:'')+
@@ -688,7 +699,7 @@ function render(){
 
   // pending 候选提示条（llm_rewrite 异步 gate）
   const pc=STATE.pending_candidate;
-  const pcBanner=pc?`<div class="small warn-txt" style="margin-top:6px">🧪 待验证候选 <b>${pc.version}</b>（父 ${pc.parent||'—'}）：请对该候选跑 WB 生成 + 批量真实 Judge，判分完成后平台自动结算采纳/回滚。</div>`:'';
+  const pcBanner=pc?`<div class="small warn-txt" style="margin-top:6px">🧪 待验证候选 <b>${pc.version}</b>（父 ${pc.parent||'—'}）：请对该候选跑 Runner 生成 + 批量真实 Judge，判分完成后平台自动结算采纳/回滚。</div>`:'';
 
   // 当前 skill
   const cv=STATE.versions.find(v=>v.version===STATE.current_version);
@@ -791,7 +802,7 @@ function renderJudgeStatus(){
   el.innerHTML=`<div class="kv"><span>报告已就绪</span><span>${p.reports_ready}/${p.total_cases}</span></div>`+
     `<div class="kv"><span>模型 Judge</span><b class="${complete?'ok-txt':p.judged_cases?'warn-txt':'mut'}">${p.judged_cases}/${p.total_cases}</b></div>`+
     (JUDGE_SUMMARY?`<div class="kv"><span>最近调用</span><span>${esc(llmBackendLabel(JUDGE_SUMMARY.llm_backend))} · ${esc(JUDGE_SUMMARY.model||'—')}${JUDGE_SUMMARY.reasoning_effort?' · '+esc(JUDGE_SUMMARY.reasoning_effort):''}</span></div>`:'')+
-    (!allReports?`<div class="warn-txt" style="margin-top:5px">仍缺 ${p.total_cases-p.reports_ready} 份报告，请先重试 WB CLI 或手工补齐。</div>`:'')+
+    (!allReports?`<div class="warn-txt" style="margin-top:5px">仍缺 ${p.total_cases-p.reports_ready} 份报告，请先重试 Runner 或手工补齐。</div>`:'')+
     (complete?'<div class="ok-txt" style="margin-top:5px">全部 case 已完成模型 Judge，可以生成下一版 Skill。</div>':'')+
     (action&&!action.enabled&&action.reason&&!complete?`<div class="small mut" style="margin-top:5px">${esc(action.reason)}</div>`:'')+
     (JUDGE_SUMMARY&&JUDGE_SUMMARY.failed_cases
@@ -880,7 +891,7 @@ function renderRubricEditor(){
 const EV_ZH={created:"生成 V0",import_data:"导入数据",
   edit_rubric:"编辑 rubric",version_adopted:"采纳新版",version_rejected:"版本被拒",
   converged:"收敛/平台期",import_output:"导入报告文本",import_judgment:"导入LLM评分",
-  generation_import:"WB 批量导入",run_judge_batch:"批量模型 Judge"};
+  generation_import:"Runner 批量导入",run_judge_batch:"批量模型 Judge"};
 // ---- 打开已有会话 ----
 async function loadSessions(){
   try{
@@ -914,7 +925,7 @@ document.getElementById('refreshSessBtn').onclick=loadSessions;
       ready:false,
       error:e.status===404
         ?'当前后端版本过旧：请停止并重新启动 server.py'
-        :('无法读取 WB 运行配置：'+(e.message||'未知错误'))
+        :('无法读取 Runner 运行配置：'+(e.message||'未知错误'))
     };
   }
   renderGenerationPanel();

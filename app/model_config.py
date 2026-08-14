@@ -49,7 +49,13 @@ SUPPORTED_WB_MODELS = (
 )
 
 DEFAULT_GENERATION_WB_MODEL = "deepseek-v4-pro-ioa"
+DEFAULT_GENERATION_CODEX_MODEL = "gpt-5.6-sol"
 DEFAULT_EVALUATION_WB_MODEL = "claude-opus-4.8"
 DEFAULT_EVALUATION_API_MODEL = "claude-opus-4.8"
 DEFAULT_EVALUATION_CODEX_MODEL = "gpt-5.6-sol"
 DEFAULT_CODEX_REASONING_EFFORT = "medium"
+
+# “生成 V0 skill + rubric”中 llm_scratch 的起草与红线守卫固定使用此配置。
+DEFAULT_V0_LLM_BACKEND = "codex"
+DEFAULT_V0_CODEX_MODEL = "gpt-5.6-sol"
+DEFAULT_V0_CODEX_REASONING_EFFORT = "medium"

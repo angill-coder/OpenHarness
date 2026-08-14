@@ -45,6 +45,16 @@ class LLMClientError(RuntimeError):
     """LLM 配置、网络或响应格式错误。"""
 
 
+class EmptyLLMResponseError(LLMClientError):
+    """上游请求成功但没有返回可用正文；diagnostics 只含脱敏元数据。"""
+
+    error_code = "empty_llm_response"
+
+    def __init__(self, message: str, diagnostics=None):
+        super().__init__(message)
+        self.diagnostics = dict(diagnostics or {})
+
+
 LLM_BACKEND_API = "api"
 LLM_BACKEND_WORKBUDDY = "workbuddy"
 LLM_BACKEND_CODEX = "codex"
@@ -135,6 +145,127 @@ def _retry_count(value=None) -> int:
     return retries
 
 
+def _max_tokens(value=None) -> int:
+    raw = os.environ.get("LLM_MAX_TOKENS", "16000") if value is None else value
+    if isinstance(raw, bool):
+        raise LLMClientError("LLM max_tokens 必须是正整数")
+    try:
+        max_tokens = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise LLMClientError("LLM max_tokens 必须是正整数") from exc
+    if max_tokens <= 0:
+        raise LLMClientError("LLM max_tokens 必须是正整数")
+    return max_tokens
+
+
+def _usage_summary(value) -> dict:
+    """只保留 token 计数，不落盘 provider 的原始响应内容。"""
+    if not isinstance(value, dict):
+        return {}
+    summary = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+    ):
+        number = value.get(key)
+        if isinstance(number, (int, float)) and not isinstance(number, bool):
+            summary[key] = number
+    details = value.get("completion_tokens_details")
+    if isinstance(details, dict):
+        reasoning = details.get("reasoning_tokens")
+        if isinstance(reasoning, (int, float)) and not isinstance(reasoning, bool):
+            summary["reasoning_tokens"] = reasoning
+    return summary
+
+
+def _short_scalar(value):
+    if value is None or isinstance(value, (dict, list)):
+        return None
+    return str(value)[:120]
+
+
+def _parse_api_response(raw: str, style: str):
+    """返回 (正文, 脱敏元数据)；不会把 reasoning/refusal 原文带出。"""
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise TypeError("响应不是 JSON 对象")
+    metadata = {
+        "response_id": _short_scalar(payload.get("id")),
+        "response_keys": sorted(str(key) for key in payload),
+        "usage": _usage_summary(payload.get("usage")),
+    }
+    if style == "openai":
+        choice = payload["choices"][0]
+        if not isinstance(choice, dict):
+            raise TypeError("choice 不是对象")
+        message = choice["message"]
+        if not isinstance(message, dict):
+            raise TypeError("message 不是对象")
+        content = message.get("content")
+        # reasoning 模型在预算耗尽时可能返回 content=null；按语义空响应处理，
+        # 但绝不把 reasoning_content 当作最终答案或写进日志。
+        if content is None:
+            content = ""
+        if not isinstance(content, str):
+            raise TypeError("content 不是字符串")
+        reasoning = message.get("reasoning_content")
+        refusal = message.get("refusal")
+        metadata.update({
+            "finish_reason": _short_scalar(choice.get("finish_reason")),
+            "message_fields": sorted(str(key) for key in message),
+            "reasoning_content_chars": (
+                len(reasoning) if isinstance(reasoning, str) else 0
+            ),
+            "refusal_chars": len(refusal) if isinstance(refusal, str) else 0,
+        })
+    else:
+        blocks = payload["content"]
+        if not isinstance(blocks, list):
+            raise TypeError("content 不是数组")
+        content = "".join(
+            block.get("text", "")
+            for block in blocks
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text", ""), str)
+        )
+        metadata.update({
+            "finish_reason": _short_scalar(payload.get("stop_reason")),
+            "content_block_types": sorted({
+                str(block.get("type"))
+                for block in blocks
+                if isinstance(block, dict) and block.get("type")
+            }),
+            "reasoning_content_chars": sum(
+                len(block.get("thinking", ""))
+                for block in blocks
+                if isinstance(block, dict)
+                and isinstance(block.get("thinking"), str)
+            ),
+            "refusal_chars": 0,
+        })
+    metadata["content_chars"] = len(content)
+    return content, metadata
+
+
+def _empty_response_message(retry_limit: int, diagnostics: dict) -> str:
+    last = (diagnostics.get("attempts") or [{}])[-1]
+    usage = last.get("usage") or {}
+    details = []
+    if last.get("finish_reason"):
+        details.append("finish_reason=%s" % last["finish_reason"])
+    for key in ("completion_tokens", "output_tokens", "reasoning_tokens"):
+        if key in usage:
+            details.append("%s=%s" % (key, usage[key]))
+    details.append("max_tokens=%s" % diagnostics.get("max_tokens"))
+    suffix = "；" + "，".join(details) if details else ""
+    retried = "，已重试 %d 次" % retry_limit if retry_limit else ""
+    return "上游 LLM 返回空内容%s%s" % (retried, suffix)
+
+
 def _ssl_context() -> ssl.SSLContext:
     """构造带可用 CA 的 SSL context。
 
@@ -160,6 +291,7 @@ def _call_api(
     timeout_seconds=None,
     retries=None,
     model=None,
+    max_tokens=None,
 ) -> str:
     """通过原有 Anthropic/OpenAI-compatible API 调用 LLM。"""
     key = os.environ.get("ANTHROPIC_API_KEY")
@@ -190,15 +322,10 @@ def _call_api(
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
-    try:
-        max_tokens = int(os.environ.get("LLM_MAX_TOKENS", "16000"))
-    except (TypeError, ValueError) as exc:
-        raise LLMClientError("LLM_MAX_TOKENS 必须是整数") from exc
-    if max_tokens <= 0:
-        raise LLMClientError("LLM_MAX_TOKENS 必须大于 0")
+    effective_max_tokens = _max_tokens(max_tokens)
     body = json.dumps({
         "model": selected_model,
-        "max_tokens": max_tokens,
+        "max_tokens": effective_max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -209,8 +336,9 @@ def _call_api(
     )
     timeout = _timeout_seconds(timeout_seconds)
     retry_limit = _retry_count(retries)
-    raw = None
+    empty_attempts = []
     for attempt in range(retry_limit + 1):
+        attempt_started = time.monotonic()
         try:
             with urllib.request.urlopen(
                 req,
@@ -218,7 +346,6 @@ def _call_api(
                 context=_ssl_context(),
             ) as resp:
                 raw = resp.read().decode("utf-8")
-            break
         except urllib.error.HTTPError as exc:
             retryable = exc.code in (408, 429, 500, 502, 503, 504)
             if retryable and attempt < retry_limit:
@@ -241,23 +368,36 @@ def _call_api(
                     "（已重试 %d 次）" % attempt if attempt else "",
                 )
             ) from exc
-
-    try:
-        payload = json.loads(raw)
-        if style == "openai":
-            content = payload["choices"][0]["message"]["content"]
-        else:
-            blocks = payload["content"]
-            content = "".join(
-                block.get("text", "")
-                for block in blocks
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
-        if not isinstance(content, str):
-            raise TypeError("content 不是字符串")
-        return content
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        raise LLMClientError("上游 LLM 响应格式无效") from exc
+        try:
+            content, response_meta = _parse_api_response(raw, style)
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            raise LLMClientError("上游 LLM 响应格式无效") from exc
+        if content.strip():
+            return content
+        response_meta.update({
+            "attempt": attempt + 1,
+            "duration_ms": int(
+                (time.monotonic() - attempt_started) * 1000
+            ),
+        })
+        empty_attempts.append(response_meta)
+        if attempt < retry_limit:
+            time.sleep(min(2 ** attempt, 4))
+            continue
+        diagnostics = {
+            "error_code": EmptyLLMResponseError.error_code,
+            "style": style,
+            "model": selected_model,
+            "max_tokens": effective_max_tokens,
+            "prompt_chars": len(prompt),
+            "retry_count": retry_limit,
+            "attempts": empty_attempts,
+        }
+        raise EmptyLLMResponseError(
+            _empty_response_message(retry_limit, diagnostics),
+            diagnostics,
+        )
+    raise LLMClientError("上游 LLM 调用失败")
 
 
 def _workbuddy_environment(command: tuple[str, ...]) -> dict[str, str]:
@@ -490,6 +630,7 @@ def call_llm(
     backend=None,
     model=None,
     reasoning_effort=None,
+    max_tokens=None,
 ) -> str:
     """通过 API、WorkBuddy CLI 或 Codex CLI 调用 LLM。"""
     selected_backend = normalize_backend(backend)
@@ -513,6 +654,7 @@ def call_llm(
         timeout_seconds=timeout_seconds,
         retries=retries,
         model=model,
+        max_tokens=max_tokens,
     )
 
 

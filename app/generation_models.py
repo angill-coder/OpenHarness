@@ -66,9 +66,12 @@ class GenerationJob:
     stall_timeout_seconds: float
     created_at: float
     updated_at: float
+    backend: str = "workbuddy"
+    reasoning_effort: Optional[str] = None
     dataset_sha256: Optional[str] = None
     compiler_version: Optional[str] = None
     base_skill_hash: Optional[str] = None
+    iteration_id: Optional[str] = None
     status: str = "queued"
     cases: List[GenerationCaseState] = field(default_factory=list)
     idempotency_key: Optional[str] = None
@@ -143,4 +146,7 @@ class GenerationJob:
         fields.setdefault("dataset_sha256", None)
         fields.setdefault("compiler_version", None)
         fields.setdefault("base_skill_hash", None)
+        fields.setdefault("iteration_id", None)
+        fields.setdefault("backend", "workbuddy")
+        fields.setdefault("reasoning_effort", None)
         return cls(**fields)

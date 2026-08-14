@@ -1,7 +1,9 @@
 # OpenHarness 交接文档（HANDOFF）
 
-> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-07-21（见文末 §9 增量）。
+> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-08-11（见文末增量 §13）。
 > 用户要求：**一律用简体中文交流**（曾误用日语被纠正）。
+>
+> 🟥 **先读文末 §13（2026-08-11 大更新）再看正文**：远程已合并 PR #17–23，架构大改（三后端 LLM 调用 / gate 重写 / 实时看板 / 数据质量产品 / 评测流程重构）。前面 §2、§5#6、§9 的「无 key / harness 无真 LLM / 端口 8765 / 严格 401 鉴权 / 非 git 仓库 / Linux 机器」等描述**已过时，冲突处一律以 §13 为准**。
 
 ---
 
@@ -230,3 +232,120 @@ cd "/Users/angill/Documents/New project/OpenHarness/app" && python3 server.py   
 - V0 已编译到 `generation_runs/_session_skills/president-report-llm/v0/ec45e61f6d27/research-report/`，目录 hash=`92d713416dced5fcc26ae85a94692a87b54b3494093ed1c77d451840fdfff7b5`。
 - App 46 项测试、Harness 20 项测试全绿；`node --check app/app.js` 与相关 Python `py_compile` 通过；两个离线 demo 仍为 research 2.17→4.56、旧 report-assistant 2.58→4.75。
 - 本地服务启动方式：`cd app && source ./start_real.sh && python3 server.py --host 127.0.0.1 --port 8080`。打开页面后选 `president-report-llm`，先跑 v0 的 20-case 生成 + 批量真实 Judge，再点 LLM 改写下一版；之后按同样循环推进，满足任一 early-stop 自动停。
+
+---
+
+## 12. 2026-08-10 增量（每轮五文件可观测日志）
+
+为排查“分数不高但很快停止优化”、Judge/Gate 误判、对话契约丢失和重复调用浪费，新增 `app/iteration_trace.py`。每个实际生成或评测的版本都会在 `sessions/<sid>/iterations/<version>/` 下原子维护且只维护以下五个 JSON：
+
+- `manifest.json`：`iteration_id`、父子版本、输入 hash、Optimizer/Generation/Judge 关联 ID、当前状态和既有大文件相对引用。
+- `optimizer_summary.json`：失败证据量、目标维度、指令 diff 指标、rewrite/红线守卫调用 hash、字符数和耗时。
+- `dialogue_contract.json`：逐 case 追问/回答/缺失字段、信息未齐时是否仍交付、报告静态指标与 hash。
+- `gate_decision.json`：父子完整分数向量和 delta、红线/失败 case 变化、current/champion 指针、现行 gate 与“所有维度均不可回退”shadow decision。
+- `resource_usage.json`：生成任务/尝试/报告字节/耗时、Judge 调用/重试/字符量/耗时、Optimizer 调用与耗时。
+
+五文件不复制报告、完整 Prompt 或 Judge 逐 check 明细；原文仍在 `outputs.jsonl`、`check_judgments.jsonl`、`generation_jobs/` 和 generation trace 中。`iteration_id` 同步写入生成 job、Judge judgment、`version_proposed`/`generation_import`/`run_judge_batch`/`candidate_settled` 事件，用于串联整轮。对应单测为 `app/tests/test_iteration_trace.py`。
+
+---
+
+## 13. 2026-08-11 大更新（远程合并 PR #17–23 + 本轮 Mac 实测运维）
+
+> ⚠️ **本节是当前最新事实**。与前面 §2/§5/§9 冲突处，一律以本节为准。
+
+### 13.0 现状勘误（覆盖旧描述）
+- **开发机**：当前工作副本在 **Mac `/Users/angill/Documents/New project/OpenHarness`**（§9 写的 Linux `/data/home/angillwang/...` 是另一台/旧环境）。Python 3.12（Framework 版，注意缺 CA 证书，见 13.1）。
+- **仓库**：**已是 git 仓库**，远程 `git@github.com:angill-coder/OpenHarness.git`，主分支 `main`（§1「非 git」过时）。更新本地：`git fetch origin main && git merge --ff-only origin/main`（远程基本走 PR，本地纯快进即可；`app/sessions/` 一般不被远程改，本地会话数据不会冲突）。
+- **端口**：**8080**（§5#6 的 8765 过时）。
+- **鉴权**：**当前临时关闭** —— `server.py` 的 `_account()` 直接返回 `"local"`，iOA 校验整段被注释。本地可直调所有 `/api/*`，无需 `X-Tai-Identity`（§9「严格 401」过时）。恢复鉴权见该函数上方注释。
+- **启动**：`cd app && source ./start_real.sh && python3 server.py --host 0.0.0.0 --port 8080`。⚠️ `start_real.sh` **只 export 环境变量、不启动 server**（含真实密钥、gitignored、Claude 权限分类器会拦，须用户本人跑；`source` 时**不要**带 `--host` 参数，否则 `command not found`）。日志默认打到启动它的**终端**（不落盘）；要文件加 `> /tmp/oh_server.log 2>&1`。
+
+### 13.1 三后端 LLM 调用（重大：judge/optimizer 现在真调 LLM，可选后端）
+旧 HANDOFF「harness 里没有真 LLM、judge 读 mock signals」**只适用于离线 demo**。app 运行时的判分/优化现在真调 LLM：
+- `app/llm_client.py` `call_llm(prompt, backend, model, reasoning_effort, timeout_seconds, retries, max_tokens)`，三后端：
+  - `api` —— Anthropic 或 OpenAI 兼容中转（bianxie）。`_call_api` 读 `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL`/`LLM_API_STYLE`(openai|anthropic)/`ANTHROPIC_JUDGE_MODEL`。
+  - `workbuddy` —— WorkBuddy CLI（`_call_workbuddy`，禁用 WB 自动记忆）。**judge/optimizer/generation 的默认后端**。
+  - `codex` —— Codex CLI（`_call_codex`，PR#23，含 `reasoning_effort`）。
+- `app/model_config.py` = 模型配置中心：`SUPPORTED_WB_MODELS`(~26，含 deepseek-v4-pro-ioa、claude-opus-4.8、gpt-5.6-sol、gemini/glm/kimi/minimax…)、`SUPPORTED_API_MODELS`(claude-opus-5 / claude-opus-4.8 / gpt-5.6-sol)、`SUPPORTED_CODEX_MODELS`(gpt-5.6-sol)。默认 `DEFAULT_GENERATION_WB_MODEL=deepseek-v4-pro-ioa`、`DEFAULT_EVALUATION_WB_MODEL=claude-opus-4.8`。
+- **关键环境变量**（在 start_real.sh 里设）：
+  - 后端：`OPENHARNESS_JUDGE_LLM_BACKEND` / `OPENHARNESS_OPTIMIZER_LLM_BACKEND`（默认 `workbuddy`）。
+  - 模型：`OPENHARNESS_{JUDGE,OPTIMIZER}_{WB,API,CODEX}_MODEL`、`OPENHARNESS_{JUDGE,OPTIMIZER}_CODEX_REASONING_EFFORT`。
+  - token/超时/重试：`LLM_MAX_TOKENS`(默认 16000，API/Codex 用)、`LLM_OPTIMIZER_MAX_TOKENS`(12000)、`LLM_GUARD_MAX_TOKENS`(2000)、`LLM_TIMEOUT_SECONDS`(180)、`LLM_RETRIES`(2)、`LLM_REWRITE_RETRIES`(2)。
+  - judge：`OPENHARNESS_JUDGE_PARALLEL`(20)、`OPENHARNESS_JUDGE_STRATEGY`(per_dimension)、`OPENHARNESS_JUDGE_MAX_RETRIES`(3)。
+- 页面可**按请求**选后端/模型（Judge、Optimizer 各一组下拉；前端从 `GET /api/generation/config` 读默认后端来初始化，即改上面 env 就能改页面默认）。
+- **SSL**：`_ssl_context()` 优先 certifi → 系统 CA（`/etc/ssl/cert.pem`）→ `SSL_CERT_FILE`。修 macOS Framework Python 无根证书导致的 `CERTIFICATE_VERIFY_FAILED`。
+
+### 13.2 采纳 gate 重写（`lexicographic_champion/v2`，比旧版严得多）
+`app/optimizer_pipeline.py:evaluate_gate`（纯函数）：
+- **对比基线：历史 champion**（不是父版）。
+- **仅两条采纳路径**：① 硬失败 key **词典序严格下降** ∧ 全维不回退超容差；② 硬失败 **持平** ∧ overall 提升 ≥ `MIN_EFFECTIVE_OVERALL_DELTA=0.05` ∧ 全维不回退 ∧ **独立 holdout 不回退**。
+- 硬失败 key = `(redline_failures, hard_floor_failures)` 词典序。`target_check` 仅作佐证、不构成第三条路径（防 judge 噪声/单维波动误采纳）。
+- 由 `session_core.settle_pending_candidate()` 在候选**真实判分收尾时**调用（llm_rewrite 异步 gate）；switch_search 仍走 session_eval 内联老 gate。旧 gate 是「父版 + 任意维涨 0.001 + 无新红线」，已被彻底取代。
+
+### 13.3 实时评测看板（PR #17/18/20）
+- `app/dashboard/*`（纯前端 SPA：experiment-evaluation-tree.html + loader + theme）+ `app/dashboard_api.py`（纯数据层，只读本地文件）**挂在 `server.py` 同进程**，非独立服务。`GET /dashboard`；15 个 `/api/local/*` 只读端点。数据全部来自 `app/sessions/`、`generation_runs/`，不再调 LLM/API。权威数据契约见 `app/dashboard/README.md`。
+
+### 13.4 数据质量产品（新产品线，与调研洞察并行）
+- `harness/data_workflow.py`（CLI facade）→ `_data_prepare.py`（造/合数据集）/ `_data_audit.py`（三阶段：结构化提证 → 审计遗漏/冲突/噪声 → 可选修复，用 **Codex CLI**）。资产 `harness/data_quality_assets/`（schema+prompt）。新 agent skill `skills/data-quality-audit/`。评的是**数据准备质量**（非报告质量）。
+- `harness/workbuddy_batch/`（8 模块、~2100 行低层批跑引擎）由 `harness/workbuddy_runner.py` façade 统一暴露；外部只经 façade 调用。`harness/backend.py` 仍是 MockBackend/ResearchMockBackend/RecordedBackend 三个（离线 mock 引擎，供 demo/自测）。
+
+### 13.5 评测流程重构 + iteration_trace
+- 报告可**直接从 session case inputs 生成**（782f162）；支持多数据集分组（`datasets`/`active_dataset_id`，版本绑 `dataset_id`）；case 级进度流转。
+- `app/iteration_trace.py`：每版在 `sessions/<sid>/iterations/<ver>/` 原子维护五文件（manifest/optimizer_summary/dialogue_contract/gate_decision/resource_usage），详见 §12。
+
+### 13.6 会话与数据资产盘点（截至 2026-08-11）
+- **会话很多（15 个）**：
+  - research_insight 系：`research-run`(18 版翻开关 demo)、`research-calib`(27 案校准)、`ds-timelen`/`real-eval`(标注)、`president-report-llm`(20 案 llm_rewrite)、`verify-ds-tmp`(空)。
+  - custom-skill · llm_rewrite 实验系：`3d8fe03d`(v0=llm_scratch 从零写，5 版)、`b27e80a8`、`a722bcb4`(= fork 自 3d8fe03d 的 v0，无旧数据，本轮用 v3 数据 + gpt-5.6-sol 重跑)、`6377ba38`/`89438d72`、以及一批**模型对比会话** `1-api-gpt56-opus5`/`2-api-opus5-gpt56`/`3-api-opus5-alt`/`4-api-gpt56-gpt56`（名字即 judge/optimizer 用的模型组合）。
+  - 注：盘点里 `best=None` 多为 view 未判分完/未结算，不代表坏。
+- **数据集**：当前 `OPENHARNESS_WB_DATASET` → `data/v3_20260804_real_project_package/data.json`（20 case，真实项目）；旧 `data/20260727_real_project_package/`；`data/research_assistant/`(3 真实尺子)、`data/report_assistant/`(旧算数字型)；及若干 `data/*_test_data/`。`data/` 整个 gitignored（不进库）。
+
+### 13.7 本轮运维实测教训（重要，省得再踩）
+1. **bianxie 计费坑（api 后端）**：403 分两类 —— ① `max_tokens` 超该模型单请求上限；② `预扣费额度失败, 余额不足`（**账户没钱**：本轮余额 $0.24 < 单次判分预扣 $0.27，全 403）。judge 是并发的（默认 20），**并发 × 每请求预扣**会成倍烧额度/撞上限。治标=降并发(`OPENHARNESS_JUDGE_PARALLEL`)+降 `LLM_MAX_TOKENS`；根治=**bianxie 充值** 或 judge/optimizer **改回 workbuddy 后端**（公司 CLI，不烧 bianxie 余额）。
+2. **重启坑（反复踩）**：改 `start_real.sh` 或代码后**必须真重启**才生效；多次出现「以为重启了、其实是旧/僵尸进程占着 8080」→ 看到过期数据/旧配置。标准动作：`pkill -f "server.py.*8080"` 确认端口空 → source+启动 → `ps eww -p <pid> | grep LLM_MAX_TOKENS` 等**核对新 env 真进了新进程**（`ps` 偶发读数过期，多确认一次）。
+3. **本轮修的三个 bug**（已并入远程 main）：SSL 无 CA 回退（llm_client）、`LLM_MAX_TOKENS` 过小致 llm_rewrite 整段 instructions 被截断、`session_core.restore()` 漏初始化 `active_dataset_id`/`datasets` 致**任何会话重启后 advance 崩**（AttributeError）。
+
+### 13.8 关键文件地图（增补，以此为准）
+- LLM 后端/模型：`app/llm_client.py`、`app/model_config.py`。
+- judge：`app/judge_batch.py`（并发、per_dimension 策略、重试）。
+- optimizer：`app/optimizer02.py`(llm_rewrite)、`harness/optimizer.py`(switch_search)、`app/optimizer_registry.py`、`app/optimizer_pipeline.py`(gate/context)。
+- 会话：`app/session.py`(组合) = `session_core`+`session_eval`+`session_label`+`session_generation` 四 mixin。
+- 生成：`app/generation_jobs.py` + `harness/workbuddy_runner.py`(+`workbuddy_batch/`)。
+- 看板：`app/dashboard/` + `app/dashboard_api.py`（`app/dashboard/README.md` 权威契约）。
+- 数据质量：`harness/data_workflow.py`/`_data_audit.py`/`_data_prepare.py` + `harness/data_quality_assets/` + `skills/data-quality-audit/`。
+- 轨迹：`app/iteration_trace.py`。
+
+### 13.9 生产 Skill / Harness 边界（2026-08-11）
+- 新增 `app/production_skill_policy.py`，把 rubric check 投影成无 ID、无权重、无分数的生产执行规则，并统一拦截 rubric/check ID/Gate/champion/holdout/采纳策略等评测元数据。
+- `llm_scratch` V0 不再把完整 rubric 传给起草 LLM；红线完整性检查仍是 Harness 内部独立守卫，不写回 Skill。Patch LLM 不再接收完整 rubric、当前分数或 Gate 策略，只接收选中的生产内容要求。
+- `skill_compiler` 版本为 `session-skill/v4-production-boundary`：编译时自动清理旧会话中的评分/Gate/采纳章节，最终冻结包删除 `OPENHARNESS_*` 标记和 directive ID，且对所有 Markdown 再做一次生产边界校验。
+
+---
+
+## 14. 2026-08-12 增量（Gate v4 适度放宽）
+
+> 本节覆盖 §13.2 中的 Gate v3 规则。
+
+- `llm_rewrite` 现行规则为 `net_hard_improvement_champion/v4`，仍永远与历史 champion 比较。
+- 不再因候选出现任何新 `(case_id, check_id)` 红线失败键就一票否决；失败键新增/解决清单仍完整写入 Gate trace，但只作诊断。
+- 硬改善路径改为 Pareto 判定：硬红线总数和维度硬底线总数都不得增加，且至少一项减少。这避免旧词典序规则采纳“红线减少、硬底线反而增加”的交换。
+- 补偿性保护：全维回退仍不得超 rubric 容差；本轮目标 check 回退不得超 `0.05`；如已有 test holdout，硬改善路径也要求 holdout 两类硬失败不增、无维度实质回退、overall 回退不超 `0.05`。
+- 硬失败持平时的 overall 路径仍保持严格：dev overall 至少提升 `0.05`，且独立 holdout overall 不回退。
+- 对历史会话回放：`20555ce0` 的 v1/v4 会改为可采纳，v2 因硬失败恶化拒绝，v3 因目标 check 回退 `-0.10` 拒绝；`7cbf5f29` 的 v1–v4 仍全部拒绝，因为存在真实维度回退、holdout 恶化或 dev 硬失败恶化。历史已结算 verdict 不追溯改写，v4 仅对之后新结算的候选生效。
+
+---
+
+## 15. 2026-08-13 增量（Gate 增益门槛与 early-stop patience）
+
+- `llm_rewrite` 在硬失败持平时的 dev overall 最低有效提升由 `0.05` 调整为 `0.02`；目标 check 与 holdout 的 `0.05` 回退容差不变。
+- Gate hydration 会把旧会话 rubric 中持久化的 `min_overall_improvement=0.05` 统一迁移为 `0.02`，历史已结算 verdict 不追溯重判。
+- 新建 LLM loop 的默认 `max_no_improvement` 由 4 调整为 8；页面与 seed 脚本同步。
+- 当前实验会话 `3f0fae24` 已把 patience 调为 8 并解除停止态，保留当前 streak=4，可继续探索 V5–V8。
+
+---
+
+## 16. 2026-08-13 增量（V0 起草固定使用 Codex）
+
+- 页面选择 `llm_scratch` 创建 V0 时，V0 正文起草与独立红线守卫两次调用均固定为 Codex CLI `gpt-5.6-sol`、`medium`。
+- 该配置只影响 V0 专用调用；Runner、Judge 与后续 Optimizer 的模型选择保持原逻辑。
+- Rubric 仍从受控模板加载，不交给模型自由生成或改写。

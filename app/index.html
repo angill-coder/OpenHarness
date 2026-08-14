@@ -154,7 +154,7 @@
           <option value="base_skill">从基础 Skill 开始（V0 使用基础规则）</option>
           <option value="llm_scratch">LLM 从零起草（需求 + Rubric）</option>
         </select>
-        <div class="small mut" style="margin-top:5px">“从零起草”不会读取基础 Skill 的可编辑规则；创建 V0 时会调用 LLM，可能需要数分钟。</div>
+        <div class="small mut" style="margin-top:5px">“从零起草”不会读取基础 Skill 的可编辑规则；创建 V0 固定调用 Codex CLI · gpt-5.6-sol · medium，可能需要数分钟。</div>
       </div>
       <div class="row" style="align-items:flex-end;margin-top:8px">
         <div style="flex:1">
@@ -163,7 +163,7 @@
         </div>
         <div style="flex:1">
           <label for="stopPatience">连续无提升版本数</label>
-          <input id="stopPatience" type="number" min="1" step="1" value="4">
+          <input id="stopPatience" type="number" min="1" step="1" value="8">
         </div>
       </div>
       <div class="small mut" style="margin-top:5px">仅用于 LLM 改写实验的 early-stop，不修改 Rubric 目标。</div>
@@ -213,7 +213,7 @@
     </div>
 
     <div class="card step" id="realRunCard">
-      <h2><span class="n">▶</span>真实运行 · WB CLI</h2>
+      <h2><span class="n">▶</span>真实运行 · Runner CLI</h2>
       <p class="small mut">一键执行当前 Session 的全部 case；缺失报告自动重试最多 3 次，每份通过验收的报告产出后立即导入当前冻结版本。</p>
       <div id="generationConfig" class="small mut">正在读取运行配置…</div>
       <div class="row" style="align-items:flex-end;margin-top:8px">
@@ -240,7 +240,7 @@
 
     <div class="card step" id="outputCard">
       <h2><span class="n">▶</span>报告与批量模型 Judge</h2>
-      <p class="small mut">WB CLI 会批量导入报告；也可在这里手工补充单个报告。点击一次即可并发 Judge 当前版本全部 case，每个 case 使用独立 Prompt。</p>
+      <p class="small mut">Runner CLI 会批量导入报告；也可在这里手工补充单个报告。点击一次即可并发 Judge 当前版本全部 case，每个 case 使用独立 Prompt。</p>
       <label>选择 case</label>
       <select id="outCaseSel"></select>
 
