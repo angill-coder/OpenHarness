@@ -25,7 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 HERE = Path(__file__).resolve().parent
@@ -178,6 +178,8 @@ class ExperimentLoop:
         max_settled_candidates: Optional[int] = None,
         max_no_improvement_streak: int = 0,
         generation_model: Optional[str] = None,
+        generation_memory_context: Optional[str] = None,
+        generation_memory_ids: Optional[List[str]] = None,
         llm_backend: Optional[str] = None,
         llm_model: Optional[str] = None,
         llm_reasoning_effort: Optional[str] = None,
@@ -215,6 +217,8 @@ class ExperimentLoop:
             int(max_no_improvement_streak),
         )
         self.generation_model = generation_model
+        self.generation_memory_context = generation_memory_context
+        self.generation_memory_ids = list(generation_memory_ids or [])
         self.llm_backend = llm_backend
         self.llm_model = llm_model
         self.llm_reasoning_effort = llm_reasoning_effort
@@ -361,6 +365,9 @@ class ExperimentLoop:
             payload["parallel"] = self.generation_parallel
         if self.generation_model:
             payload["model"] = self.generation_model
+        if self.generation_memory_context:
+            payload["memory_context"] = self.generation_memory_context
+            payload["memory_ids"] = self.generation_memory_ids
         result = self.api(
             "/api/generation/start",
             "POST",

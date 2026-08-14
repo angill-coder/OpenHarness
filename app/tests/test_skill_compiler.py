@@ -94,6 +94,25 @@ class SkillCompilerTest(unittest.TestCase):
         self.assertIn("require_source_ref", instructions)
         self.assertIn("回溯到真实素材", instructions)
 
+    def test_memory_context_is_frozen_without_changing_artifact_hash(self):
+        skill = _skill()
+        without_memory = compile_session_skill(
+            self.root / "runs", "memory-eval", skill, self.base,
+        )
+        with_memory = compile_session_skill(
+            self.root / "runs", "memory-eval", skill, self.base,
+            memory_context="- 报告使用短段。",
+        )
+
+        self.assertEqual(without_memory.artifact_hash, with_memory.artifact_hash)
+        self.assertNotEqual(without_memory.path, with_memory.path)
+        instructions = (
+            with_memory.path / "references" / "instructions.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("本次启用的用户写作偏好", instructions)
+        self.assertIn("报告使用短段", instructions)
+        self.assertIn("低于本轮用户明确要求", instructions)
+
     def test_different_versions_apply_cumulative_directives(self):
         v0 = _skill()
         v1 = v0.clone_with_directive(

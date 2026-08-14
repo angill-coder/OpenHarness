@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -19,12 +20,27 @@ import uuid
 from typing import Any, Callable, Dict, Iterable, Optional
 
 import dashboard_api
+import feedback_router
 import feedback_acceptance
 import llm_client
+import memory_pipeline
+from memory_client import (
+    MemoryClientError,
+    ResearchReportMemoryClient,
+    SUPPORTED_MEMORY_USERS,
+    normalize_memory_user,
+)
 
 
 class RubricsLoopError(ValueError):
     pass
+
+
+def _memory_user(value):
+    try:
+        return normalize_memory_user(value)
+    except MemoryClientError as exc:
+        raise RubricsLoopError(str(exc)) from exc
 
 
 def json_sha256(value: Any) -> str:
@@ -403,7 +419,11 @@ class RubricsLoopService:
     def context(self) -> Dict[str, Any]:
         sessions = []
         if not self.sessions_root.is_dir():
-            return {"sessions": []}
+            return {
+                "sessions": [],
+                "memory_users": list(SUPPORTED_MEMORY_USERS),
+                "default_memory_user": "local",
+            }
         for path in sorted(self.sessions_root.iterdir()):
             if not (path / "state.json").is_file():
                 continue
@@ -433,7 +453,11 @@ class RubricsLoopService:
                     ),
                 }
             )
-        return {"sessions": sessions}
+        return {
+            "sessions": sessions,
+            "memory_users": list(SUPPORTED_MEMORY_USERS),
+            "default_memory_user": "local",
+        }
 
     def report(
         self,
@@ -742,6 +766,10 @@ class RubricsLoopService:
                     ),
                     "experiment_id": candidate.get("experiment_id"),
                     "adopted_version": candidate.get("adopted_version"),
+                    "feedback_batch_ids": copy.deepcopy(
+                        candidate.get("feedback_batch_ids")
+                        or [candidate.get("source_batch_id")]
+                    ),
                     "cumulative_validation": (
                         {
                             "included": True,
@@ -771,7 +799,17 @@ class RubricsLoopService:
                         or (item.get("acceptance") or {}).get("status")
                     ),
                     "experiment_session_id": item.get("experiment_session_id"),
+                    # A validation experiment runs against the cumulative
+                    # Rubrics draft frozen on this Candidate.  Keep that
+                    # membership in the history payload so earlier rounds in
+                    # the same draft are also shown as validated.
+                    "included_batch_ids": copy.deepcopy(
+                        item.get("included_batch_ids")
+                        or candidate.get("feedback_batch_ids")
+                        or [candidate.get("source_batch_id")]
+                    ),
                     "created_at": item.get("created_at"),
+                    "finished_at": item.get("finished_at"),
                     "updated_at": item.get("updated_at"),
                 } for item in linked_experiments)
             latest_candidate = candidate_summaries[0] if candidate_summaries else None
@@ -791,6 +829,24 @@ class RubricsLoopService:
                 "feedback_count": len(feedback),
                 "report_refs": copy.deepcopy(batch.get("report_refs") or []),
                 "feedback": copy.deepcopy(feedback),
+                "routing_summary": {
+                    "status": (batch.get("routing") or {}).get("status"),
+                    "memory_user": batch.get("memory_user") or "local",
+                    "rubric_count": sum(
+                        1 for route in (batch.get("routing") or {}).get("routes") or []
+                        if route.get("destination") == "rubric"
+                    ),
+                    "memory_count": sum(
+                        1 for route in (batch.get("routing") or {}).get("routes") or []
+                        if route.get("destination") == "memory"
+                    ),
+                    "memory_saved_count": sum(
+                        1 for route in (batch.get("routing") or {}).get("routes") or []
+                        if route.get("destination") == "memory"
+                        and (route.get("memory_result") or {}).get("status")
+                        in {"pending", "stored", "unchanged"}
+                    ),
+                },
                 "candidates": candidate_summaries,
                 "experiments": experiment_summaries,
                 "latest_candidate_id": (
@@ -949,11 +1005,17 @@ class RubricsLoopService:
         )
         return {"sessions": sessions}
 
+    @staticmethod
+    def inspect_memory(user="local") -> Dict[str, Any]:
+        """Expose the canonical Memory Runtime's read-only L0/L1/L2 view."""
+        return ResearchReportMemoryClient(user=user).inspect()
+
     def create_batch(
         self,
         session_id: str,
         report_ref: Optional[Dict[str, Any]] = None,
         account: str = "",
+        memory_user: str = "local",
     ) -> Dict[str, Any]:
         state = self._state(session_id)
         rubric = copy.deepcopy(state.get("rubric") or {})
@@ -976,6 +1038,7 @@ class RubricsLoopService:
             ),
             "report_refs": [],
             "feedback": [],
+            "memory_user": _memory_user(memory_user),
             "status": "draft",
             "created_by": account,
             "created_at": _now(),
@@ -1089,6 +1152,7 @@ class RubricsLoopService:
             "created_at": _now(),
         }
         batch.setdefault("feedback", []).append(feedback)
+        batch.pop("routing", None)
         batch["updated_at"] = _now()
         _atomic_write(self._batch_path(session_id, batch_id), batch)
         feedback_log = self._loop_root(session_id) / "feedback.jsonl"
@@ -1107,6 +1171,7 @@ class RubricsLoopService:
             item for item in batch.get("feedback") or []
             if item.get("feedback_id") != feedback_id
         ]
+        batch.pop("routing", None)
         batch["updated_at"] = _now()
         _atomic_write(self._batch_path(session_id, batch_id), batch)
         return batch
@@ -1137,9 +1202,303 @@ class RubricsLoopService:
         target["content"] = content
         target["updated_by"] = account
         target["updated_at"] = _now()
+        batch.pop("routing", None)
         batch["updated_at"] = _now()
         _atomic_write(self._batch_path(session_id, batch_id), batch)
         return batch
+
+    def route_batch_feedback(
+        self,
+        session_id: str,
+        batch_id: str,
+        model_config: Dict[str, Any],
+        account: str = "",
+        call_model: Optional[Callable[..., str]] = None,
+    ) -> Dict[str, Any]:
+        batch = self.get_batch(session_id, batch_id)
+        if batch.get("status") != "draft":
+            raise RubricsLoopError("只有 draft Batch 可以重新分类 Feedback")
+        feedback = batch.get("feedback") or []
+        if not feedback:
+            raise RubricsLoopError("请先添加 Feedback")
+        reports = []
+        for ref in batch.get("report_refs") or []:
+            report = self.report(
+                session_id, ref["skill_version"], ref["case_id"],
+                ref["report_sha256"], ref["rubric_sha256"],
+            )
+            reports.append({
+                "skill_version": ref["skill_version"],
+                "case_id": ref["case_id"],
+                "report_text": report["report_text"],
+            })
+        try:
+            routes = feedback_router.route_feedback(
+                feedback, batch["working_rubric"], reports,
+                model_config, call_model=call_model,
+            )
+        except ValueError as exc:
+            raise RubricsLoopError(str(exc)) from exc
+        batch["routing"] = {
+            "status": "review",
+            "routes": routes,
+            "model_config": copy.deepcopy(model_config),
+            "routed_by": account,
+            "routed_at": _now(),
+        }
+        batch["updated_at"] = _now()
+        _atomic_write(self._batch_path(session_id, batch_id), batch)
+        return batch
+
+    def confirm_feedback_routing(
+        self,
+        session_id: str,
+        batch_id: str,
+        destinations: Dict[str, str],
+        model_config: Dict[str, Any],
+        account: str = "",
+        process_memory=None,
+        memory_actions: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        batch = self._confirm_routing_choices(
+            session_id, batch_id, destinations, model_config, account,
+            memory_actions,
+        )
+        routes, memory_user, memory_error = self._process_memory_routes(
+            session_id, batch, model_config, process_memory=process_memory
+        )
+        batch = self._finalize_routing(
+            session_id, batch_id, routes, memory_user, account,
+            error=memory_error,
+        )
+        if memory_error:
+            raise RubricsLoopError("Memory 处理失败: %s" % memory_error)
+        return batch
+
+    def _confirm_routing_choices(
+        self,
+        session_id: str,
+        batch_id: str,
+        destinations: Dict[str, str],
+        model_config: Dict[str, Any],
+        account: str = "",
+        memory_actions: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        batch = self.get_batch(session_id, batch_id)
+        routing = batch.get("routing") or {}
+        if routing.get("status") not in {
+            "review", "processing", "memory_failed", "completed"
+        }:
+            raise RubricsLoopError("请先运行 Feedback 分类")
+        routes = routing.get("routes") or []
+        valid_ids = {str(item.get("feedback_id") or "") for item in batch.get("feedback") or []}
+        by_feedback = {
+            str(item.get("feedback_id") or ""): item
+            for item in batch.get("feedback") or []
+        }
+        for route in routes:
+            feedback_id = str(route.get("feedback_id") or "")
+            selected = str((destinations or {}).get(feedback_id) or route.get("destination") or "")
+            if feedback_id not in valid_ids or selected not in feedback_router.DESTINATIONS:
+                raise RubricsLoopError("Feedback 分类确认包含非法值")
+            route["destination"] = selected
+            route["confirmed_by_user"] = feedback_id in (destinations or {})
+            if selected == "memory":
+                memory_action = str(
+                    (memory_actions or {}).get(feedback_id)
+                    or route.get("memory_action")
+                    or "pending"
+                )
+                if memory_action not in {"pending", "store"}:
+                    raise RubricsLoopError("Memory 保存方式包含非法值")
+                route["memory_action"] = memory_action
+        routing["status"] = "processing"
+        routing["memory_model_config"] = copy.deepcopy(model_config)
+        routing["destinations_confirmed_by"] = account
+        routing["destinations_confirmed_at"] = _now()
+        batch["updated_at"] = _now()
+        _atomic_write(self._batch_path(session_id, batch_id), batch)
+        return batch
+
+    def _process_memory_routes(
+        self,
+        session_id: str,
+        batch: Dict[str, Any],
+        model_config: Dict[str, Any],
+        process_memory=None,
+        call_model: Optional[Callable[..., str]] = None,
+    ) -> tuple[list[Dict[str, Any]], str, str]:
+        routes = copy.deepcopy((batch.get("routing") or {}).get("routes") or [])
+        by_feedback = {
+            str(item.get("feedback_id") or ""): item
+            for item in batch.get("feedback") or []
+        }
+        memory_user = _memory_user(
+            batch.get("memory_user") or batch.get("created_by") or "local"
+        )
+        pipeline = memory_pipeline.MemoryPipeline(user=memory_user)
+        state = self._state(session_id)
+        memory_error = ""
+        for route in routes:
+            memory_result = route.get("memory_result") or {}
+            if (
+                route.get("destination") != "memory"
+                or (
+                    memory_result
+                    and memory_result.get("status") != "error"
+                )
+            ):
+                continue
+            feedback = by_feedback[route["feedback_id"]]
+            ref = feedback.get("report_ref") or {}
+            context = {
+                "external_source_id": "openharness:%s:%s" % (
+                    session_id, route["feedback_id"]
+                ),
+                "session_id": session_id,
+                "task": state.get("requirement") or "报告写作反馈",
+                "topic": ref.get("case_id") or "",
+                "audience": "总裁",
+                "report_type": "研究报告",
+                "context_before": feedback.get("quote") or "",
+                "context_after": feedback.get("content") or "",
+                "final_artifact": "skill=%s case=%s report_sha256=%s" % (
+                    ref.get("skill_version") or "",
+                    ref.get("case_id") or "",
+                    ref.get("report_sha256") or "",
+                ),
+            }
+            try:
+                if process_memory:
+                    route["memory_result"] = process_memory(
+                        feedback, context, model_config
+                    )
+                elif route.get("memory_action") == "store":
+                    route["memory_result"] = pipeline.process(
+                        feedback, context, model_config,
+                        call_model=call_model,
+                        forced_decision="store",
+                    )
+                else:
+                    route["memory_result"] = pipeline.store_pending(
+                        feedback, context, model_config
+                    )
+                route["memory_result"]["memory_user"] = memory_user
+            except Exception as exc:
+                route["memory_result"] = {
+                    "status": "error", "error": str(exc)
+                }
+                memory_error = str(exc)
+                break
+        return routes, memory_user, memory_error
+
+    def _finalize_routing(
+        self,
+        session_id: str,
+        batch_id: str,
+        routes: list[Dict[str, Any]],
+        memory_user: str,
+        account: str,
+        error: str = "",
+    ) -> Dict[str, Any]:
+        # Candidate generation may have updated the Batch while the Memory
+        # branch was running. Reload before merging so neither branch can
+        # overwrite the other's result.
+        batch = self.get_batch(session_id, batch_id)
+        routing = batch.get("routing") or {}
+        routing["routes"] = copy.deepcopy(routes)
+        routing["status"] = "memory_failed" if error else "completed"
+        routing["confirmed_by"] = account
+        routing["confirmed_at"] = _now()
+        if error:
+            routing["memory_error"] = error
+        else:
+            routing.pop("memory_error", None)
+        batch["routing"] = routing
+        batch["memory_user"] = memory_user
+        if not any(
+            route.get("destination") == "rubric" for route in routes
+        ):
+            # Memory-only and record-only rounds do not generate a Candidate.
+            batch["status"] = "completed"
+        batch["updated_at"] = _now()
+        _atomic_write(self._batch_path(session_id, batch_id), batch)
+        return batch
+
+    def confirm_and_propose_candidate(
+        self,
+        session_id: str,
+        batch_id: str,
+        destinations: Dict[str, str],
+        memory_actions: Dict[str, str],
+        memory_model_config: Dict[str, Any],
+        rubric_model_config: Dict[str, Any],
+        account: str = "",
+        process_memory=None,
+        call_memory_model: Optional[Callable[..., str]] = None,
+        call_candidate_model: Optional[Callable[..., str]] = None,
+    ) -> Dict[str, Any]:
+        """Confirm routing and run Memory + Rubrics branches concurrently."""
+        batch = self._confirm_routing_choices(
+            session_id, batch_id, destinations, memory_model_config, account,
+            memory_actions,
+        )
+        has_rubric = any(
+            route.get("destination") == "rubric"
+            for route in (batch.get("routing") or {}).get("routes") or []
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            memory_future = pool.submit(
+                self._process_memory_routes,
+                session_id, copy.deepcopy(batch), memory_model_config,
+                process_memory, call_memory_model,
+            )
+            candidate_future = (
+                pool.submit(
+                    self.propose_candidate,
+                    session_id, batch_id, rubric_model_config, account, "", "",
+                    call_candidate_model,
+                )
+                if has_rubric else None
+            )
+            candidate = None
+            candidate_error = None
+            try:
+                if candidate_future:
+                    candidate = candidate_future.result()
+            except Exception as exc:
+                candidate_error = exc
+            routes, memory_user, memory_error = memory_future.result()
+        latest_batch = self._finalize_routing(
+            session_id, batch_id, routes, memory_user, account,
+            error=memory_error,
+        )
+        if memory_error:
+            raise RubricsLoopError("Memory 处理失败: %s" % memory_error)
+        if candidate_error:
+            raise candidate_error
+        return {"batch": latest_batch, "candidate": candidate}
+
+    @staticmethod
+    def _rubric_feedback(batch: Dict[str, Any]) -> list[Dict[str, Any]]:
+        routing = batch.get("routing") or {}
+        if not routing:
+            return list(batch.get("feedback") or [])
+        confirmed_processing = (
+            routing.get("status") == "processing"
+            and bool(routing.get("destinations_confirmed_at"))
+        )
+        if routing.get("status") != "completed" and not confirmed_processing:
+            raise RubricsLoopError("请先确认 Feedback 分类")
+        rubric_ids = {
+            str(route.get("feedback_id") or "")
+            for route in routing.get("routes") or []
+            if route.get("destination") == "rubric"
+        }
+        return [
+            item for item in batch.get("feedback") or []
+            if str(item.get("feedback_id") or "") in rubric_ids
+        ]
 
     def _optimizer_prompt(
         self,
@@ -1165,14 +1524,14 @@ class RubricsLoopService:
                 batch.get("working_rubric") or batch["parent_rubric"]
             ),
             "historical_changes": self._draft_history_context(rubric_draft),
-            "feedback": batch.get("feedback") or [],
+            "feedback": self._rubric_feedback(batch),
             "reports": reports,
             "revision_note": revision_note,
             "previous_candidate": previous_candidate,
         }
         return "\n".join([
             "你是 OpenHarness 的 Rubrics Optimizer。请联合分析多份报告与专家 Feedback，生成精简的候选 Rubrics。",
-            "先判断每条 Feedback 属于 rubric/skill/judge/data/one_off_preference；只有 rubric 问题才能修改 Rubrics。",
+            "输入 Feedback 已由 Feedback Router 和用户确认属于通用 Rubrics；不要重新分类，也不要写入个性化偏好。",
             "优先修改或合并现有 Check，确有缺口才新增。维度不得变化；Check 总数和判定文本均不得超过父版本。",
             "base_rubric 是累计长度预算的原始基线；working_rubric 是本轮必须继续修改的最新草案，不得退回 base_rubric。",
             "historical_changes 是此前已暂存的修改历史。若本轮再次涉及同一 Check，必须结合原始内容、历史修改原因和新 Feedback 决定保留、扩展、合并或替换，不能静默覆盖。",
@@ -1180,6 +1539,7 @@ class RubricsLoopService:
             "不要自动改变红线。每个 operation 必须关联 feedback_ids。",
             "只输出一个 JSON 对象，字段必须为 candidate_rubric、operations、feedback_analysis、unhandled_feedback_ids、summary。",
             "feedback_analysis 每项包含 feedback_id、category、existing_check_ids、decision、reason。",
+            "feedback_analysis.decision 仅允许 add_check/update_check/merge_checks/delete_check/move_check/covered/task_config/one_off_preference；若该 Feedback 被任一 operation 引用，decision 必须使用对应的修改 operation，不得写 covered 或自造近义值。",
             "operations 的 op 仅允许 add_check/update_check/merge_checks/delete_check/move_check。",
             "若 operation 涉及 historical_changes 中已改过的 Check，增加 history_action（keep_previous/extend/merge/replace/no_change）；replace 或存在冲突时还要写 conflict=true 和 conflict_resolution。",
             "\n## 输入\n" + json.dumps(payload, ensure_ascii=False, indent=2),
@@ -1198,6 +1558,9 @@ class RubricsLoopService:
         batch = self.get_batch(session_id, batch_id)
         if not batch.get("feedback"):
             raise RubricsLoopError("请先添加 Feedback")
+        rubric_feedback = self._rubric_feedback(batch)
+        if not rubric_feedback:
+            raise RubricsLoopError("本轮没有需要修改通用 Rubrics 的 Feedback")
         if batch.get("status") not in {"draft", "submitted", "completed"}:
             raise RubricsLoopError("当前 Batch 状态不能生成 Candidate")
         previous = None
@@ -1250,7 +1613,7 @@ class RubricsLoopService:
             "move_check",
         }
         valid_feedback_ids = {
-            item["feedback_id"] for item in batch.get("feedback") or []
+            item["feedback_id"] for item in rubric_feedback
         }
         historically_touched = {
             str(check_id)
@@ -1315,6 +1678,7 @@ class RubricsLoopService:
             "candidate_rubric_sha256": json_sha256(parsed["candidate_rubric"]),
             "operations": parsed.get("operations") or [],
             "feedback_analysis": parsed.get("feedback_analysis") or [],
+            "rubric_feedback_ids": sorted(valid_feedback_ids),
             "unhandled_feedback_ids": parsed.get("unhandled_feedback_ids") or [],
             "summary": _summary_text(parsed.get("summary")),
             "revision_note": revision_note,
@@ -1482,6 +1846,7 @@ class RubricsLoopService:
         config: Dict[str, Any],
         account: str = "",
         redline_confirmed: bool = False,
+        selected_batch_ids: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         candidate = self.get_candidate(session_id, candidate_id)
         if candidate.get("status") not in {
@@ -1496,6 +1861,31 @@ class RubricsLoopService:
         state = self._state(session_id)
         if json_sha256(state.get("rubric") or {}) != candidate["parent_rubric_sha256"]:
             raise RubricsLoopError("父 Rubrics 已变化，Candidate 已过期")
+        included_batch_ids = [
+            str(value) for value in (
+                candidate.get("feedback_batch_ids")
+                or [candidate.get("source_batch_id")]
+            ) if value
+        ]
+        explicit_selection = [
+            str(value) for value in (selected_batch_ids or []) if value
+        ]
+        if explicit_selection and explicit_selection != included_batch_ids:
+            raise RubricsLoopError(
+                "所选反馈轮次与候选 Rubrics 的累计范围不一致，请重新选择"
+            )
+        if candidate.get("draft_id") and not explicit_selection:
+            draft = self.get_draft(session_id, candidate["draft_id"])
+            if str(draft.get("latest_candidate_id") or "") != candidate_id:
+                raise RubricsLoopError(
+                    "该候选不是待验证草案的最新累计版本；请从迭代历史选择要验证的轮次"
+                )
+        for existing in self._list_loop_documents(session_id, "experiments"):
+            if existing.get("status") in {"created", "queued", "running"}:
+                raise RubricsLoopError(
+                    "当前 Session 已有验证实验运行中: %s"
+                    % existing.get("experiment_id")
+                )
         for existing in self._list_loop_documents(session_id, "experiments"):
             if (
                 existing.get("candidate_id") == candidate_id
@@ -1513,6 +1903,7 @@ class RubricsLoopService:
             "session_id": session_id,
             "candidate_id": candidate_id,
             "candidate_rubric_sha256": candidate["candidate_rubric_sha256"],
+            "included_batch_ids": included_batch_ids,
             "config": copy.deepcopy(config),
             "status": "created",
             "phase": "skill_loop",
@@ -1544,6 +1935,10 @@ class RubricsLoopService:
         value["feedback_acceptance_enabled"] = value.get(
             "feedback_acceptance_enabled", True
         ) is not False
+        value["memory_enabled"] = value.get("memory_enabled", False) is True
+        value["memory_user"] = _memory_user(
+            value.get("memory_user") or "local"
+        )
         if not isinstance(value.get("acceptance"), dict):
             value["acceptance"] = copy.deepcopy(value.get("judge") or {})
         return value
@@ -1717,7 +2112,7 @@ class RubricsLoopService:
         ]
         batches = [self.get_batch(session_id, value) for value in batch_ids]
         feedback = [
-            item for batch in batches for item in batch.get("feedback") or []
+            item for batch in batches for item in self._rubric_feedback(batch)
         ]
         report_refs = []
         for batch in batches:

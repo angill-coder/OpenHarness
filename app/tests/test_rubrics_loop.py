@@ -2,6 +2,7 @@ import copy
 import json
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -107,6 +108,162 @@ class RubricsLoopTest(unittest.TestCase):
             rubrics_loop.json_sha256(sample_rubric()),
             batch["rubric_sha256"],
         )
+
+    def test_routes_memory_before_rubrics_optimizer(self):
+        batch = self.service.create_batch("exp-1", {
+            "skill_version": "v9", "case_id": "case-1",
+        }, "alice")
+        batch = self.service.add_feedback(
+            "exp-1", batch["batch_id"], "report", "图表都必须标单位",
+            {"skill_version": "v9", "case_id": "case-1"}, account="alice",
+        )
+        rubric_feedback_id = batch["feedback"][0]["feedback_id"]
+        batch = self.service.add_feedback(
+            "exp-1", batch["batch_id"], "report", "我个人偏好短段",
+            {"skill_version": "v9", "case_id": "case-1"}, account="alice",
+        )
+        memory_feedback_id = batch["feedback"][1]["feedback_id"]
+        batch = self.service.route_batch_feedback(
+            "exp-1", batch["batch_id"], {}, "alice",
+            call_model=lambda *args, **kwargs: json.dumps({"routes": [
+                {"feedback_id": rubric_feedback_id, "destination": "rubric", "reason": "通用", "confidence": 0.9},
+                {"feedback_id": memory_feedback_id, "destination": "memory", "reason": "个人", "confidence": 0.9},
+            ]}, ensure_ascii=False),
+        )
+        memory_calls = []
+        batch = self.service.confirm_feedback_routing(
+            "exp-1", batch["batch_id"], {}, {}, "alice",
+            process_memory=lambda feedback, context, config: memory_calls.append(feedback["feedback_id"]) or {
+                "status": "stored", "episode_id": "ep-1", "written_ids": ["m-1"], "profiles_written": 1,
+            },
+        )
+        self.assertEqual([memory_feedback_id], memory_calls)
+        prompts = []
+        self.service.propose_candidate(
+            "exp-1", batch["batch_id"], {}, "alice",
+            call_model=lambda prompt, **kwargs: prompts.append(prompt) or json.dumps({
+                "candidate_rubric": sample_rubric(), "operations": [],
+                "feedback_analysis": [{
+                    "feedback_id": rubric_feedback_id, "category": "rubric",
+                    "existing_check_ids": ["T1"], "decision": "covered", "reason": "已有覆盖",
+                }], "summary": "无需修改",
+            }, ensure_ascii=False),
+        )
+        payload = json.loads(prompts[0].split("\n## 输入\n", 1)[1])
+        self.assertEqual([rubric_feedback_id], [item["feedback_id"] for item in payload["feedback"]])
+        self.assertIn(
+            "若该 Feedback 被任一 operation 引用，decision 必须使用对应的修改 operation",
+            prompts[0],
+        )
+
+    def test_confirm_runs_memory_and_rubrics_optimizer_in_parallel(self):
+        batch = self.service.create_batch("exp-1", {
+            "skill_version": "v9", "case_id": "case-1",
+        }, "alice")
+        batch = self.service.add_feedback(
+            "exp-1", batch["batch_id"], "report", "图表都必须标单位",
+            {"skill_version": "v9", "case_id": "case-1"}, account="alice",
+        )
+        rubric_feedback_id = batch["feedback"][0]["feedback_id"]
+        batch = self.service.add_feedback(
+            "exp-1", batch["batch_id"], "report", "我个人偏好短段",
+            {"skill_version": "v9", "case_id": "case-1"}, account="alice",
+        )
+        memory_feedback_id = batch["feedback"][1]["feedback_id"]
+        batch = self.service.route_batch_feedback(
+            "exp-1", batch["batch_id"], {}, "alice",
+            call_model=lambda *args, **kwargs: json.dumps({"routes": [
+                {"feedback_id": rubric_feedback_id, "destination": "rubric", "reason": "通用", "confidence": 0.9},
+                {"feedback_id": memory_feedback_id, "destination": "memory", "reason": "个人", "confidence": 0.9},
+            ]}, ensure_ascii=False),
+        )
+        barrier = threading.Barrier(2, timeout=2)
+
+        def process_memory(*args, **kwargs):
+            barrier.wait()
+            return {
+                "status": "stored", "episode_id": "ep-1",
+                "written_ids": ["m-1"], "profiles_written": 1,
+            }
+
+        def propose(prompt, **kwargs):
+            barrier.wait()
+            return json.dumps({
+                "candidate_rubric": sample_rubric(),
+                "operations": [{
+                    "op": "update_check", "check_id": "T1",
+                    "feedback_ids": [rubric_feedback_id],
+                }],
+                "feedback_analysis": [{
+                    "feedback_id": rubric_feedback_id,
+                    "category": "rubric", "existing_check_ids": ["T1"],
+                    "decision": "update_check", "reason": "强化单位要求",
+                }],
+                "summary": "强化 T1",
+            }, ensure_ascii=False)
+
+        result = self.service.confirm_and_propose_candidate(
+            "exp-1", batch["batch_id"],
+            {rubric_feedback_id: "rubric", memory_feedback_id: "memory"},
+            {memory_feedback_id: "store"}, {}, {}, "alice",
+            process_memory=process_memory, call_candidate_model=propose,
+        )
+
+        self.assertIsNotNone(result["candidate"])
+        self.assertEqual("completed", result["batch"]["routing"]["status"])
+        memory_route = next(
+            item for item in result["batch"]["routing"]["routes"]
+            if item["feedback_id"] == memory_feedback_id
+        )
+        self.assertEqual("stored", memory_route["memory_result"]["status"])
+        self.assertEqual(
+            result["candidate"]["candidate_id"],
+            result["batch"]["latest_candidate_id"],
+        )
+
+    def test_memory_only_routing_completes_iteration_without_candidate(self):
+        batch = self.service.create_batch("exp-1", {
+            "skill_version": "v9", "case_id": "case-1",
+        }, "alice")
+        batch = self.service.add_feedback(
+            "exp-1", batch["batch_id"], "report", "我偏好更短的段落",
+            {"skill_version": "v9", "case_id": "case-1"}, account="alice",
+        )
+        feedback_id = batch["feedback"][0]["feedback_id"]
+        batch = self.service.route_batch_feedback(
+            "exp-1", batch["batch_id"], {}, "alice",
+            call_model=lambda *args, **kwargs: json.dumps({"routes": [{
+                "feedback_id": feedback_id, "destination": "memory",
+                "reason": "个人偏好", "confidence": 0.9,
+            }]}, ensure_ascii=False),
+        )
+        batch = self.service.confirm_feedback_routing(
+            "exp-1", batch["batch_id"], {}, {}, "alice",
+            process_memory=lambda *args, **kwargs: {
+                "status": "pending", "episode_id": "ep-1",
+                "written_ids": [], "profiles_written": 0,
+            },
+            memory_actions={feedback_id: "pending"},
+        )
+        self.assertEqual("completed", batch["status"])
+        self.assertEqual("local", batch["memory_user"])
+        self.assertEqual(
+            "pending", batch["routing"]["routes"][0]["memory_action"]
+        )
+        history = self.service.list_iterations("exp-1")
+        iteration = history["groups"][0]["iterations"][0]
+        self.assertEqual(1, iteration["routing_summary"]["memory_count"])
+        self.assertEqual(1, iteration["routing_summary"]["memory_saved_count"])
+        self.assertIsNone(history["active"]["batch_id"])
+
+    def test_batch_rejects_unknown_memory_user(self):
+        with self.assertRaisesRegex(
+            rubrics_loop.RubricsLoopError, "不支持的 Memory 用户"
+        ):
+            self.service.create_batch(
+                "exp-1", {"skill_version": "v9", "case_id": "case-1"},
+                "alice", "unknown",
+            )
 
     def test_inline_feedback_accepts_rendered_soft_line_break(self):
         original_report = self.service.report
@@ -401,10 +558,29 @@ YouTube 待验证
             "exp-1", second["candidate_id"], "owner",
             history_conflict_confirmed=True,
         )
+        with self.assertRaisesRegex(
+            rubrics_loop.RubricsLoopError, "不是待验证草案的最新累计版本"
+        ):
+            self.service.create_experiment(
+                "exp-1", first["candidate_id"], {}
+            )
+        with self.assertRaisesRegex(
+            rubrics_loop.RubricsLoopError, "累计范围不一致"
+        ):
+            self.service.create_experiment(
+                "exp-1", second["candidate_id"], {},
+                selected_batch_ids=[second_batch["batch_id"]],
+            )
         experiment = self.service.create_experiment(
             "exp-1", second["candidate_id"], {
                 "skill_iteration_rounds": 2,
-            }, "owner",
+            }, "owner", selected_batch_ids=[
+                batch["batch_id"], second_batch["batch_id"]
+            ],
+        )
+        self.assertEqual(
+            [batch["batch_id"], second_batch["batch_id"]],
+            experiment["included_batch_ids"],
         )
         self.service.update_experiment(
             "exp-1", experiment["experiment_id"], {"status": "completed"}
@@ -429,6 +605,17 @@ YouTube 待验证
         self.assertEqual(
             "completed",
             first_summary["cumulative_validation"]["experiment_status"],
+        )
+        experiment_summary = next(
+            stored_experiment
+            for group in history["groups"]
+            for iteration in group["iterations"]
+            for stored_experiment in iteration["experiments"]
+            if stored_experiment["experiment_id"] == experiment["experiment_id"]
+        )
+        self.assertEqual(
+            [batch["batch_id"], second_batch["batch_id"]],
+            experiment_summary["included_batch_ids"],
         )
 
     def test_legacy_candidate_without_working_parent_can_start_draft(self):

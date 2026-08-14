@@ -69,6 +69,8 @@ class GenerationJob:
     dataset_sha256: Optional[str] = None
     compiler_version: Optional[str] = None
     base_skill_hash: Optional[str] = None
+    memory_context: Optional[str] = None
+    memory_ids: List[str] = field(default_factory=list)
     status: str = "queued"
     cases: List[GenerationCaseState] = field(default_factory=list)
     idempotency_key: Optional[str] = None
@@ -143,4 +145,6 @@ class GenerationJob:
         fields.setdefault("dataset_sha256", None)
         fields.setdefault("compiler_version", None)
         fields.setdefault("base_skill_hash", None)
+        fields.setdefault("memory_context", None)
+        fields.setdefault("memory_ids", [])
         return cls(**fields)

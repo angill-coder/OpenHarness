@@ -26,12 +26,6 @@
         <div class="panel-head"><h2>报告选择</h2><button id="refresh">刷新</button></div>
         <label>Session<select id="sessionSelect"></select></label>
         <div class="rubric-selection-row"><div id="rubricSummary" class="rubric-summary"></div></div>
-        <details class="rubric-import-section">
-          <summary>更换当前 Session Rubric</summary>
-          <p>仅在需要用另一份评分标准开启新一轮迭代时使用。导入后只替换当前 Session 的 Rubric，并使其旧 Judge 结果失效；不会修改已生成报告、其他 Session 或仓库默认文件。</p>
-          <label class="button-link rubric-import-button">选择 Rubric JSON<input id="rubricFileInput" type="file" accept="application/json,.json" hidden></label>
-        </details>
-        <p id="rubricImportStatus" class="rubric-import-status"></p>
         <div id="versionTree" class="version-tree"></div>
       </aside>
 
@@ -47,6 +41,7 @@
       <aside class="panel batch-panel">
         <div class="panel-head"><h2>本轮反馈</h2></div>
         <p class="panel-intro">选中报告原文可添加针对性批注；不选中原文时，反馈默认针对整篇报告。</p>
+        <label class="memory-user-label">当前标注者<select id="memoryUser"></select><small>归类为 Memory 的反馈将写入该用户的独立记忆目录。</small></label>
         <section id="currentReportTools" class="current-report-tools hidden">
           <div class="current-report-head"><div><small>正在阅读</small><b id="currentReportName"></b></div></div>
           <div id="selectionPreview" class="selection-preview hidden">
@@ -63,12 +58,14 @@
         </section>
         <div id="batchMeta" class="empty">尚未添加反馈</div>
         <h3>已批注报告与意见</h3><div id="batchReports" class="annotated-reports empty">添加反馈后会自动关联报告</div>
+        <section id="routingReview" class="routing-review hidden"></section>
         <div id="feedbackActions" class="feedback-actions hidden">
           <button id="continueAnnotating">继续批注其他报告</button>
           <button id="generateCandidate" class="primary">提交已有批注</button>
         </div>
         <details class="model-config">
-          <summary>Rubrics Optimizer 模型设置（可选）</summary>
+          <summary>Feedback 处理与 Rubrics Optimizer 模型设置（可选）</summary>
+          <p class="hint">同一模型依次用于 Feedback 分类、Memory 提炼和 Rubrics Optimizer。</p>
           <label>调用方式<select id="optimizerBackend"></select></label>
           <label>模型<select id="optimizerModel"></select></label>
           <label id="effortLabel">Reasoning effort<select id="optimizerEffort"></select></label>
@@ -80,6 +77,12 @@
       <div class="panel-head"><div><h2>Rubrics 迭代历史</h2><p id="historyHint" class="hint">默认展示全部 Session；选择 Session 后查看该会话的详细迭代记录。</p></div></div>
       <div id="historyEmpty" class="empty">暂无 Rubrics 迭代历史。</div>
       <div id="historyGroups" class="history-groups"></div>
+    </section>
+
+    <section class="panel memory-panel">
+      <div class="panel-head"><div><h2>已保存 Memory</h2><p id="memoryOwner" class="hint">查看当前标注者待观察的 L0、稳定规则 L1 和归纳后的 L2 Profile。</p></div><button id="refreshMemory">刷新</button></div>
+      <div id="memorySummary" class="rubric-summary"><span>正在读取…</span></div>
+      <div id="memoryStore" class="memory-store"></div>
     </section>
 
     <section id="candidatePanel" class="panel candidate-panel hidden">
@@ -118,6 +121,7 @@
           <div class="config-role"><b>Runner</b><span>生成各轮报告</span></div>
           <label>模型<select id="runnerModel"><option value="">正在读取模型列表…</option></select></label>
           <label>报告并发<input id="generationParallel" type="number" min="1" value="4"></label>
+          <label class="memory-toggle"><span><input id="memoryEnabled" type="checkbox"> 启用 Memory</span><small>生成报告时应用本轮标注者的写作偏好；验证 Rubrics 时建议关闭</small></label>
         </div>
         <div class="experiment-config-row">
           <div class="config-role"><b>Skill Optimizer</b><span>根据 Judge 结果迭代 Skill</span></div>

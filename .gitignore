@@ -15,6 +15,8 @@ data/
 # WorkBuddy 真实生成 trace/workspace（体积大，仅本地保留）
 generation_runs/
 app/sessions/*
+state_snapshots/
+deleted_validation_experiments/
 
 # 本地开发设计文档（不随产品代码发布）
 WB_CLI_真实报告生成集成开发设计.md

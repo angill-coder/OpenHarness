@@ -110,6 +110,25 @@ class ExperimentLoopPlanTest(unittest.TestCase):
         self.assertEqual(action["action"], "retry_generation")
         self.assertEqual(action["case_ids"], ["c2"])
 
+    def test_generation_start_includes_frozen_memory_context(self):
+        loop = ExperimentLoop(
+            "http://127.0.0.1:9999",
+            "memory-session",
+            generation_memory_context="- 使用短段。",
+            generation_memory_ids=["m-1"],
+        )
+        calls = []
+        loop.api = lambda path, method, payload, timeout: (
+            calls.append((path, method, payload, timeout))
+            or {"job": {"job_id": "j1", "skill_version": "v0", "case_count": 1}}
+        )
+
+        loop._start_generation({"version": "v0", "case_ids": ["c1"]})
+
+        payload = calls[0][2]
+        self.assertEqual("- 使用短段。", payload["memory_context"])
+        self.assertEqual(["m-1"], payload["memory_ids"])
+
     def test_generation_retry_limit_blocks(self):
         jobs = [
             {

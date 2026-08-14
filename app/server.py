@@ -49,6 +49,7 @@ import persistence as persist  # noqa: E402
 import llm_client  # noqa: E402
 import dashboard_api  # noqa: E402
 import rubrics_loop as rubrics_loop_mod  # noqa: E402
+from memory_client import MemoryClientError, ResearchReportMemoryClient  # noqa: E402
 from run_experiment_loop import ExperimentLoop  # noqa: E402
 from generation_jobs import (  # noqa: E402
     GenerationJobError,
@@ -544,6 +545,43 @@ def _start_rubric_experiment_worker(
             if not loop_completed:
                 skill_cfg = config.get("skill_optimizer") or {}
                 judge_cfg = config.get("judge") or {}
+                memory_context = ""
+                memory_ids = []
+                if config.get("memory_enabled"):
+                    memory_snapshot = experiment.get("memory_snapshot") or {}
+                    if not memory_snapshot:
+                        source = SESSIONS[source_session_id]
+                        recalled = ResearchReportMemoryClient(
+                            user=config.get("memory_user") or "local"
+                        ).recall({
+                            "task": source.requirement,
+                            "audience": "总裁",
+                            "reportType": "研究报告",
+                            "limit": 12,
+                        })
+                        if recalled.get("status") != "ok":
+                            raise RuntimeError(
+                                "Memory 召回失败: %s"
+                                % (recalled.get("reason") or "unknown")
+                            )
+                        memory_snapshot = {
+                            "status": "frozen",
+                            "context": recalled.get("context") or "",
+                            "memory_ids": [
+                                str(item.get("id"))
+                                for item in (recalled.get("memories") or [])
+                                if item.get("id")
+                            ],
+                            "instruction": recalled.get("instruction") or "",
+                            "recalled_at": round(time.time(), 3),
+                        }
+                        experiment = service.update_experiment(
+                            source_session_id,
+                            experiment_id,
+                            {"memory_snapshot": memory_snapshot},
+                        )
+                    memory_context = memory_snapshot.get("context") or ""
+                    memory_ids = memory_snapshot.get("memory_ids") or []
                 loop = ExperimentLoop(
                     base_url=base_url,
                     session_id=experiment_session_id,
@@ -558,6 +596,8 @@ def _start_rubric_experiment_worker(
                         config.get("skill_iteration_rounds") or 2
                     ),
                     generation_model=config.get("runner_model") or None,
+                    generation_memory_context=memory_context,
+                    generation_memory_ids=memory_ids,
                     judge_llm_backend=judge_cfg.get("llm_backend"),
                     judge_llm_model=judge_cfg.get("llm_model"),
                     judge_llm_reasoning_effort=judge_cfg.get(
@@ -875,6 +915,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, value)
             except rubrics_loop_mod.RubricsLoopError as exc:
                 return self._send(400, {"error": str(exc)})
+        if u.path == "/api/rubrics-loop/memory":
+            q = parse_qs(u.query)
+            try:
+                return self._send(
+                    200, _rubrics_loop_service().inspect_memory(
+                        (q.get("user") or ["local"])[0]
+                    )
+                )
+            except MemoryClientError as exc:
+                return self._send(503, {"error": str(exc)})
         if u.path == "/api/rubrics-loop/candidate":
             q = parse_qs(u.query)
             try:
@@ -1360,7 +1410,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/rubrics-loop/batches":
             try:
                 value = _rubrics_loop_service().create_batch(
-                    b.get("session_id"), b.get("report_ref"), acct
+                    b.get("session_id"), b.get("report_ref"), acct,
+                    b.get("memory_user") or "local",
                 )
                 return self._send(200, value)
             except rubrics_loop_mod.RubricsLoopError as exc:
@@ -1412,6 +1463,76 @@ class Handler(BaseHTTPRequestHandler):
                         account=acct,
                     )
                 return self._send(200, value)
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/feedback/route":
+            try:
+                backend, model, effort = _llm_selection(b, "feedback_router")
+                value = _rubrics_loop_service().route_batch_feedback(
+                    b.get("session_id"), b.get("batch_id"),
+                    {
+                        "llm_backend": backend,
+                        "llm_model": model,
+                        "llm_reasoning_effort": effort,
+                    },
+                    account=acct,
+                )
+                return self._send(200, value)
+            except llm_client.LLMClientError as exc:
+                return self._send(502, {"error": "Feedback Router 调用失败: %s" % exc})
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/feedback/confirm-routing":
+            try:
+                backend, model, effort = _llm_selection(b, "memory_agent")
+                value = _rubrics_loop_service().confirm_feedback_routing(
+                    b.get("session_id"), b.get("batch_id"),
+                    b.get("destinations") or {},
+                    {
+                        "llm_backend": backend,
+                        "llm_model": model,
+                        "llm_reasoning_effort": effort,
+                    },
+                    account=acct,
+                    memory_actions=b.get("memory_actions") or {},
+                )
+                return self._send(200, value)
+            except llm_client.LLMClientError as exc:
+                return self._send(502, {"error": "Memory Agent 调用失败: %s" % exc})
+            except rubrics_loop_mod.RubricsLoopError as exc:
+                return self._send(400, {"error": str(exc)})
+
+        if u.path == "/api/rubrics-loop/feedback/confirm-and-optimize":
+            try:
+                memory_backend, memory_model, memory_effort = _llm_selection(
+                    b, "memory_agent"
+                )
+                rubric_backend, rubric_model, rubric_effort = _llm_selection(
+                    b, "rubrics_optimizer"
+                )
+                value = _rubrics_loop_service().confirm_and_propose_candidate(
+                    b.get("session_id"), b.get("batch_id"),
+                    b.get("destinations") or {},
+                    b.get("memory_actions") or {},
+                    {
+                        "llm_backend": memory_backend,
+                        "llm_model": memory_model,
+                        "llm_reasoning_effort": memory_effort,
+                    },
+                    {
+                        "llm_backend": rubric_backend,
+                        "llm_model": rubric_model,
+                        "llm_reasoning_effort": rubric_effort,
+                    },
+                    account=acct,
+                )
+                return self._send(200, value)
+            except llm_client.LLMClientError as exc:
+                return self._send(
+                    502, {"error": "Feedback 并行处理调用失败: %s" % exc}
+                )
             except rubrics_loop_mod.RubricsLoopError as exc:
                 return self._send(400, {"error": str(exc)})
 
@@ -1481,6 +1602,7 @@ class Handler(BaseHTTPRequestHandler):
                         b.get("session_id"), b.get("candidate_id"),
                         b.get("config") or {}, acct,
                         bool(b.get("redline_confirmed")),
+                        b.get("selected_batch_ids") or None,
                     )
                 candidate = service.get_candidate(
                     source.id, b.get("candidate_id")
@@ -1830,6 +1952,8 @@ class Handler(BaseHTTPRequestHandler):
                     case_ids=b.get("case_ids"),
                     parallel=b.get("parallel"),
                     model=b.get("model"),
+                    memory_context=b.get("memory_context"),
+                    memory_ids=b.get("memory_ids"),
                     idempotency_key=(
                         b.get("idempotency_key")
                         or self.headers.get("Idempotency-Key")
