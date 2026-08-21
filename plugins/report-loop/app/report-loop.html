@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenHarness · Report Loop 工作台</title>
+<link rel="stylesheet" href="/report-pages.css?rev=20260819-loop-auto">
+</head>
+<body class="report-workspace-page">
+<header class="top">
+  <a class="brand" href="/report-loop/">OpenHarness</a>
+  <nav class="product-nav" aria-label="平台页面">
+    <a class="active" href="/report-loop/">Report Loop 工作台</a>
+  </nav>
+  <span class="sync-status">LOCAL REALTIME · 自动同步</span>
+</header>
+<div class="workspace">
+  <aside class="control-rail" id="controlRail">
+    <div class="rail-scroll">
+      <section class="card control-card">
+        <div class="card-head"><h2>打开已有会话</h2><div class="card-head-tools"><small>SESSION</small><button class="icon-button compact-toggle" id="railToggle" type="button" aria-label="收起控制栏">‹</button></div></div>
+        <div class="card-body session-row"><select class="control" id="sessionSelect"></select><button class="ghost-button" id="openSession" type="button">打开</button></div>
+      </section>
+      <section class="card control-card">
+        <div class="card-head"><h2>加载数据集</h2><small>DATASET</small></div>
+        <div class="card-body">
+          <div class="field"><label>数据集</label><select class="control" id="datasetSelect"></select></div><div class="field"><label>Case</label><select class="control" id="caseSelect"></select></div>
+          <button class="embedded-skill-open dataset-load-button" id="datasetLoad" type="button"><span>导入dataset</span><i>›</i></button>
+          <p class="dataset-load-status" id="datasetLoadStatus" aria-live="polite"></p>
+        </div>
+      </section>
+      <section class="card control-card">
+        <div class="card-head"><h2>Report Loop 设置</h2><small>SETTINGS</small></div>
+        <div class="card-body">
+          <div class="field"><label>Skill 模板</label><select class="control" id="skillTemplate"><option value="">正在加载 Skill…</option></select></div><button class="embedded-skill-open" id="skillOpen" type="button" disabled><span>Skill 查看</span><i>›</i></button>
+          <div class="field"><label for="reportRequirement">需求描述</label><textarea class="control requirement-input" id="reportRequirement" rows="3" placeholder="请输入报告目标、重点问题或输出要求"></textarea></div>
+          <div class="two-fields"><div class="field"><label>Loop 停止总分</label><input class="control" id="loopStopScore" type="number" min="0" max="5" step="0.1" value="5"></div><div class="field"><label>连续无提升版本数</label><input class="control" id="maxNoImprovement" type="number" min="1" step="1" value="2"></div></div>
+          <div class="two-fields"><div class="field"><label>总时间预算（分钟）</label><input class="control" id="maxElapsedMinutes" type="number" min="1" step="1" value="60"></div><label class="field"><span>不可修复失败（可选）</span><span><input id="stopOnUnrepairable" type="checkbox"> 立即停止并标记 blocked</span></label></div>
+          <button class="step-button loop-start-button" id="loopStart" type="button" disabled>一键启动 Loop</button>
+        </div>
+      </section>
+      <section class="pipeline" id="pipeline"></section>
+    </div>
+  </aside>
+  <button class="rail-reopen" id="railReopen" type="button" aria-label="展开控制栏">›</button>
+  <main class="workbench">
+    <section class="card overview-card">
+      <div class="card-head"><div><h2>历史会话</h2></div><div class="segmented view-mode" id="experimentMode"><button class="on" data-mode="single">单会话</button><button data-mode="multi">会话对比</button></div></div>
+      <div class="table-wrap"><table class="latest-table"><thead><tr><th>选择</th><th>Report Run</th><th>报告主题</th><th>最新版本</th><th>启动时间</th><th>结束时间</th><th>总分</th><th>红线</th><th>可回溯性</th><th>结构</th><th>逻辑与故事线</th><th>提炼与洞察</th><th>覆盖度</th><th>表达</th></tr></thead><tbody id="latestBody"></tbody></table></div>
+    </section>
+    <section class="card session-compare-board" id="sessionCompareBoard" hidden>
+      <div class="board-head"><div><h2>多会话对比</h2></div></div>
+      <div class="session-compare-tree" id="sessionCompareTree"></div>
+    </section>
+    <section class="card data-card" id="dataCard">
+      <div class="card-head"><div><h2>数据展示</h2></div></div>
+      <div class="card-body data-line"><h3>Structured Data</h3><button class="structured-open" id="structuredOpen" type="button"><span>查看数据</span><i>›</i></button><h3>原始资料包</h3><div class="file-row" id="fileList"></div></div>
+    </section>
+    <section class="card report-board" id="reportBoard">
+      <div class="board-head"><div><h2>历史报告</h2></div><div class="segmented view-mode" id="versionMode"><button class="on" data-mode="one">单版本</button><button data-mode="many">版本对比</button></div></div>
+      <div class="report-tree" id="reportTree"></div>
+    </section>
+    <section class="card report-compare-board" id="reportCompareBoard" hidden>
+      <div class="report-compare-tree" id="reportCompareTree"></div>
+    </section>
+  </main>
+</div>
+<div class="doc-modal skill-doc-modal" id="skillModal" hidden aria-hidden="true"><div class="doc-modal-card skill-doc-modal-card" role="dialog" aria-modal="true" aria-labelledby="skillModalTitle"><div class="doc-modal-head"><div><h2 id="skillModalTitle">Skill 文档</h2><small id="skillModalMeta">当前报告生成规范</small></div><button class="ghost-button" id="skillClose" type="button">关闭</button></div><div class="doc-modal-body"><section class="doc-pane"><div class="doc-pane-head" id="skillFileName">SKILL.md</div><article class="markdown-doc" id="skillDoc"></article></section><section class="doc-pane"><div class="doc-pane-head" id="instructionFileName">instruction.md</div><article class="markdown-doc" id="instructionDoc"></article></section></div></div></div>
+<div class="doc-modal" id="structuredModal" hidden aria-hidden="true">
+  <div class="doc-modal-card structured-modal-card dataset-modal-card" role="dialog" aria-modal="true" aria-labelledby="structuredModalTitle">
+    <div class="doc-modal-head"><div><h2 id="structuredModalTitle">Dataset 数据</h2><small id="structuredTopic"></small></div><button class="ghost-button" id="structuredClose" type="button">关闭</button></div>
+    <div class="structured-modal-body dataset-preview-grid">
+      <section class="dataset-preview-pane"><h3>原始资料包</h3><div class="dataset-file-list" id="datasetFileList"></div></section>
+      <section class="dataset-preview-pane"><h3>Structured Data</h3><small class="structured-source" id="structuredSource"></small><div class="structured-view" id="structuredView"></div></section>
+    </div>
+  </div>
+</div>
+<script src="/report-loop-app.js?rev=20260819-loop-auto"></script>
+</body>
+</html>
+
+
