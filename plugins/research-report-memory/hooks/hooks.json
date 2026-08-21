@@ -1,0 +1,53 @@
+{
+  "description": "Allow research-report intake first, require memory recall before drafting, and capture explicit writing feedback before delivery.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh --import ${CODEBUDDY_PLUGIN_ROOT}/node_modules/tsx/dist/loader.mjs ${CODEBUDDY_PLUGIN_ROOT}/hooks/memory-guard.mjs prompt",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh --import ${CODEBUDDY_PLUGIN_ROOT}/node_modules/tsx/dist/loader.mjs ${CODEBUDDY_PLUGIN_ROOT}/hooks/memory-guard.mjs pre-tool",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh --import ${CODEBUDDY_PLUGIN_ROOT}/node_modules/tsx/dist/loader.mjs ${CODEBUDDY_PLUGIN_ROOT}/hooks/memory-guard.mjs post-tool",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh --import ${CODEBUDDY_PLUGIN_ROOT}/node_modules/tsx/dist/loader.mjs ${CODEBUDDY_PLUGIN_ROOT}/hooks/memory-guard.mjs stop",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

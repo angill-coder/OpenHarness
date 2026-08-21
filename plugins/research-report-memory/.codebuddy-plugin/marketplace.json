@@ -1,0 +1,16 @@
+{
+  "name": "research-report-memory-v2-mvp-local",
+  "description": "Local development marketplace for the research-report writing memory plugin",
+  "owner": {
+    "name": "Research Report Team"
+  },
+  "plugins": [
+    {
+      "name": "research-report-memory-v2-mvp",
+      "description": "research-report skill, WB Memory Sub-agent, L0/L1 evidence and Git-backed L2/L3",
+      "version": "2.0.0-mvp.22",
+      "source": ".",
+      "license": "MIT"
+    }
+  ]
+}

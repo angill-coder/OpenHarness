@@ -1,0 +1,28 @@
+{
+  "name": "research-report-memory-v2-mvp",
+  "version": "2.0.0-mvp.35",
+  "private": true,
+  "type": "module",
+  "description": "Research-report memory MVP with WB Sub-agent, L0/L1 evidence and Git-backed L2/L3 context",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "start": "node --import tsx mcp/src/server.ts",
+    "start:openharness": "sh ./scripts/run-node.sh --import tsx integration/openharness-worker.ts",
+    "sync:research-report-skill": "node scripts/sync-research-report-skill.mjs",
+    "build:release": "node scripts/build-release.mjs",
+    "test": "node --import tsx --test mcp/test/*.test.ts",
+    "syntaxcheck": "tsc --noEmit --noCheck"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.3",
+    "@tencentdb-agent-memory/memory-tencentdb": "0.3.6",
+    "tsx": "^4.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^6.0.0"
+  }
+}

@@ -1,0 +1,86 @@
+{{! Research Report Memory — Writing Recall Prompt }}
+{{! Expected data contract:
+{
+  "writing_context": {
+    "core": { "items": ["..."] } | null,
+    "audience": { "name": "...", "items": ["..."] } | null,
+    "project": { "name": "...", "items": ["..."] } | null
+  },
+  "self_checklist": {
+    "core": { "items": ["..."] } | null,
+    "audience": { "name": "...", "items": ["..."] } | null,
+    "project": { "name": "...", "items": ["..."] } | null
+  },
+  "specific_memories": { "items": ["..."] } | null
+}
+}}
+<research-report-memory>
+
+<usage>
+以下内容来自用户历史报告写作反馈，已经根据当前任务完成筛选和冲突消解。
+将其作为本轮报告的默认写作要求，但不要在报告中提及“记忆”、内部层级或 Scope。
+要求优先级为：本轮用户明确要求 > Project Memory > Audience Memory > Writing Core。
+记忆不能替代事实证据；涉及事实、数据和结论时，仍以本轮材料为准。
+</usage>
+
+<writing-context>
+{{#writing_context.core}}
+  <core>
+{{#items}}
+  - {{.}}
+{{/items}}
+  </core>
+{{/writing_context.core}}
+{{#writing_context.audience}}
+
+  <audience name="{{name}}">
+{{#items}}
+  - {{.}}
+{{/items}}
+  </audience>
+{{/writing_context.audience}}
+{{#writing_context.project}}
+
+  <project name="{{name}}">
+{{#items}}
+  - {{.}}
+{{/items}}
+  </project>
+{{/writing_context.project}}
+</writing-context>
+
+<self-checklist>
+{{#self_checklist.core}}
+  <core>
+{{#items}}
+  - [ ] {{.}}
+{{/items}}
+  </core>
+{{/self_checklist.core}}
+{{#self_checklist.audience}}
+
+  <audience name="{{name}}">
+{{#items}}
+  - [ ] {{.}}
+{{/items}}
+  </audience>
+{{/self_checklist.audience}}
+{{#self_checklist.project}}
+
+  <project name="{{name}}">
+{{#items}}
+  - [ ] {{.}}
+{{/items}}
+  </project>
+{{/self_checklist.project}}
+</self-checklist>
+{{#specific_memories}}
+
+<specific-memories>
+{{#items}}
+- {{.}}
+{{/items}}
+</specific-memories>
+{{/specific_memories}}
+
+</research-report-memory>

@@ -1,0 +1,34 @@
+{
+  "name": "research-report-memory-v2-mvp",
+  "version": "2.0.0-mvp.35",
+  "description": "为 research-report skill 提供 WB Sub-agent 与 L0–L3 写作记忆",
+  "author": {
+    "name": "Research Report Team"
+  },
+  "license": "MIT",
+  "keywords": [
+    "research-report",
+    "writing",
+    "memory",
+    "mcp"
+  ],
+  "skills": "./skills",
+  "agents": [
+    "./agents/research-report-memory-curator.md"
+  ],
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": {
+    "research-report-memory-v2-mvp": {
+      "command": "sh",
+      "args": [
+        "${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh",
+        "--import",
+        "tsx",
+        "${CODEBUDDY_PLUGIN_ROOT}/mcp/src/server.ts"
+      ],
+      "env": {
+        "RESEARCH_REPORT_MEMORY_V2_DIR": "~/.research-report-memory-v2-mvp"
+      }
+    }
+  }
+}

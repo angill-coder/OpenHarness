@@ -1,0 +1,19 @@
+{
+  "name": "research-report-memory-v2-mvp",
+  "version": "2.0.0-mvp.35",
+  "description": "Research-report memory with WB Sub-agent and L0-L3 storage",
+  "author": {
+    "name": "Research Report Team"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Research Report Memory V2 MVP",
+    "shortDescription": "Personalized long-term memory for research-report writing.",
+    "longDescription": "Adds a WB Memory Sub-agent, workflow guard, L0/L1 evidence storage and Git-backed L2 Context/L3 Rubrics without changing the core research-report writing method.",
+    "developerName": "Research Report Team",
+    "category": "Productivity",
+    "capabilities": ["writing memory", "local storage", "memory curation"],
+    "defaultPrompt": ["Use the research-report skill and its writing memory for this report task."]
+  },
+  "mcpServers": "./.mcp.json"
+}

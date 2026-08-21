@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "research-report-memory-v2-mvp": {
+      "command": "sh",
+      "args": [
+        "${PLUGIN_ROOT}/scripts/run-node.sh",
+        "--import",
+        "tsx",
+        "${PLUGIN_ROOT}/mcp/src/server.ts"
+      ],
+      "env": {
+        "RESEARCH_REPORT_MEMORY_V2_DIR": "~/.research-report-memory-v2-mvp"
+      }
+    }
+  }
+}
