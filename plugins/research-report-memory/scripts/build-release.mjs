@@ -100,7 +100,6 @@ copyPlugin("LICENSE", "LICENSE.md");
 copyPlugin("README.release.md", "README.md");
 copyRoot("scripts/install-release-workbuddy.sh");
 copyRoot("README.release.md", "README.md");
-copyRoot("skillhub/SKILL.md", "SKILL.md");
 
 const releaseMarketplace = {
   name: marketplaceName,
