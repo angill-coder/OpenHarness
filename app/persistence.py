@@ -59,6 +59,17 @@ def init_session(sid: str, requirement: str, product_id: str, experiment_user: s
         })
 
 
+def init_cloned_session(source_sid: str, target_sid: str, extra: Dict[str, Any] = None):
+    """复制 Session 元信息用于隔离实验，不复制任何报告或 Judge 结果。"""
+    source = load_meta(source_sid) or {}
+    value = dict(source)
+    value.update(extra or {})
+    value["sid"] = target_sid
+    value["parent_session_id"] = source_sid
+    value["created_at"] = _now()
+    _atomic_write(os.path.join(_ensure(target_sid), "meta.json"), value)
+
+
 def append_event(sid: str, etype: str, payload: Dict[str, Any]):
     d = _ensure(sid)
     rec = {"ts": _now(), "type": etype, "payload": payload}

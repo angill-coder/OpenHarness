@@ -25,7 +25,9 @@ from directive_registry import (
 )
 
 
-COMPILER_VERSION = "session-skill/v3"
+COMPILER_VERSION = "session-skill/v4"
+MEMORY_CONTEXT_START = "<!-- OPENHARNESS_MEMORY_CONTEXT_START -->"
+MEMORY_CONTEXT_END = "<!-- OPENHARNESS_MEMORY_CONTEXT_END -->"
 
 
 @dataclass(frozen=True)
@@ -168,6 +170,7 @@ def compile_session_skill(
     session_id: str,
     skill,
     base_skill_path: Path,
+    memory_context: str = "",
 ) -> FrozenSkill:
     base = base_skill_path.expanduser().resolve()
     baseline_states = load_skill_directives(base)
@@ -192,11 +195,16 @@ def compile_session_skill(
     artifact = skill.to_dict()
     artifact_hash = _json_hash(artifact)
     base_skill_hash = directory_hash(base)
+    normalized_memory_context = str(memory_context or "").strip()
+    memory_context_hash = hashlib.sha256(
+        normalized_memory_context.encode("utf-8")
+    ).hexdigest()
     compiled_identity = _json_hash(
         {
             "artifact_hash": artifact_hash,
             "base_skill_hash": base_skill_hash,
             "compiler_version": COMPILER_VERSION,
+            "memory_context_hash": memory_context_hash,
         }
     )
     final_dir = (
@@ -237,6 +245,19 @@ def compile_session_skill(
                 text,
                 additional,
                 skill.few_shots,
+            )
+        if normalized_memory_context:
+            text = (
+                text.rstrip()
+                + "\n\n"
+                + MEMORY_CONTEXT_START
+                + "\n## 本次启用的用户写作偏好\n\n"
+                + "以下偏好低于本轮用户明确要求，高于通用 Skill 规则；"
+                + "仅在不冲突时应用。\n\n"
+                + normalized_memory_context
+                + "\n"
+                + MEMORY_CONTEXT_END
+                + "\n"
             )
         instructions.write_text(text, encoding="utf-8")
 

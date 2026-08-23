@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Rubrics Loop · OpenHarness</title>
+  <link rel="stylesheet" href="/rubrics-loop/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">OpenHarness</a>
+    <nav>
+      <a href="/">Skill 评测与迭代</a>
+      <a href="/dashboard/">实时评测 Dashboard</a>
+      <a class="active" href="/rubrics-loop/">Rubrics Loop</a>
+    </nav>
+    <span id="status">正在加载…</span>
+  </header>
+
+  <main>
+    <section class="steps">
+      <b>1 选择并批注报告</b><span>→</span><b>2 审核候选 Rubrics</b><span>→</span><b>3 验证与决策</b>
+    </section>
+    <div class="workspace">
+      <aside class="panel selector">
+        <div class="panel-head"><h2>报告选择</h2><button id="refresh">刷新</button></div>
+        <label>Session<select id="sessionSelect"></select></label>
+        <div class="rubric-selection-row"><div id="rubricSummary" class="rubric-summary"></div></div>
+        <div id="versionTree" class="version-tree"></div>
+      </aside>
+
+      <section class="panel report-panel">
+        <div class="panel-head">
+          <div><h2 id="reportTitle">请选择报告</h2><div id="reportMeta" class="badges"></div></div>
+        </div>
+        <div id="judgeScore" class="judge-score hidden"></div>
+        <p id="reportHint" class="hint">从左侧展开一个 Skill 版本，再选择报告。</p>
+        <article id="report" class="report"></article>
+      </section>
+
+      <aside class="panel batch-panel">
+        <div class="panel-head"><h2>本轮反馈</h2></div>
+        <p class="panel-intro">选中报告原文可添加针对性批注；不选中原文时，反馈默认针对整篇报告。</p>
+        <label class="memory-user-label">当前标注者<select id="memoryUser"></select><small>归类为 Memory 的反馈将写入该用户的独立记忆目录。</small></label>
+        <section id="currentReportTools" class="current-report-tools hidden">
+          <div class="current-report-head"><div><small>正在阅读</small><b id="currentReportName"></b></div></div>
+          <div id="selectionPreview" class="selection-preview hidden">
+            <div><b>已选中 Markdown 原文</b><button id="cancelSelection" title="取消原文选择">×</button></div>
+            <blockquote id="selectedQuote"></blockquote>
+          </div>
+          <div class="composer">
+            <label id="feedbackModeLabel">反馈内容</label>
+            <textarea id="feedbackInput" placeholder="例如：建议部分缺少证据链，无法支持优先级判断"></textarea>
+            <small class="keyboard-hint">Enter 添加反馈 · Shift+Enter 换行</small>
+            <label>适用范围<select id="feedbackScope"><option value="current">当前报告</option><option value="all">本次所有已批注报告</option></select></label>
+            <button id="saveFeedback" class="primary" disabled>添加反馈</button>
+          </div>
+        </section>
+        <div id="batchMeta" class="empty">尚未添加反馈</div>
+        <h3>已批注报告与意见</h3><div id="batchReports" class="annotated-reports empty">添加反馈后会自动关联报告</div>
+        <section id="routingReview" class="routing-review hidden"></section>
+        <div id="feedbackActions" class="feedback-actions hidden">
+          <button id="continueAnnotating">继续批注其他报告</button>
+          <button id="generateCandidate" class="primary">提交已有批注</button>
+        </div>
+        <details class="model-config">
+          <summary>Feedback 处理与 Rubrics Optimizer 模型设置（可选）</summary>
+          <p class="hint">同一模型依次用于 Feedback 分类、Memory 提炼和 Rubrics Optimizer。</p>
+          <label>调用方式<select id="optimizerBackend"></select></label>
+          <label>模型<select id="optimizerModel"></select></label>
+          <label id="effortLabel">Reasoning effort<select id="optimizerEffort"></select></label>
+        </details>
+      </aside>
+    </div>
+
+    <section class="panel history-panel">
+      <div class="panel-head"><div><h2>Rubrics 迭代历史</h2><p id="historyHint" class="hint">默认展示全部 Session；选择 Session 后查看该会话的详细迭代记录。</p></div></div>
+      <div id="historyEmpty" class="empty">暂无 Rubrics 迭代历史。</div>
+      <div id="historyGroups" class="history-groups"></div>
+    </section>
+
+    <section class="panel memory-panel">
+      <div class="panel-head"><div><h2>已保存 Memory</h2><p id="memoryOwner" class="hint">查看当前标注者待观察的 L0、稳定规则 L1 和归纳后的 L2 Profile。</p></div><button id="refreshMemory">刷新</button></div>
+      <div id="memorySummary" class="rubric-summary"><span>正在读取…</span></div>
+      <div id="memoryStore" class="memory-store"></div>
+    </section>
+
+    <section id="candidatePanel" class="panel candidate-panel hidden">
+      <div class="panel-head"><div><h2 id="candidateTitle">候选 Rubrics 审核</h2><p id="candidateContext" class="hint">先确认反馈处理和 Rubrics 变化，再进入验证实验。</p></div><button id="closeCandidateReview">收起审核</button></div>
+      <div id="optimizerRunStatus" class="optimizer-run-status hidden">
+        <span class="optimizer-spinner" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div><b>Rubrics Optimizer 运行中</b><p id="optimizerRunDetail"></p></div>
+      </div>
+      <div id="candidateEmpty" class="empty">生成候选 Rubrics 后，在这里审核反馈处理结果和具体变更。</div>
+      <div id="candidateView" class="hidden">
+        <div id="draftBanner" class="draft-banner hidden"></div>
+        <div id="candidateSummary" class="candidate-summary"></div>
+        <div class="candidate-grid">
+          <div><h3>反馈处理结果</h3><p class="section-help">说明每条反馈对应哪些 Checks，以及是否需要修改通用 Rubrics。</p><div id="analysisList"></div></div>
+          <div><h3>Rubrics 变更对照</h3><p class="section-help">只展示本轮发生变化的 Check，直接比较修改前和修改后。</p><div id="operationList"></div></div>
+        </div>
+        <div class="review-action-section">
+          <h3>审核操作</h3>
+          <div class="decision-bar">
+            <textarea id="revisionNote" placeholder="需要调整时输入修改意见"></textarea>
+            <button id="reviseCandidate">要求重新生成</button>
+            <button id="rejectCandidate" class="danger">拒绝候选 Rubrics</button>
+            <button id="stageCandidate">暂存到待验证草案</button>
+            <button id="prepareExperiment" class="primary">验证新 Rubrics</button>
+          </div>
+        </div>
+        <details class="candidate-rubric-section"><summary><b>候选 Rubrics 全表</b><span>展开查看完整 Checks</span></summary><p class="section-help">以下是更新后的完整 Rubrics；红色行表示本轮发生了修改。</p><div id="candidateRubricTable"></div></details>
+        <details class="advanced-json"><summary>高级编辑：查看或修改原始 JSON</summary><textarea id="candidateJson" class="json-editor"></textarea><button id="saveCandidateJson">保存手工修改并重新校验</button></details>
+      </div>
+    </section>
+
+    <section id="experimentPanel" class="panel experiment-panel hidden">
+      <div class="panel-head"><h2>验证与决策</h2><span class="hint">默认迭代 2 轮，再逐条检查反馈是否在新报告中得到落实</span></div>
+      <div class="experiment-config">
+        <div class="experiment-config-row runner-config-row">
+          <div class="config-role"><b>Runner</b><span>生成各轮报告</span></div>
+          <label>模型<select id="runnerModel"><option value="">正在读取模型列表…</option></select></label>
+          <label>报告并发<input id="generationParallel" type="number" min="1" value="4"></label>
+          <label class="memory-toggle"><span><input id="memoryEnabled" type="checkbox"> 启用 Memory</span><small>生成报告时应用本轮标注者的写作偏好；验证 Rubrics 时建议关闭</small></label>
+        </div>
+        <div class="experiment-config-row">
+          <div class="config-role"><b>Skill Optimizer</b><span>根据 Judge 结果迭代 Skill</span></div>
+          <label>迭代轮数<input id="skillIterationRounds" type="number" min="1" max="5" value="2"></label>
+          <label>调用方式<select id="skillBackend"></select></label>
+          <label>模型<select id="skillModel"></select></label>
+          <label id="skillEffortLabel">推理强度<select id="skillEffort"></select></label>
+        </div>
+        <div class="experiment-config-row">
+          <div class="config-role"><b>Judge</b><span>按 Rubrics 评估报告</span></div>
+          <label>调用方式<select id="judgeBackend"></select></label>
+          <label>模型<select id="judgeModel"></select></label>
+          <label id="judgeEffortLabel">推理强度<select id="judgeEffort"></select></label>
+          <label>并发<input id="judgeParallel" type="number" min="1" value="20"></label>
+        </div>
+        <div class="experiment-config-row">
+          <div class="config-role"><b>Rubrics 验收</b><span>逐条检查反馈是否在迭代后的报告中得到落实</span></div>
+          <label>调用方式<select id="acceptanceBackend"></select></label>
+          <label>模型<select id="acceptanceModel"></select></label>
+          <label id="acceptanceEffortLabel">推理强度<select id="acceptanceEffort"></select></label>
+        </div>
+      </div>
+      <button id="startExperiment" class="primary">启动 Skill 迭代与 Rubrics 验收</button>
+      <a id="openExperiment" class="button-link hidden" href="#">查看验证实验详情</a>
+      <div id="experimentProgress" class="experiment-progress"></div>
+      <section id="acceptancePanel" class="acceptance-panel hidden">
+        <div class="panel-head"><h3>Rubrics 验收</h3><span id="acceptanceSummary"></span></div>
+        <div id="acceptanceResults"></div>
+      </section>
+      <div id="experimentError" class="experiment-error hidden"></div>
+      <div id="experimentDecision" class="experiment-decision hidden">
+        <button id="adoptCandidate" class="primary">采纳新 Rubrics</button>
+        <button id="continueOptimization">继续优化 Rubrics</button>
+        <button id="keepOriginalRubric" class="danger">保留原 Rubrics 并结束</button>
+        <button id="setDefaultRubric" class="hidden">设为 Rubrics Loop 默认版本</button>
+      </div>
+      <details class="advanced-json"><summary>查看实验原始记录</summary><pre id="experimentResult"></pre></details>
+    </section>
+
+  </main>
+  <div id="toast" class="toast"></div>
+  <script src="/rubrics-loop/app.js"></script>
+</body>
+</html>

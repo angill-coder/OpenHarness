@@ -204,11 +204,12 @@ class GenerationJobServiceTest(unittest.TestCase):
     def test_default_dataset_path_is_repository_local_data_json(self):
         with patch.dict("os.environ", {}, clear=True):
             settings = GenerationSettings.from_env()
-        expected = {
-            version: APP.parent / "data" / "research-report" / version / "data.json"
-            for version in ("v1", "v2", "v3")
-        }
-        self.assertEqual(settings.dataset_path, expected["v1"])
+        bundled = (
+            APP.parent / "data" / "v4_20260810_real_project_package"
+            / "data.json"
+        )
+        expected = {version: bundled for version in ("v1", "v2", "v3")}
+        self.assertEqual(settings.dataset_path, bundled)
         self.assertEqual(dict(settings.dataset_paths), expected)
         self.assertEqual(settings.parallel, 20)
         self.assertEqual(settings.model, "deepseek-v4-pro-ioa")
@@ -366,7 +367,7 @@ class GenerationJobServiceTest(unittest.TestCase):
                 / "instructions.md"
             ).is_file()
         )
-        self.assertEqual(done.compiler_version, "session-skill/v3")
+        self.assertEqual(done.compiler_version, "session-skill/v4")
         self.assertIsNotNone(done.base_skill_hash)
         self.assertIn("case-a", self.session.report_outputs["v0"])
         self.assertIn("case-b", self.session.report_outputs["v0"])

@@ -167,13 +167,21 @@ class GenerationSettings:
     def from_env(cls) -> "GenerationSettings":
         legacy_dataset = os.environ.get("OPENHARNESS_WB_DATASET")
         dataset_root = ROOT / "data" / "research-report"
+        bundled_dataset = (
+            ROOT / "data" / "v4_20260810_real_project_package" / "data.json"
+        )
         dataset_paths = tuple(
             (
                 version,
                 Path(
                     os.environ.get(
                         "OPENHARNESS_WB_DATASET_" + version.upper(),
-                        legacy_dataset or str(dataset_root / version / "data.json"),
+                        legacy_dataset
+                        or str(
+                            dataset_root / version / "data.json"
+                            if (dataset_root / version / "data.json").is_file()
+                            else bundled_dataset
+                        ),
                     )
                 ),
             )
@@ -623,6 +631,8 @@ class GenerationJobService:
         model: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         parent_job_id: Optional[str] = None,
+        memory_context: Optional[str] = None,
+        memory_ids: Optional[Iterable[str]] = None,
     ) -> tuple[GenerationJob, bool]:
         self._validate_runtime()
         session = self.sessions.get(session_id)
@@ -658,6 +668,14 @@ class GenerationJobService:
             raise GenerationJobError(
                 "不支持的报告生成模型: %s" % selected_model
             )
+        selected_memory_context = str(memory_context or "").strip()
+        if len(selected_memory_context) > 20000:
+            raise GenerationJobError("Memory 上下文不能超过 20000 个字符")
+        selected_memory_ids = list(dict.fromkeys(
+            str(item).strip()
+            for item in (memory_ids or [])
+            if str(item).strip()
+        ))
 
         with self._lock:
             if idempotency_key:
@@ -697,6 +715,7 @@ class GenerationJobService:
                     session_id,
                     skill,
                     self.settings.skill_path,
+                    memory_context=selected_memory_context,
                 )
             except (OSError, ValueError) as exc:
                 raise GenerationJobError(
@@ -761,6 +780,8 @@ class GenerationJobService:
             dataset_sha256=_file_hash(dataset_path),
             compiler_version=frozen_skill.compiler_version,
             base_skill_hash=frozen_skill.base_skill_hash,
+            memory_context=selected_memory_context or None,
+            memory_ids=selected_memory_ids,
             cases=[
                 GenerationCaseState(
                     case_id=case_id,
@@ -827,6 +848,8 @@ class GenerationJobService:
             model=previous.model if model is None else model,
             idempotency_key=idempotency_key,
             parent_job_id=previous.job_id,
+            memory_context=previous.memory_context,
+            memory_ids=previous.memory_ids,
         )
 
     def cancel(self, job_id: str) -> GenerationJob:
