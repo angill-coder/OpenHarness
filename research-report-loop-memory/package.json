@@ -1,6 +1,6 @@
 {
   "name": "research-report-loop-memory",
-  "version": "1.0.0-mvp.10",
+  "version": "1.0.0-mvp.11",
   "private": true,
   "type": "module",
   "description": "Integrated report writing loop with L0/L1 evidence and Git-backed L2B Rubrics",
@@ -13,10 +13,12 @@
     "build:release": "node scripts/build-release.mjs",
     "build:local": "node scripts/build-release.mjs --judge-provider codex",
     "build:release:workbuddy": "node scripts/build-release.mjs --judge-provider workbuddy",
+    "build:release:windows": "node scripts/build-release.mjs --target-platform win32 --target-arch x64",
+    "build:release:windows:workbuddy": "node scripts/build-release.mjs --target-platform win32 --target-arch x64 --judge-provider workbuddy",
     "build:release:prompt-v1": "node scripts/build-release.mjs --curator-prompt v1-gate-first",
     "build:release:prompt-v2": "node scripts/build-release.mjs --curator-prompt v2-letta-first",
     "test": "npm run test:memory && npm run test:loop",
-    "test:memory": "node --import tsx --test mcp/test/mcp.integration.test.ts mcp/test/relevance.test.ts mcp/test/rubric-repository.test.ts mcp/test/storage-layout-v2.test.ts mcp/test/user-shortcut.test.ts mcp/test/integrated-contract.test.ts mcp/test/asset-path.test.ts mcp/test/curator-prompt-variants.test.ts mcp/test/capture-hook.test.ts mcp/test/maintenance-schedule.test.ts",
+    "test:memory": "node --import tsx --test mcp/test/mcp.integration.test.ts mcp/test/relevance.test.ts mcp/test/rubric-repository.test.ts mcp/test/storage-layout-v2.test.ts mcp/test/user-shortcut.test.ts mcp/test/integrated-contract.test.ts mcp/test/asset-path.test.ts mcp/test/curator-prompt-variants.test.ts mcp/test/capture-hook.test.ts mcp/test/maintenance-schedule.test.ts mcp/test/windows-package.test.ts",
     "test:loop": "PYTHONPYCACHEPREFIX=/tmp/research-report-loop-memory-pycache sh scripts/run-python.sh -m unittest discover -s tests -p 'test_*.py'",
     "syntaxcheck": "tsc --noEmit --noCheck && node --check hooks/capture-checkpoint.mjs && PYTHONPYCACHEPREFIX=/tmp/research-report-loop-memory-pycache sh scripts/run-python.sh -m compileall -q mcp/report_loop"
   },

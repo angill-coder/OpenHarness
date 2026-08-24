@@ -18,7 +18,7 @@
 插件恢复独立 Memory 插件的两条调度链：
 
 - **实时 Capture**：Capture-only Hook 识别已交付报告后的明确写作反馈，提醒宿主先修改报告，再通过 Agent/Task 委派 `research-report-memory-curator` 调用专用 MCP。Stop 最多检查一次是否遗漏 Capture；明确成功或失败后放行。
-- **定时 Dreaming**：macOS LaunchAgent 每天 16:30 启动一次隔离的 WorkBuddy CLI Curator，复审待处理 L0/L1 和疑似冲突，并只提交 L2B 增量修改。
+- **定时 Dreaming**：macOS LaunchAgent 或 Windows Task Scheduler 每天 16:30 启动一次隔离的 WorkBuddy CLI Curator，复审待处理 L0/L1 和疑似冲突，并只提交 L2B 增量修改。
 
 Hook 不注册 `PreToolUse`，不负责写前 Recall、报告文件校验或 Report Loop 状态管理，也不要求主 Agent 直接调用 MCP。Capture 明确失败不会回滚已完成报告。
 
@@ -40,6 +40,8 @@ Hook 不注册 `PreToolUse`，不负责写前 Recall、报告文件校验或 Rep
 npm run build:local              # 本地实验：Codex CLI / gpt-5.6-sol / medium
 npm run build:release            # 正式发布：Codex CLI / gpt-5.6-sol / medium
 npm run build:release:workbuddy  # 可选：WorkBuddy CLI / deepseek-v4-flash-ioa / medium
+npm run build:release:windows    # Windows x64：Codex CLI / gpt-5.6-sol / medium
+npm run build:release:windows:workbuddy # Windows x64：WorkBuddy CLI Judge
 ```
 
 每个维度的 Judge 都会收到用户本轮完整任务。若用户明确要求与非证据类 Rubric 直接冲突，Judge 将该检查记为 `met` 并以 `user_override:` 说明，不再用基础 Rubric 反向纠正用户；事实准确性、证据可追溯和数据一致性等底线不能被覆盖。该机制只改变现有 Judge Prompt 和 Rewrite Brief，不增加模型调用。
@@ -81,7 +83,29 @@ node scripts/migrate-rubric-scope-paths.mjs
 node scripts/migrate-rubric-scope-paths.mjs --apply
 ```
 
-安装包中的 `scripts/install-maintenance-macos.sh` 用于注册每天 16:30 的 Dreaming 任务；任务只连接本插件的 Memory MCP，不启动 Report Loop Judge。
+安装包中的 `scripts/install-maintenance-macos.sh` 或 `scripts/install-maintenance-windows.ps1` 用于注册每天 16:30 的 Dreaming 任务；任务只连接本插件的 Memory MCP，不启动 Report Loop Judge。
+
+## Windows x64 安装包
+
+Windows 包使用 `cmd.exe + run-node.cmd / run-python.cmd` 启动 MCP，不依赖 Git Bash、WSL 或系统 `sh`。它优先复用 WorkBuddy 自带的 Node/Python，并强制 Python MCP 通过 UTF-8 收发 JSON，避免中文报错乱码。
+
+安装前应先在 WorkBuddy 中卸载或禁用旧的独立 `openharness-report-loop` / `local-report-loop`，避免同名工具被旧 MCP 接管。安装完成后，本插件的 Report Loop 工具应为：
+
+```text
+report_loop_start / report_loop_submit / report_loop_finish / report_loop_status
+```
+
+可在插件根目录执行以下预检，确认 Report Loop 与 Memory MCP 都已正常启动且工具契约没有串包：
+
+```bat
+scripts\run-node.cmd scripts\verify-mcp-contract.mjs
+```
+
+如需启用每天 16:30 的 Memory Dreaming，可在 PowerShell 中执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-maintenance-windows.ps1
+```
 
 ## 开发验证
 
