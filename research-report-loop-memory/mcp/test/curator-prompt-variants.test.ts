@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const currentPath = path.join(root, "agents/research-report-memory-curator.md");
-const lettaPath = path.join(root, "prompts/research-report-memory-curator-v2-letta.md");
+const lettaPath = path.join(root, "prompts/research-report-memory-curator-v2-letta-first.md");
 const current = fs.readFileSync(currentPath, "utf8");
 const letta = fs.readFileSync(lettaPath, "utf8");
 
@@ -21,6 +21,12 @@ const sharedContract = [
   "conversationExcerpt",
   "sourceRefs",
   "sourceL1Ids",
+  "baseRubricIndex",
+  "rubricDocuments",
+  "rubricSetVersion",
+  "scopeValue",
+  "criterionKey",
+  "add / extend / override / disable",
   "MEMORY_RECALL_COMPLETED",
   "MEMORY_CAPTURE_COMPLETED",
 ];
@@ -43,7 +49,19 @@ test("Letta-first variant makes conservative experiential judgment the primary f
   ]) assert.ok(letta.includes(marker), `Letta-first prompt is missing ${marker}`);
 });
 
+test("both curator prompts keep the integrated Rubric Set evolution contract", () => {
+  for (const prompt of [current, letta]) {
+    assert.match(prompt, /Base → core → audience → project/u);
+    assert.match(prompt, /dimension=personal/u);
+    assert.match(prompt, /operation=extend/u);
+    assert.match(prompt, /Base 红线不可 `override \/ disable`/u);
+    assert.match(prompt, /最多一次 Capture/u);
+  }
+});
+
 test("the active prompt remains the current V1 control", () => {
   assert.match(current, /## 3\. Layer Filter/u);
-  assert.doesNotMatch(current, /Research Report Memory Curator — Letta-first Variant/u);
+  assert.doesNotMatch(current, /Research Report Memory Curator — Letta-first Integrated Variant/u);
+  assert.match(letta, /Research Report Memory Curator — Letta-first Integrated Variant/u);
+  assert.doesNotMatch(letta, /## 3\. Layer Filter/u);
 });

@@ -365,7 +365,11 @@ export class WritingMemoryRuntime {
       records: [],
     };
 
-    const requested = input.atoms ?? [];
+    // Curator should send scopeValue explicitly, but WorkBuddy already supplies
+    // the current audience/project on the Episode. Use that trusted metadata as
+    // a narrow fallback so one omitted field does not force a second Capture.
+    const requested = (input.atoms ?? []).map((candidate) =>
+      this.withEpisodeScopeValue(candidate, episode));
     const rubricPatchCandidates = input.rubricPatches ?? [];
     if (requested.length === 0 && rubricPatchCandidates.length === 0) return { status: "error", stored: false, reason: "atoms_or_rubric_patches_required", records: [] };
     const store = this.core.getVectorStore();
@@ -668,6 +672,20 @@ export class WritingMemoryRuntime {
     const verified = (await store.queryL1Records({ sessionId })).some((row) => row.record_id === id);
     if (!result || !verified) throw new Error(`l1_write_verification_failed:${id}`);
     return { created: true, id, lifecycle: metadata.lifecycle, record: { id, status: action === "store" ? "stored" : action, rule, replacedIds: targets }, sourceEpisodeIds };
+  }
+
+  private withEpisodeScopeValue(
+    candidate: MemoryCandidate,
+    episode: WritingEpisode | undefined,
+  ): MemoryCandidate {
+    const explicit = candidate.scopeValue?.trim();
+    if (candidate.scope === "core" || explicit) return { ...candidate, ...(explicit ? { scopeValue: explicit } : {}) };
+    const fallback = candidate.scope === "audience" ? episode?.audience?.trim() : episode?.project?.trim();
+    if (!fallback) return { ...candidate };
+    return {
+      ...candidate,
+      scopeValue: candidate.scope === "audience" ? normalizeAudience(fallback) : fallback,
+    };
   }
 
   private async validateCapturePlan(

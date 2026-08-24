@@ -36,6 +36,11 @@ def build_judge_prompt(rubric, report_text, case_context) -> str:
         "只评价报告正文实际呈现的内容；背景和 Structured Data 只用于核验。",
         "对每条 check 判 met、partial 或 miss；判定时参照对应维度的评分锚点"
         "（1–5 分）与正反示例，使三档判定与锚点分层一致。",
+        "用户本轮明确要求高于非证据性的结构、表达和风格偏好。仅当用户要求明确、"
+        "直接且与当前 check 实质冲突时，将该 check 判为 met，并以 user_override: "
+        "开头说明豁免依据；不得仅因用户没有提及某项 Rubric 就使用豁免。",
+        "事实准确、素材忠实、冲突口径、证据不足诚实留白等可追溯性要求不得使用"
+        " user_override；用户要求与 Rubric 兼容时仍按 Rubric 正常评价。",
     ]
     if len(dimensions) == 1:
         dimension = dimensions[0]
@@ -49,6 +54,12 @@ def build_judge_prompt(rubric, report_text, case_context) -> str:
         ])
     context = dict(case_context or {})
     context.pop("human_report", None)
+    if context.get("user_requirements"):
+        lines.extend([
+            "",
+            "## 用户本轮明确要求",
+            str(context["user_requirements"]),
+        ])
     if context.get("structured_data"):
         lines.extend([
             "Structured Data 是证据索引而非参考答案。",

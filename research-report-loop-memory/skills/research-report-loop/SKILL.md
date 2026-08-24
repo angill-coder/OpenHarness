@@ -9,6 +9,12 @@ description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究
 
 使用当前宿主 Agent 完成报告写作，再通过隔离 Judge 评测和迭代。写作上下文与 Judge 上下文保持分离；最终交付历史最佳已采纳版本，而不是未经确认的最后一次修改。用户反馈由独立 Memory Curator 记录；L2B 变化会升级 Git-backed Rubric Set，新版本只在下一次 `report_loop_start` 时按 Scope 解析进 Judge，不直接 Recall 到写作上下文。
 
+## 专用 Report Memory
+
+本插件使用独立的 `research-report-memory-v2-0821`，其层级是 L0 Writing Episode、L1 Atom Memory 和 L2B Rubrics Memory。它与 WorkBuddy 自带的 `~/.workbuddy/MEMORY.md`、项目 `.workbuddy/memory/**` 和工作日志不是同一套记忆。
+
+用户明确评价报告写法或提出可复用写作要求时，本身就构成 Capture 触发条件，不需要用户再说“请记住”。宿主必须在完成当前报告修改后，通过 Agent/Task 委派 `research-report-memory-curator`；只有 Curator 可以调用专用 Memory MCP。宿主不得把 WorkBuddy 原生 Memory 的读写当作 Capture 的替代，也不得声称原生 Memory 对应本插件的 L0/L1/L2B。
+
 ## 执行流程
 
 ### 1. 确认写作输入

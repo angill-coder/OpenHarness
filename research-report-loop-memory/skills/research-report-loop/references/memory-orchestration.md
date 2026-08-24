@@ -2,6 +2,12 @@
 
 本文件只规定用户反馈如何进入长期写作记忆，不定义报告写法，也不得进入报告正文。
 
+## 系统身份
+
+- 本契约中的 Memory 专指 `research-report-memory-v2-0821`：L0 Writing Episode、L1 Atom Memory、L2B Rubrics Memory。
+- WorkBuddy 的 `~/.workbuddy/MEMORY.md`、项目 `.workbuddy/memory/**` 和工作日志是宿主原生记忆，不属于本插件，也不能替代本插件 Capture。
+- 用户明确评价报告写法或提出可复用要求时即应 Capture，无需用户额外说“记住”。实时 Capture 只能由宿主通过 Agent/Task 委派 `research-report-memory-curator` 完成。
+
 ## 写作与 Judge
 
 - 写作前不执行 Memory Recall。宿主 Agent只按本轮用户要求和 `research-report-loop` Skill 写初稿。

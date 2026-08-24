@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from mcp.report_loop.core.memory_rubric_provider import MemoryRubricProvider, storage_slug
+from mcp.report_loop.core.memory_rubric_provider import MemoryRubricProvider, scope_storage_key
 from mcp.report_loop.core.rubric_compiler import compile_rubric
 
 
@@ -71,13 +71,13 @@ class MemoryRubricCompilerTests(unittest.TestCase):
         project = "时长分析"
         self._write("system/rubrics.json", "core", [self._item("MR-SUMMARY", "core")])
         self._write(
-            f"audiences/{storage_slug(audience)}/rubrics.json",
+            f"audiences/{scope_storage_key(audience)}/rubrics.json",
             "audience",
             [self._item("MR-SUMMARY", "audience")],
             audience,
         )
         self._write(
-            f"projects/{storage_slug(project)}/rubrics.json",
+            f"projects/{scope_storage_key(project)}/rubrics.json",
             "project",
             [self._item("MR-SUMMARY", "project")],
             project,
@@ -129,8 +129,8 @@ class MemoryRubricCompilerTests(unittest.TestCase):
             "label": "项目开篇方式",
         }
         self._write("system/rubrics.json", "core", [core])
-        self._write(f"audiences/{storage_slug(audience)}/rubrics.json", "audience", [audience_item], audience)
-        self._write(f"projects/{storage_slug(project)}/rubrics.json", "project", [project_item], project)
+        self._write(f"audiences/{scope_storage_key(audience)}/rubrics.json", "audience", [audience_item], audience)
+        self._write(f"projects/{scope_storage_key(project)}/rubrics.json", "project", [project_item], project)
         self._commit()
 
         compiled, metadata = compile_rubric(
@@ -156,13 +156,52 @@ class MemoryRubricCompilerTests(unittest.TestCase):
         audience_item = {**self._item("MR-AUD-DECISION", "讨论项前置"), "criterionKey": "structure.decision_first", "dimension": "structure"}
         project_item = {**self._item("MR-PROJECT-METRIC", "拆解频次和单次时长"), "criterionKey": "insight.duration_decomposition", "dimension": "insight"}
         self._write("system/rubrics.json", "core", [])
-        self._write(f"audiences/{storage_slug(audience)}/rubrics.json", "audience", [audience_item], audience)
-        self._write(f"projects/{storage_slug(project)}/rubrics.json", "project", [project_item], project)
+        self._write(f"audiences/{scope_storage_key(audience)}/rubrics.json", "audience", [audience_item], audience)
+        self._write(f"projects/{scope_storage_key(project)}/rubrics.json", "project", [project_item], project)
         self._commit()
         compiled, _ = compile_rubric(self.base, provider=MemoryRubricProvider(self.memory_root), audience=audience, project=project)
         ids = {check["id"] for dimension in compiled["dimensions"] for check in dimension["checks"]}
         self.assertIn("MR-AUD-DECISION", ids)
         self.assertIn("MR-PROJECT-METRIC", ids)
+
+    def test_project_names_with_the_same_readable_slug_stay_isolated(self) -> None:
+        values = ["A/B", "A-B", "A B"]
+        self.assertEqual(len({scope_storage_key(value) for value in values}), 3)
+        self._write("system/rubrics.json", "core", [])
+        for index, value in enumerate(values):
+            item = {
+                **self._item(f"MR-PROJECT-{index}", f"只适用于 {value}"),
+                "criterionKey": f"expression.project_{index}",
+            }
+            self._write(
+                f"projects/{scope_storage_key(value)}/rubrics.json",
+                "project",
+                [item],
+                value,
+            )
+        self._commit()
+
+        provider = MemoryRubricProvider(self.memory_root)
+        for index, value in enumerate(values):
+            loaded = provider.load(project=value)
+            project_items = [item for item in loaded["items"] if item["scope"] == "project"]
+            self.assertEqual([item["id"] for item in project_items], [f"MR-PROJECT-{index}"])
+
+    def test_scope_value_mismatch_fails_closed(self) -> None:
+        requested = "A/B"
+        self._write("system/rubrics.json", "core", [])
+        self._write(
+            f"projects/{scope_storage_key(requested)}/rubrics.json",
+            "project",
+            [self._item("MR-WRONG-PROJECT", "不得串入")],
+            "A-B",
+        )
+        self._commit()
+
+        loaded = MemoryRubricProvider(self.memory_root).load(project=requested)
+        self.assertEqual(loaded["status"], "unavailable")
+        self.assertEqual(loaded["items"], [])
+        self.assertTrue(any("scopeValue mismatch" in warning for warning in loaded["warnings"]))
 
     def test_personal_dimension_is_conditional_and_reweights_base(self) -> None:
         item = {

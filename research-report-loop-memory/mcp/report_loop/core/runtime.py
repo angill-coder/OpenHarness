@@ -20,12 +20,13 @@ from .judge_batch import (
     judge_report,
 )
 from .judge_prompt import build_judge_prompt
+from .judge_provider import call_judge, resolve_settings
 from .memory_rubric_provider import MemoryRubricProvider
 from .report_failure import failure_report_from_checks
 from .report_loop_gate import evaluate_candidate_gate
 from .report_scoring import normalize_check_scores, score_labeled_check_judgment
 from .rubric_compiler import compile_rubric
-from .workbuddy_cli import call_workbuddy, extract_json
+from .workbuddy_cli import extract_json
 
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -52,6 +53,9 @@ class ReportLoopRuntime:
         rubric_path: Path | None = None,
         judge_call: Callable[[str], str] | None = None,
         memory_provider: MemoryRubricProvider | None = None,
+        judge_provider: str | None = None,
+        judge_model: str | None = None,
+        judge_effort: str | None = None,
     ) -> None:
         plugin_root = Path(__file__).resolve().parents[3]
         configured = os.environ.get("RESEARCH_REPORT_LOOP_DIR", "~/.research-report-loop")
@@ -66,18 +70,13 @@ class ReportLoopRuntime:
             if memory_dir
             else None
         )
+        self.judge_settings = resolve_settings(
+            provider=judge_provider,
+            model=judge_model,
+            effort=judge_effort,
+        )
         self.judge_call = judge_call or (
-            lambda prompt: call_workbuddy(
-                prompt,
-                model=os.environ.get(
-                    "RESEARCH_REPORT_LOOP_JUDGE_MODEL",
-                    "deepseek-v4-flash-ioa",
-                ),
-                effort=os.environ.get(
-                    "RESEARCH_REPORT_LOOP_JUDGE_EFFORT",
-                    "medium",
-                ),
-            )
+            lambda prompt: call_judge(prompt, settings=self.judge_settings)
         )
         self._lock = threading.RLock()
         self.runs_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -156,7 +155,7 @@ class ReportLoopRuntime:
         targetScore: float = 5.0,
         maxJudgedVersions: int = 3,
         maxElapsedSeconds: int = 3600,
-        skillVersion: str = "research-report-loop/1.0.0-mvp.3",
+        skillVersion: str = "research-report-loop/1.0.0-mvp.10",
     ) -> dict[str, Any]:
         task = str(task or "").strip()
         if not task:
@@ -219,14 +218,9 @@ class ReportLoopRuntime:
                     item.get("id") for item in memory_snapshot.get("items") or []
                 ],
                 "rubricCompile": memory_snapshot,
-                "judgeModel": os.environ.get(
-                    "RESEARCH_REPORT_LOOP_JUDGE_MODEL",
-                    "deepseek-v4-flash-ioa",
-                ),
-                "judgeEffort": os.environ.get(
-                    "RESEARCH_REPORT_LOOP_JUDGE_EFFORT",
-                    "medium",
-                ),
+                "judgeProvider": self.judge_settings.provider,
+                "judgeModel": self.judge_settings.model,
+                "judgeEffort": self.judge_settings.effort,
                 "judgeStrategy": JUDGE_STRATEGY_PER_DIMENSION,
                 "judgeParallelism": judge_parallelism,
                 "stopPolicy": {
@@ -246,6 +240,7 @@ class ReportLoopRuntime:
             self._save(run)
             self._event(run_id, "loop.started", {
                 "rubricSha256": run["rubricSha256"],
+                "judgeProvider": run["judgeProvider"],
                 "judgeModel": run["judgeModel"],
                 "judgeEffort": run["judgeEffort"],
                 "judgeParallelism": run["judgeParallelism"],
@@ -257,6 +252,7 @@ class ReportLoopRuntime:
             "status": "started",
             "runId": run_id,
             "rubricRevision": run["rubricSha256"],
+            "judgeProvider": run["judgeProvider"],
             "judgeModel": run["judgeModel"],
             "judgeEffort": run["judgeEffort"],
             "judgeStrategy": run["judgeStrategy"],
@@ -345,6 +341,7 @@ class ReportLoopRuntime:
         reasoning = (best.get("judgment") or {}).get("reasoning") or {}
         repair: list[dict[str, Any]] = []
         preserve: list[dict[str, Any]] = []
+        user_overrides: list[dict[str, Any]] = []
         definitions: dict[str, dict[str, Any]] = {}
         for dimension in rubric.get("dimensions", []):
             for check in dimension.get("checks", []):
@@ -357,10 +354,19 @@ class ReportLoopRuntime:
                 }
                 definitions[check_id] = definition
                 if checks.get(check_id) in {"met", 1, 1.0}:
-                    preserve.append({
-                        "checkId": check_id,
-                        "label": definition["label"],
-                    })
+                    reason = str(reasoning.get(check_id) or "")
+                    if re.match(r"^\s*user_override\s*[:：]", reason, re.I):
+                        user_overrides.append({
+                            "checkId": check_id,
+                            "dimension": definition["dimension"],
+                            "label": definition["label"],
+                            "reason": reason,
+                        })
+                    else:
+                        preserve.append({
+                            "checkId": check_id,
+                            "label": definition["label"],
+                        })
                 else:
                     repair.append({
                         **definition,
@@ -390,9 +396,13 @@ class ReportLoopRuntime:
             "repair": repair,
             "preserve": preserve,
             "avoid": avoid,
+            "userRequirements": run["task"],
+            "userOverrides": user_overrides,
             "instruction": (
                 "以 bestArtifactPath 对应的已采纳版本为唯一基线；优先修复 repair，"
                 "保持 preserve，避免重新引入 avoid；只做与修复目标有关的修改。"
+                "必须继续遵守 userRequirements；userOverrides 中的 Rubric 已因用户明确要求"
+                "豁免，不得为了追求 Rubric 分数反向修改用户指定的结构、表达或交付形式。"
             ),
         }
 
@@ -459,7 +469,9 @@ class ReportLoopRuntime:
             "caseFailedGate": scored.get("case_failed_gate", False),
             "judgeMeta": result.get("judge_meta") or {},
             "judgeTrace": result.get("judge_trace") or {},
+            "judgeProvider": run["judgeProvider"],
             "judgeModel": run["judgeModel"],
+            "judgeEffort": run["judgeEffort"],
             "createdAt": _now(),
         }
         failure_report = failure_report_from_checks(

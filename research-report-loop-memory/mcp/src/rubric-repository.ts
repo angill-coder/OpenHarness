@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { normalizeAudience, storageSlug } from "./scope-paths.ts";
+import { normalizeAudience, scopeStorageKey, scopeValuesEqual, storageSlug } from "./scope-paths.ts";
 import type { WritingMemoryScope } from "./runtime.ts";
 import { L2B_RUBRICS_DIR } from "./storage-layout.ts";
 
@@ -184,12 +184,29 @@ export class RubricRepository {
 
   async recall(input: { audience?: string; project?: string }): Promise<LoadedRubricDocument[]> {
     await this.initialize();
-    const paths = [
-      "system/rubrics.json",
-      ...(input.audience?.trim() ? [`audiences/${storageSlug(normalizeAudience(input.audience) ?? input.audience)}/rubrics.json`] : []),
-      ...(input.project?.trim() ? [`projects/${storageSlug(input.project)}/rubrics.json`] : []),
+    const candidates: Array<{ path: string; scope: WritingMemoryScope; scopeValue?: string }> = [
+      { path: "system/rubrics.json", scope: "core" },
+      ...(input.audience?.trim() ? [{
+        path: `audiences/${scopeStorageKey(normalizeAudience(input.audience) ?? input.audience)}/rubrics.json`,
+        scope: "audience" as const,
+        scopeValue: normalizeAudience(input.audience) ?? input.audience,
+      }] : []),
+      ...(input.project?.trim() ? [{
+        path: `projects/${scopeStorageKey(input.project)}/rubrics.json`,
+        scope: "project" as const,
+        scopeValue: input.project.trim(),
+      }] : []),
     ];
-    const documents = await Promise.all([...new Set(paths)].map((value) => this.readDocument(value)));
+    const unique = [...new Map(candidates.map((value) => [value.path, value])).values()];
+    const documents = await Promise.all(unique.map(async (candidate) => {
+      const document = await this.readDocument(candidate.path);
+      if (!document) return undefined;
+      if (document.scope !== candidate.scope) throw new Error(`rubric_scope_mismatch:${candidate.path}`);
+      if (candidate.scope !== "core" && !scopeValuesEqual(document.scopeValue, candidate.scopeValue)) {
+        throw new Error(`rubric_scope_value_mismatch:${candidate.path}`);
+      }
+      return document;
+    }));
     return documents.filter((value): value is LoadedRubricDocument => Boolean(value));
   }
 
@@ -333,7 +350,7 @@ export class RubricRepository {
     if (value.scope === "core") return "system/rubrics.json";
     const root = value.scope === "audience" ? "audiences" : "projects";
     const scopeValue = this.normalizeScopeValue(value.scope, value.scopeValue ?? "");
-    return `${root}/${storageSlug(scopeValue)}/rubrics.json`;
+    return `${root}/${scopeStorageKey(scopeValue)}/rubrics.json`;
   }
 
   private normalizeScopeValue(scope: WritingMemoryScope, value: string): string {
