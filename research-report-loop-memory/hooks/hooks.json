@@ -1,0 +1,73 @@
+{
+  "description": "Require Report Loop completion and capture explicit user writing feedback without write-time Memory Recall.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-python.sh ${CODEBUDDY_PLUGIN_ROOT}/hooks/report-loop-guard.py prompt",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "RESEARCH_REPORT_MEMORY_WRITING_RECALL=off RESEARCH_REPORT_MEMORY_GUARD_DIR=$HOME/.research-report-loop-memory/hook-state sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh --import ${CODEBUDDY_PLUGIN_ROOT}/node_modules/tsx/dist/loader.mjs ${CODEBUDDY_PLUGIN_ROOT}/hooks/memory-guard.mjs prompt",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-python.sh ${CODEBUDDY_PLUGIN_ROOT}/hooks/report-loop-guard.py pre-tool",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "RESEARCH_REPORT_MEMORY_WRITING_RECALL=off RESEARCH_REPORT_MEMORY_GUARD_DIR=$HOME/.research-report-loop-memory/hook-state sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh --import ${CODEBUDDY_PLUGIN_ROOT}/node_modules/tsx/dist/loader.mjs ${CODEBUDDY_PLUGIN_ROOT}/hooks/memory-guard.mjs pre-tool",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-python.sh ${CODEBUDDY_PLUGIN_ROOT}/hooks/report-loop-guard.py post-tool",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "RESEARCH_REPORT_MEMORY_WRITING_RECALL=off RESEARCH_REPORT_MEMORY_GUARD_DIR=$HOME/.research-report-loop-memory/hook-state sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh --import ${CODEBUDDY_PLUGIN_ROOT}/node_modules/tsx/dist/loader.mjs ${CODEBUDDY_PLUGIN_ROOT}/hooks/memory-guard.mjs post-tool",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-python.sh ${CODEBUDDY_PLUGIN_ROOT}/hooks/report-loop-guard.py stop",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "RESEARCH_REPORT_MEMORY_WRITING_RECALL=off RESEARCH_REPORT_MEMORY_GUARD_DIR=$HOME/.research-report-loop-memory/hook-state sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh --import ${CODEBUDDY_PLUGIN_ROOT}/node_modules/tsx/dist/loader.mjs ${CODEBUDDY_PLUGIN_ROOT}/hooks/memory-guard.mjs stop",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

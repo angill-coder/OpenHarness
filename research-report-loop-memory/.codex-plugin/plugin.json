@@ -1,0 +1,24 @@
+{
+  "name": "research-report-loop-memory",
+  "version": "1.0.0-mvp.3",
+  "description": "Research-report writing, Judge iteration, and long-term writing memory",
+  "author": {
+    "name": "Research Report Team"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Research Report Loop Memory",
+    "shortDescription": "Write, judge, improve, and learn from report feedback.",
+    "longDescription": "Uses the host Agent for writing, isolated rubric-based Judges for revision, and a Memory Curator for long-term writing preferences.",
+    "developerName": "Research Report Team",
+    "category": "Productivity",
+    "capabilities": [
+      "research report writing",
+      "rubric-based judging",
+      "iterative revision",
+      "writing memory"
+    ],
+    "defaultPrompt": "Use the research-report-loop skill to write and iteratively judge this report."
+  },
+  "mcpServers": "./.mcp.json"
+}

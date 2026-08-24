@@ -1,0 +1,16 @@
+{
+  "name": "research-report-loop-memory-local",
+  "description": "Local development marketplace for the integrated Research Report Loop and Memory plugin",
+  "owner": {
+    "name": "Research Report Team"
+  },
+  "plugins": [
+    {
+      "name": "research-report-loop-memory",
+      "description": "Host writing, isolated Judge iteration, and long-term writing Memory Rubrics",
+      "version": "1.0.0-mvp.3",
+      "source": ".",
+      "license": "MIT"
+    }
+  ]
+}
