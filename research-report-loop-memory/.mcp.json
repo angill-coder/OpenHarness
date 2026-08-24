@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "research-report-loop": {
+      "command": "sh",
+      "args": [
+        "${PLUGIN_ROOT}/scripts/run-python.sh",
+        "${PLUGIN_ROOT}/mcp/report_loop/server.py"
+      ],
+      "env": {
+        "RESEARCH_REPORT_LOOP_DIR": "~/.research-report-loop",
+        "RESEARCH_REPORT_LOOP_JUDGE_MODEL": "deepseek-v4-flash-ioa",
+        "RESEARCH_REPORT_LOOP_JUDGE_EFFORT": "medium",
+        "RESEARCH_REPORT_MEMORY_V2_0821_DIR": "~/.research-report-memory-v2-0821"
+      }
+    },
+    "research-report-memory-v2-0821": {
+      "command": "sh",
+      "args": [
+        "${PLUGIN_ROOT}/scripts/run-node.sh",
+        "--import",
+        "tsx",
+        "${PLUGIN_ROOT}/mcp/src/server.ts"
+      ],
+      "env": {
+        "RESEARCH_REPORT_MEMORY_V2_0821_DIR": "~/.research-report-memory-v2-0821",
+        "RESEARCH_REPORT_BASE_RUBRIC_PATH": "${PLUGIN_ROOT}/rubrics/v2_rubric_research.json"
+      }
+    }
+  }
+}

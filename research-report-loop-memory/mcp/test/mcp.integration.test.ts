@@ -1,0 +1,206 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+function payload(result: Awaited<ReturnType<Client["callTool"]>>): Record<string, any> {
+  const first = (result.content as Array<{ type: string; text?: string }>)[0];
+  assert.equal(first.type, "text");
+  return JSON.parse(first.text ?? "{}") as Record<string, any>;
+}
+
+function feedbackEpisode(task: string, feedback: string, extra: Record<string, unknown> = {}) {
+  return {
+    task,
+    conversationExcerpt: [
+      { role: "assistant", content: "上一版报告已经交付，请审阅。" },
+      { role: "user", content: feedback },
+    ],
+    conversationSource: "host_context",
+    conversationTruncated: false,
+    ...extra,
+  };
+}
+
+function serverArgs(projectRoot: string): string[] {
+  const configured = process.env.RESEARCH_REPORT_MEMORY_SERVER_ENTRY?.trim();
+  if (!configured) return [path.join(projectRoot, "scripts/run-node.sh"), "--import", "tsx", "mcp/src/server.ts"];
+  const entry = path.isAbsolute(configured) ? configured : path.join(projectRoot, configured);
+  return [path.join(projectRoot, "scripts/run-node.sh"), entry];
+}
+
+test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-v2-0821-e2e-"));
+  const projectRoot = path.resolve(import.meta.dirname, "../..");
+  const client = new Client({ name: "research-report-memory-v2-0821-test", version: "2.1.0" }, { capabilities: {} });
+  const transport = new StdioClientTransport({
+    command: "sh",
+    args: serverArgs(projectRoot),
+    cwd: projectRoot,
+    env: { ...process.env, RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir } as Record<string, string>,
+    stderr: "pipe",
+  });
+
+  const feedback = "摘要控制在2–3行，只保留核心观点和推导逻辑";
+  const rule = "报告摘要控制在2–3行，只保留核心观点与推导逻辑。";
+
+  try {
+    await client.connect(transport);
+    const tools = await client.listTools();
+    assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
+      "writing_memory_capture", "writing_memory_capture_payload", "writing_memory_forget", "writing_memory_recall",
+    ]);
+
+    const empty = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "用户研究报告", audience: "管理委员会", project: "项目A", purpose: "writing" },
+    }));
+    assert.equal(empty.status, "ok");
+    assert.deepEqual(empty.judgeRubrics, []);
+    assert.doesNotMatch(empty.context, /writing-context|L1 Atom/u);
+
+    const review1 = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "用户研究报告", query: feedback, purpose: "review", includeL1: true },
+    }));
+    assert.ok(review1.baseRubricIndex.some((item: any) => item.criterionKey === "structure.s1"));
+    assert.equal(review1.rubricSetVersion, "v0");
+    const first = payload(await client.callTool({
+      name: "writing_memory_capture_payload",
+      arguments: { payload: JSON.stringify({
+        feedback,
+        decision: "store",
+        mode: "feedback",
+        snapshotRevision: review1.snapshotRevision,
+        episode: feedbackEpisode("用户研究报告", feedback, { externalSourceId: "session-1:feedback-1", sessionId: "session-1", project: "项目A" }),
+        atoms: [{ operationRef: "summary-concise", rule, scope: "core", lifecycle: "candidate" }],
+      }) },
+    }));
+    assert.equal(first.status, "stored");
+    assert.equal(first.written, 1);
+    assert.equal(first.rubricsWritten, 0, "a normal first feedback must not update L2B");
+    const atomId = first.writtenIds[0] as string;
+    assert.ok(atomId);
+
+    const episodePath = path.join(dataDir, "l0-l1-memory", "l0-episodes", `${first.episodeId}.json`);
+    const episode = JSON.parse(fs.readFileSync(episodePath, "utf8"));
+    assert.equal(episode.status, "processed");
+    assert.equal(episode.conversationExcerpt.at(-1).content, feedback);
+    assert.deepEqual(episode.linkedL1Ids, [atomId]);
+
+    const review2 = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "另一份研究报告", query: feedback, purpose: "review", includeL1: true },
+    }));
+    assert.equal(review2.l1Memories[0].evidence.sourceCount, 1);
+    const second = payload(await client.callTool({
+      name: "writing_memory_capture_payload",
+      arguments: { payload: JSON.stringify({
+        feedback,
+        decision: "store",
+        mode: "feedback",
+        snapshotRevision: review2.snapshotRevision,
+        episode: feedbackEpisode("另一份研究报告", feedback, { externalSourceId: "session-2:feedback-1", sessionId: "session-2", project: "项目B" }),
+        atoms: [{ rule, scope: "core", lifecycle: "candidate" }],
+      }) },
+    }));
+    assert.equal(second.status, "stored");
+    assert.equal(second.writtenIds[0], atomId, "exact corroboration should reuse the L1 atom");
+    assert.equal(second.rubricsWritten, 0, "Runtime gathers evidence but never auto-promotes without Curator judgement");
+
+    const review3 = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "第三份研究报告", query: feedback, purpose: "review", includeL1: true },
+    }));
+    const evidence = review3.l1Memories.find((value: any) => value.id === atomId).evidence;
+    assert.equal(evidence.sourceCount, 2);
+    assert.equal(evidence.independentSessions, 2);
+
+    const promoteFeedback = "这是我长期坚持的写作要求，以后所有正式报告都按这个标准检查";
+    const promoted = payload(await client.callTool({
+      name: "writing_memory_capture_payload",
+      arguments: { payload: JSON.stringify({
+        feedback: promoteFeedback,
+        decision: "store",
+        mode: "feedback",
+        snapshotRevision: review3.snapshotRevision,
+        episode: feedbackEpisode("第三份研究报告", promoteFeedback, { externalSourceId: "session-3:feedback-1", sessionId: "session-3", project: "项目C" }),
+        atoms: [{ operationRef: "summary-long-term", rule, scope: "core", lifecycle: "candidate" }],
+        rubricPatches: [{
+          scope: "core",
+          upsertItems: [{
+            id: "MR-EXPRESSION-SUMMARY-CONCISE",
+            criterionKey: "structure.s1",
+            operation: "extend",
+            dimension: "structure",
+            label: "摘要精简",
+            desc: "摘要控制在2–3行，仅呈现核心观点及其关键推导逻辑，不展开过程信息。",
+            effect: "摘要冗长会稀释核心结论并增加管理者阅读成本。",
+            requirements: [{ key: "summary.max_lines", text: "摘要控制在2–3行，仅呈现核心观点及其关键推导逻辑" }],
+            redline: false,
+            status: "active",
+            sourceRefs: ["new:summary-long-term"],
+          }],
+        }],
+      }) },
+    }));
+    assert.equal(promoted.status, "stored");
+    assert.equal(promoted.rubricsWritten, 1);
+    assert.equal(promoted.rubricSetVersion, "v1");
+
+    const recalled = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "新报告", audience: "管理委员会", project: "项目D", purpose: "writing" },
+    }));
+    assert.equal(recalled.judgeRubrics.length, 1);
+    assert.equal(recalled.judgeRubrics[0].id, "MR-EXPRESSION-SUMMARY-CONCISE");
+    assert.match(recalled.context, /\[core\/structure\] 摘要精简/u);
+    assert.deepEqual(recalled.sources.l1, [], "writing recall must not expose L1 by default");
+
+    const rubricPath = path.join(dataDir, "l2b-rubrics", "personal", "default", "system", "rubrics.json");
+    assert.ok(fs.existsSync(rubricPath));
+    const storedRubrics = JSON.parse(fs.readFileSync(rubricPath, "utf8"));
+    assert.equal(storedRubrics.rubrics[0].desc, recalled.judgeRubrics[0].desc);
+    assert.equal(fs.existsSync(path.join(dataDir, "l2-l3-memory")), false);
+
+    const invalid = payload(await client.callTool({
+      name: "writing_memory_capture_payload",
+      arguments: { payload: JSON.stringify({
+        feedback: promoteFeedback,
+        decision: "store",
+        mode: "feedback",
+        snapshotRevision: await currentRevision(client),
+        episode: feedbackEpisode("新报告", promoteFeedback, { externalSourceId: "session-4:feedback-1" }),
+        rubricPatches: [{
+          scope: "core",
+          upsertItems: [{
+            id: "MR-INVALID-REDLINE", criterionKey: "expression.invalid_redline", operation: "add", dimension: "expression", label: "非法红线",
+            desc: "不允许 Memory 创建红线。", effect: "测试。", redline: true, status: "active", sourceL1Ids: [atomId],
+          }],
+        }],
+      }) },
+    }));
+    assert.equal(invalid.status, "error");
+    assert.equal(invalid.reason, "invalid_capture_payload_schema");
+
+    const forgotten = payload(await client.callTool({
+      name: "writing_memory_forget",
+      arguments: { id: "MR-EXPRESSION-SUMMARY-CONCISE" },
+    }));
+    assert.equal(forgotten.deletedHighLevel, 1);
+  } finally {
+    await client.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+async function currentRevision(client: Client): Promise<string> {
+  const review = payload(await client.callTool({
+    name: "writing_memory_recall",
+    arguments: { task: "schema check", purpose: "review", includeL1: true },
+  }));
+  return review.snapshotRevision as string;
+}

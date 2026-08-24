@@ -1,0 +1,215 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { RUBRIC_DIMENSIONS, RUBRIC_OPERATIONS } from "./rubric-repository.ts";
+import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
+
+const server = new McpServer(
+  { name: "research-report-memory-v2-0821", version: "2.1.0-mvp.3" },
+  {
+    capabilities: { logging: {} },
+    instructions: [
+      "research-report 专用写作记忆 V2-0821。",
+      "Recall/Capture/Forget 由 research-report-memory-curator WB Sub-agent 调用；主写作 Agent 只有在 Hook 授权后才能使用 Recover 暂存待复核记忆。",
+      "L0 Episode 和 L1 Atom 使用 TencentDB MemoryCore；L2B 作为 Git-backed Rubric Set Overlay，通过 Criterion Slot 演进静态 Rubrics 版本。",
+      "Scope 仅使用 core/audience/project；冲突优先级为本轮要求 > project > audience > core > research-report skill。",
+      "每次 writing feedback capture 都保存 L0、按需聚合 L1，并保守判断是否更新 L2B；普通单次反馈默认不改变 L2B。",
+      "只有无法归入基础六维的 Judge-ready 长期要求才进入 personal；Personal 为空时不参与评分。",
+    ].join(" "),
+  },
+);
+
+const runtime = new WritingMemoryRuntime(server);
+const scopeSchema = z.enum(WRITING_MEMORY_SCOPES);
+
+function result(payload: unknown) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+    structuredContent: payload as Record<string, unknown>,
+  };
+}
+
+server.registerTool(
+  "writing_memory_recall",
+  {
+    title: "读取报告写作记忆",
+    description: "WB Memory Sub-agent 用于 review/maintenance；Report Loop 直接读取并解析版本化 Rubric Set。",
+    inputSchema: {
+      task: z.string().min(1).describe("已确认的报告任务"),
+      query: z.string().max(2000).optional().describe("review 时传当前反馈，用于选择相关历史证据"),
+      audience: z.string().max(160).optional().describe("报告受众或汇报环境"),
+      project: z.string().max(200).optional().describe("当前项目名或稳定项目标识"),
+      includeL1: z.boolean().optional().default(false).describe("仅在 Memory Agent 需要原子证据时开启；写作 Recall 默认关闭"),
+      limit: z.number().int().min(1).max(100).optional(),
+      purpose: z.enum(["writing", "judge", "review", "maintenance"]).optional().default("writing"),
+    },
+  },
+  async (input) => result(await runtime.recall(input)),
+);
+
+const memorySchema = z.object({
+  operationRef: z.string().min(1).max(80).optional().describe("同一次 maintenance 中供高层文档以 new:<ref> 引用"),
+  rule: z.string().min(3).max(800).describe("一条可复用的原子写作规则"),
+  scope: scopeSchema,
+  scopeValue: z.string().min(1).max(200).optional().describe("audience/project scope 必填"),
+  sourceEpisodeIds: z.array(z.string().min(1)).max(50).optional(),
+  expiresAt: z.string().datetime().optional(),
+  action: z.enum(["store", "update", "merge", "skip"]).optional().default("store"),
+  targetIds: z.array(z.string().min(1)).max(50).optional()
+    .describe("action=update|merge 时必填的原 L1 ID 数组；必须使用复数 targetIds，不能使用 id 或 targetId"),
+  lifecycle: z.enum(["candidate", "promoted", "superseded"]).optional().default("candidate"),
+});
+
+const sourceFields = {
+  sourceL1Ids: z.array(z.string().min(1)).min(1).max(200).optional(),
+  sourceRefs: z.array(z.string().min(1)).min(1).max(200).optional().describe("支持 existing:<L1 ID> 或 new:<operationRef>"),
+};
+
+const rubricItemSchema = z.object({
+  id: z.string().min(1).max(120),
+  criterionKey: z.string().min(3).max(200)
+    .describe("稳定语义槽，例如 structure.summary_quality；相同槽才允许 extend/override"),
+  operation: z.enum(RUBRIC_OPERATIONS)
+    .describe("add 新增独立检查；extend 同向扩充；override 冲突替换；disable 在当前 Scope 停用"),
+  dimension: z.enum(RUBRIC_DIMENSIONS),
+  label: z.string().min(3).max(200),
+  desc: z.string().min(3).max(1600),
+  effect: z.string().min(3).max(800),
+  requirements: z.array(z.object({
+    key: z.string().min(3).max(200),
+    text: z.string().min(3).max(800),
+  }).strict()).max(20).optional()
+    .describe("extend 必填；以稳定 key 去重并按 core→audience→project 覆盖"),
+  redline: z.literal(false).default(false),
+  optimizer: z.object({
+    pattern_id: z.string().min(1).max(160),
+    directive_hint: z.string().min(1).max(160),
+    priority: z.number().int().min(1).max(1000),
+  }).optional(),
+  status: z.literal("active").default("active"),
+  ...sourceFields,
+}).superRefine((item, context) => {
+  if (item.operation === "extend" && (item.requirements?.length ?? 0) === 0) {
+    context.addIssue({ code: "custom", path: ["requirements"], message: "extend requires requirements" });
+  }
+  if (item.dimension === "personal" && item.operation !== "add") {
+    context.addIssue({ code: "custom", path: ["operation"], message: "personal criterion starts with add; later updates reuse the same item id" });
+  }
+});
+
+const rubricPatchSchema = z.object({
+  scope: scopeSchema,
+  scopeValue: z.string().min(1).max(200).optional(),
+  upsertItems: z.array(rubricItemSchema).max(30).optional(),
+  removeItemIds: z.array(z.string().min(1).max(120)).max(30).optional(),
+}).superRefine((patch, context) => {
+  if ((patch.upsertItems?.length ?? 0) === 0 && (patch.removeItemIds?.length ?? 0) === 0) {
+    context.addIssue({ code: "custom", message: "rubric patch requires upsertItems or removeItemIds" });
+  }
+});
+
+const conversationMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().min(1).max(16000),
+  messageId: z.string().min(1).max(240).optional(),
+  createdAt: z.string().datetime().optional(),
+}).strict();
+
+const episodeSchema = z.object({
+  task: z.string().min(1).max(800),
+  externalSourceId: z.string().min(1).max(500).optional(),
+  sessionId: z.string().max(200).optional(),
+  topic: z.string().max(200).optional(),
+  audience: z.string().max(160).optional(),
+  project: z.string().max(200).optional(),
+  stage: z.string().max(120).optional(),
+  contextBefore: z.string().max(8000).optional(),
+  contextAfter: z.string().max(8000).optional(),
+  reportBefore: z.string().max(20000).optional(),
+  reportAfter: z.string().max(20000).optional(),
+  judgeResult: z.string().max(8000).optional(),
+  userEdit: z.string().max(8000).optional(),
+  finalArtifact: z.string().max(1000).optional(),
+  skillVersion: z.string().max(120).optional(),
+  rubricsVersion: z.string().max(120).optional(),
+  recalledMemoryIds: z.array(z.string().min(1)).max(100).optional(),
+  conversationExcerpt: z.array(conversationMessageSchema).min(1).max(8).optional(),
+  conversationSource: z.enum(["host_context", "workbuddy_trace_backfill", "manual_backfill"]).optional(),
+  conversationTruncated: z.boolean().optional(),
+  conversationOmissionReason: z.string().min(1).max(1000).optional(),
+}).strict().superRefine((episode, context) => {
+  const total = episode.conversationExcerpt?.reduce((sum, message) => sum + message.content.length, 0) ?? 0;
+  if (total > 40000) context.addIssue({ code: "custom", path: ["conversationExcerpt"], message: "conversation excerpt must not exceed 40000 characters" });
+  if (episode.conversationTruncated && !episode.conversationOmissionReason) {
+    context.addIssue({ code: "custom", path: ["conversationOmissionReason"], message: "truncated conversation requires an omission reason" });
+  }
+});
+
+const captureInputSchema = z.object({
+  feedback: z.string().min(1).describe("用户原始反馈，maintenance 时填本次整理说明"),
+  decision: z.enum(["store", "pending", "ignore"]),
+  mode: z.enum(["feedback", "maintenance", "manage"]).optional().default("feedback"),
+  episode: episodeSchema.optional(),
+  atoms: z.array(memorySchema).max(30).optional(),
+  rubricPatches: z.array(rubricPatchSchema).max(12).optional()
+    .describe("增量升级 Rubric Set Overlay；普通反馈证据不足时省略此字段"),
+  snapshotRevision: z.string().min(1).max(128).optional().describe("feedback 模式必须来自 purpose=review；maintenance 模式来自 purpose=maintenance"),
+}).strict();
+
+server.registerTool(
+  "writing_memory_capture",
+  {
+    title: "写入与整理报告写作记忆",
+    description: "WB Memory Sub-agent 使用。feedback 模式保存 L0/L1，并只在稳定证据或强烈长期诉求成立时更新 L2B Overlay 与 Rubric Set 版本。",
+    inputSchema: captureInputSchema.shape,
+  },
+  async (input) => result(await runtime.capture(input)),
+);
+
+server.registerTool(
+  "writing_memory_capture_payload",
+  {
+    title: "以 JSON Payload 写入报告写作记忆",
+    description: "WB Memory Sub-agent 专用稳定 Capture 入口。完整请求编码为一个 JSON 字符串，使用 atoms 和可选 rubricPatches。",
+    inputSchema: {
+      payload: z.string().min(2).max(100000).describe("符合 writing_memory_capture schema 的完整 JSON object 字符串"),
+    },
+  },
+  async ({ payload }) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload);
+    } catch (error) {
+      return result({ status: "error", reason: `invalid_capture_payload_json: ${error instanceof Error ? error.message : String(error)}` });
+    }
+    const validated = captureInputSchema.safeParse(parsed);
+    if (!validated.success) {
+      return result({ status: "error", reason: "invalid_capture_payload_schema", issues: validated.error.issues });
+    }
+    return result(await runtime.capture(validated.data));
+  },
+);
+
+server.registerTool(
+  "writing_memory_forget",
+  {
+    title: "删除报告写作记忆",
+    description: "按 ID 删除 L1/L2B，或按文本匹配 L1。只有用户明确要求时才同时删除 L0 Episode。",
+    inputSchema: {
+      query: z.string().min(1).optional(),
+      id: z.string().min(1).optional(),
+      includeEpisodes: z.boolean().optional().default(false),
+    },
+  },
+  async (input) => result(await runtime.forget(input)),
+);
+
+const shutdown = async () => {
+  await runtime.destroy();
+  process.exit(0);
+};
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
+
+await runtime.initialize();
+await server.connect(new StdioServerTransport());
