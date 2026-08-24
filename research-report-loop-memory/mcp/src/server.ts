@@ -5,7 +5,7 @@ import { RUBRIC_DIMENSIONS, RUBRIC_OPERATIONS } from "./rubric-repository.ts";
 import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
 
 const server = new McpServer(
-  { name: "research-report-memory-v2-0821", version: "2.1.0-mvp.3" },
+  { name: "research-report-memory-v2-0821", version: "2.1.0-mvp.11" },
   {
     capabilities: { logging: {} },
     instructions: [

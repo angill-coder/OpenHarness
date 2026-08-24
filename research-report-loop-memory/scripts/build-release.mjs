@@ -18,6 +18,18 @@ const judgeProviderExplicit = judgeProviderArgIndex >= 0;
 const judgeProvider = judgeProviderExplicit
   ? process.argv[judgeProviderArgIndex + 1]
   : "codex";
+const targetPlatformArgIndex = process.argv.indexOf("--target-platform");
+const targetPlatform = targetPlatformArgIndex >= 0
+  ? process.argv[targetPlatformArgIndex + 1]
+  : process.platform;
+const targetArchArgIndex = process.argv.indexOf("--target-arch");
+const targetArch = targetArchArgIndex >= 0
+  ? process.argv[targetArchArgIndex + 1]
+  : process.arch;
+if (!new Set(["darwin", "linux", "win32"]).has(targetPlatform)) {
+  throw new Error(`Unsupported target platform: ${targetPlatform}`);
+}
+if (!targetArch?.trim()) throw new Error("Target architecture is required");
 const judgeDefaults = {
   codex: { model: "gpt-5.6-sol", effort: "medium" },
   workbuddy: { model: "deepseek-v4-flash-ioa", effort: "medium" },
@@ -32,7 +44,7 @@ const curatorPromptSources = {
 if (!curatorPromptSources[curatorPromptVariant]) {
   throw new Error(`Unsupported curator prompt variant: ${curatorPromptVariant}`);
 }
-const platformKey = `${process.platform}-${process.arch}`;
+const platformKey = `${targetPlatform}-${targetArch}`;
 const releaseRoot = path.join(root, "release");
 const promptSuffix = curatorPromptExplicit ? `-prompt-${curatorPromptVariant}` : "";
 const judgeSuffix = judgeProviderExplicit ? `-judge-${judgeProvider}` : "";
@@ -100,11 +112,16 @@ for (const item of [
   "docs",
   "hooks/hooks.json",
   "scripts/run-node.sh",
+  "scripts/run-node.cmd",
   "scripts/run-python.sh",
+  "scripts/run-python.cmd",
   "scripts/register-workbuddy-local.mjs",
   "scripts/migrate-rubric-scope-paths.mjs",
+  "scripts/verify-mcp-contract.mjs",
   "scripts/run-memory-maintenance-workbuddy.sh",
+  "scripts/run-memory-maintenance-workbuddy.ps1",
   "scripts/install-maintenance-macos.sh",
+  "scripts/install-maintenance-windows.ps1",
   "scripts/maintenance-launchagent.plist.template",
   "README.md",
   "LICENSE.md",
@@ -138,7 +155,46 @@ fs.writeFileSync(path.join(sqliteVecDir, "package.json"), `${JSON.stringify({
   main: "index.cjs",
 }, null, 2)}\n`);
 
-const releaseMcp = {
+const pluginRootToken = "${CODEBUDDY_PLUGIN_ROOT}";
+const windowsCommand = (runner, target) =>
+  `""${pluginRootToken}\\scripts\\${runner}" "${pluginRootToken}\\${target}""`;
+const releaseMcp = targetPlatform === "win32" ? {
+  mcpServers: {
+    "research-report-loop": {
+      command: "cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        windowsCommand("run-python.cmd", "mcp\\report_loop\\server.py"),
+      ],
+      env: {
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+        RESEARCH_REPORT_LOOP_DIR: "~/.research-report-loop",
+        RESEARCH_REPORT_LOOP_JUDGE_PROVIDER: judgeProvider,
+        [judgeProvider === "codex"
+          ? "RESEARCH_REPORT_LOOP_CODEX_MODEL"
+          : "RESEARCH_REPORT_LOOP_WB_MODEL"]: judgeDefaults[judgeProvider].model,
+        RESEARCH_REPORT_LOOP_JUDGE_EFFORT: judgeDefaults[judgeProvider].effort,
+        RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
+      },
+    },
+    "research-report-memory-v2-0821": {
+      command: "cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        windowsCommand("run-node.cmd", "dist\\memory-server.mjs"),
+      ],
+      env: {
+        RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
+        RESEARCH_REPORT_BASE_RUBRIC_PATH: `${pluginRootToken}\\rubrics\\v2_rubric_research.json`,
+      },
+    },
+  },
+} : {
   mcpServers: {
     "research-report-loop": {
       command: "sh",
@@ -176,10 +232,13 @@ const releaseHooks = JSON.parse(fs.readFileSync(releaseHooksPath, "utf8"));
 for (const registrations of Object.values(releaseHooks.hooks)) {
   for (const registration of registrations) {
     for (const hook of registration.hooks ?? []) {
-      hook.command = "RESEARCH_REPORT_CAPTURE_HOOK_DIR=$HOME/.research-report-memory-v2-0821/capture-hook-state "
-        + "sh ${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh "
-        + "${CODEBUDDY_PLUGIN_ROOT}/dist/capture-checkpoint.mjs "
-        + hook.command.trim().split(/\s+/u).at(-1);
+      const mode = hook.command.trim().split(/\s+/u).at(-1);
+      hook.command = targetPlatform === "win32"
+        ? `cmd.exe /d /s /c ""${pluginRootToken}\\scripts\\run-node.cmd" `
+          + `"${pluginRootToken}\\dist\\capture-checkpoint.mjs" ${mode}"`
+        : "RESEARCH_REPORT_CAPTURE_HOOK_DIR=$HOME/.research-report-memory-v2-0821/capture-hook-state "
+          + `sh ${pluginRootToken}/scripts/run-node.sh `
+          + `${pluginRootToken}/dist/capture-checkpoint.mjs ${mode}`;
     }
   }
 }
@@ -201,8 +260,10 @@ fs.writeFileSync(path.join(pluginDir, "package.json"), `${JSON.stringify({
 fs.writeFileSync(path.join(pluginDir, "BUILD-INFO.json"), `${JSON.stringify({
   name: pluginName,
   version,
-  platform: process.platform,
-  arch: process.arch,
+  platform: targetPlatform,
+  arch: targetArch,
+  buildHostPlatform: process.platform,
+  buildHostArch: process.arch,
   node: process.version,
   builtAt: new Date().toISOString(),
   curatorPromptVariant,
@@ -240,7 +301,13 @@ for (const executable of [
 }
 
 fs.mkdirSync(releaseRoot, { recursive: true });
-if (process.platform === "darwin") {
+if (process.platform === "win32") {
+  run("powershell.exe", [
+    "-NoProfile",
+    "-Command",
+    `Compress-Archive -LiteralPath '${outputDir.replaceAll("'", "''")}' -DestinationPath '${zipPath.replaceAll("'", "''")}' -Force`,
+  ]);
+} else if (targetPlatform === "win32" || process.platform === "darwin") {
   run("zip", ["-qry", zipPath, packageName], { cwd: releaseRoot });
 } else {
   run("tar", ["-czf", zipPath.replace(/\.zip$/u, ".tar.gz"), "-C", releaseRoot, packageName]);

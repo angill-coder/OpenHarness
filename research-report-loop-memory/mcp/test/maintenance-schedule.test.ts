@@ -27,3 +27,22 @@ test("Dreaming is scheduled daily at 16:30 with an isolated Memory MCP", () => {
   assert.match(runner, /只提交增量修改/u);
   assert.doesNotMatch(runner, /research-report-loop__report_loop/u);
 });
+
+test("Windows Dreaming uses Task Scheduler and the isolated Memory MCP", () => {
+  const runner = fs.readFileSync(
+    path.join(root, "scripts/run-memory-maintenance-workbuddy.ps1"),
+    "utf8",
+  );
+  const installer = fs.readFileSync(
+    path.join(root, "scripts/install-maintenance-windows.ps1"),
+    "utf8",
+  );
+  assert.match(installer, /ResearchReportLoopMemoryDreaming/u);
+  assert.match(installer, /New-ScheduledTaskTrigger -Daily -At "16:30"/u);
+  assert.match(installer, /StartWhenAvailable/u);
+  assert.match(runner, /dist\\memory-server\.mjs/u);
+  assert.match(runner, /--strict-mcp-config/u);
+  assert.match(runner, /operation=maintenance/u);
+  assert.match(runner, /只提交增量修改/u);
+  assert.doesNotMatch(runner, /report_loop_(?:start|submit|finish)/u);
+});

@@ -155,7 +155,7 @@ class ReportLoopRuntime:
         targetScore: float = 5.0,
         maxJudgedVersions: int = 3,
         maxElapsedSeconds: int = 3600,
-        skillVersion: str = "research-report-loop/1.0.0-mvp.10",
+        skillVersion: str = "research-report-loop/1.0.0-mvp.11",
     ) -> dict[str, Any]:
         task = str(task or "").strip()
         if not task:
