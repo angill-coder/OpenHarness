@@ -29,6 +29,8 @@ Layer 表示一条经验被加工到什么程度，Scope 表示它适用于哪�
 
 L1 与 L2B 的每个 Item 必须且只能有一个 Scope；L2B 只能引用相同 Scope 的 L1。L2B 不是在 Judge 前临时追加的规则列表，而是版本化 Rubric Set 的 Scope Overlay。每次 L2B 有效变化都在同一次 Capture 中产生新的 Git-backed Rubric Set 版本。
 
+每条 `audience` 或 `project` L1 Atom 及 L2B Patch 都必须填写具体 `scopeValue`；分别使用本轮 Episode 的 `audience` 或 `project` 原值，不得猜测或自行扩写。Runtime 只在字段遗漏时从同一 Episode 的可信元数据回填；Episode 也没有对应值时仍会拒绝写入。`core` 不得填写 `scopeValue`。
+
 ## 2. Scope 判断
 
 | Scope | 核心判断 | 正向证据 | 例子 |
@@ -179,6 +181,8 @@ L2B 只保存 `active`、非红线的 Memory Rubrics。证据不足时不要创�
   "snapshotRevision": "<review 返回值>"
 }
 ```
+
+如果 Atom 依赖当前项目，必须写成 `{"scope":"project","scopeValue":"<episode.project 原值>"}`；依赖当前受众时同理写入 `episode.audience` 原值。不要只写 `scope` 后依赖重试补字段。
 
 仅在 Gate 2 通过时增加：
 

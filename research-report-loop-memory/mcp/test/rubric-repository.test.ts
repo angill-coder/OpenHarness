@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { RubricRepository } from "../src/rubric-repository.ts";
+import { scopeStorageKey } from "../src/scope-paths.ts";
 
 test("L2B uses Git-backed judge-ready JSON and incremental patches", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-l2b-"));
@@ -105,6 +106,69 @@ test("L2B repository keeps core, audience and project scopes separate", async ()
     const documents = await repository.recall({ audience: "管理委员会", project: "DS时长分析" });
     assert.deepEqual(documents.map((value) => value.scope).sort(), ["audience", "core", "project"]);
     assert.equal(documents.flatMap((value) => value.rubrics).length, 2);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("scope paths remain isolated when readable slugs collide", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-l2b-collision-"));
+  try {
+    const repository = new RubricRepository(dataDir);
+    await repository.initialize();
+    const values = ["A/B", "A-B", "A B"];
+    assert.equal(new Set(values.map(scopeStorageKey)).size, 3);
+    for (const [index, scopeValue] of values.entries()) {
+      await repository.applyPatches([{
+        scope: "project",
+        scopeValue,
+        upsertItems: [{
+          id: `MR-PROJECT-${index}`,
+          criterionKey: `structure.project_${index}`,
+          operation: "add",
+          dimension: "structure",
+          label: `项目规则${index}`,
+          desc: `只适用于项目 ${scopeValue}`,
+          effect: "不得串入其他项目。",
+          redline: false,
+          status: "active",
+          sourceL1Ids: [`m_project_${index}`],
+        }],
+      }], `scope-collision-${index}`);
+    }
+
+    for (const [index, scopeValue] of values.entries()) {
+      const project = (await repository.recall({ project: scopeValue }))
+        .find((value) => value.scope === "project");
+      assert.equal(project?.scopeValue, scopeValue);
+      assert.deepEqual(project?.rubrics.map((item) => item.id), [`MR-PROJECT-${index}`]);
+    }
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("recall rejects a document whose stored scopeValue does not match the requested project", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-l2b-mismatch-"));
+  try {
+    const repository = new RubricRepository(dataDir);
+    await repository.initialize();
+    const relativePath = `projects/${scopeStorageKey("A/B")}/rubrics.json`;
+    const target = path.join(repository.root, relativePath);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `${JSON.stringify({
+      schemaVersion: 2,
+      scope: "project",
+      scopeValue: "A-B",
+      rubrics: [],
+    }, null, 2)}\n`);
+    execFileSync("git", ["add", "--all"], { cwd: repository.root });
+    execFileSync("git", ["commit", "-m", "seed mismatched scope"], { cwd: repository.root });
+
+    await assert.rejects(
+      repository.recall({ project: "A/B" }),
+      /rubric_scope_value_mismatch/u,
+    );
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }

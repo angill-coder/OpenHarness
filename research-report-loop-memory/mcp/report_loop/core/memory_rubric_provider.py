@@ -14,7 +14,7 @@ _SCOPE_PRIORITY = {"core": 0, "audience": 1, "project": 2}
 
 
 def storage_slug(value: str) -> str:
-    normalized = unicodedata.normalize("NFKC", str(value or "")).strip().lower()
+    normalized = canonical_scope_value(value).lower()
     pieces: list[str] = []
     separated = False
     for character in normalized:
@@ -26,6 +26,16 @@ def storage_slug(value: str) -> str:
             separated = True
     slug = "".join(pieces).strip("-")
     return slug or hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:12]
+
+
+def canonical_scope_value(value: str) -> str:
+    return unicodedata.normalize("NFKC", str(value or "")).strip()
+
+
+def scope_storage_key(value: str) -> str:
+    canonical = canonical_scope_value(value)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+    return f"{storage_slug(canonical)}--{digest}"
 
 
 class MemoryRubricProvider:
@@ -115,13 +125,13 @@ class MemoryRubricProvider:
                 candidates.append((
                     "audience",
                     audience.strip(),
-                    f"audiences/{storage_slug(audience)}/rubrics.json",
+                    f"audiences/{scope_storage_key(audience)}/rubrics.json",
                 ))
             if project.strip():
                 candidates.append((
                     "project",
                     project.strip(),
-                    f"projects/{storage_slug(project)}/rubrics.json",
+                    f"projects/{scope_storage_key(project)}/rubrics.json",
                 ))
 
             manifest = self._read_manifest(head)
@@ -134,6 +144,8 @@ class MemoryRubricProvider:
                 if document.get("scope") != requested_scope:
                     raise ValueError(f"memory rubric scope mismatch: {relative_path}")
                 stored_value = str(document.get("scopeValue") or "")
+                if requested_scope != "core" and canonical_scope_value(stored_value) != canonical_scope_value(requested_value):
+                    raise ValueError(f"memory rubric scopeValue mismatch: {relative_path}")
                 scope_value = stored_value or requested_value
                 item_ids: list[str] = []
                 for raw_item in document.get("rubrics") or []:

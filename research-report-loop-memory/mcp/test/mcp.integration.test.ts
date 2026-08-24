@@ -204,3 +204,73 @@ async function currentRevision(client: Client): Promise<string> {
   }));
   return review.snapshotRevision as string;
 }
+
+test("project Atom inherits a missing scopeValue only from its Episode", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-scope-fallback-"));
+  const projectRoot = path.resolve(import.meta.dirname, "../..");
+  const client = new Client({ name: "research-report-memory-scope-fallback-test", version: "2.1.0" }, { capabilities: {} });
+  const transport = new StdioClientTransport({
+    command: "sh",
+    args: serverArgs(projectRoot),
+    cwd: projectRoot,
+    env: { ...process.env, RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir } as Record<string, string>,
+    stderr: "pipe",
+  });
+
+  try {
+    await client.connect(transport);
+    const feedback = "本项目统一使用行为数据口径";
+    const review = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "项目报告", project: "项目回填测试", query: feedback, purpose: "review", includeL1: true },
+    }));
+    const stored = payload(await client.callTool({
+      name: "writing_memory_capture_payload",
+      arguments: { payload: JSON.stringify({
+        feedback,
+        decision: "store",
+        mode: "feedback",
+        snapshotRevision: review.snapshotRevision,
+        episode: feedbackEpisode("项目报告", feedback, {
+          externalSourceId: "scope-fallback:project",
+          sessionId: "scope-fallback",
+          project: "项目回填测试",
+        }),
+        atoms: [{ rule: "本项目统一使用行为数据口径。", scope: "project", lifecycle: "candidate" }],
+      }) },
+    }));
+    assert.equal(stored.status, "stored");
+    assert.equal(stored.written, 1);
+
+    const recalled = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "项目报告", project: "项目回填测试", query: feedback, purpose: "review", includeL1: true },
+    }));
+    assert.equal(recalled.l1Memories[0].scope, "project");
+    assert.equal(recalled.l1Memories[0].scopeValue, "项目回填测试");
+
+    const missingReview = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "另一个项目报告", query: "项目规则", purpose: "review", includeL1: true },
+    }));
+    const rejected = payload(await client.callTool({
+      name: "writing_memory_capture_payload",
+      arguments: { payload: JSON.stringify({
+        feedback: "这份项目报告必须统一使用行为数据口径",
+        decision: "store",
+        mode: "feedback",
+        snapshotRevision: missingReview.snapshotRevision,
+        episode: feedbackEpisode("另一个项目报告", "这份项目报告必须统一使用行为数据口径", {
+          externalSourceId: "scope-fallback:missing",
+          sessionId: "scope-fallback-missing",
+        }),
+        atoms: [{ rule: "本项目报告固定使用行为数据口径。", scope: "project", lifecycle: "candidate" }],
+      }) },
+    }));
+    assert.equal(rejected.status, "error");
+    assert.equal(rejected.reason, "scope_value_required");
+  } finally {
+    await client.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});

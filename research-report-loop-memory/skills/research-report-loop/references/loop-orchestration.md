@@ -46,6 +46,8 @@
 - `revisionBrief.repair` 是本轮需要修复的检查项。
 - `revisionBrief.preserve` 是当前已通过、修改时不能破坏的质量项。
 - `revisionBrief.avoid` 是被拒绝版本引入的回退模式。
+- `revisionBrief.userRequirements` 是用户本轮完整任务，修改时必须继续满足。
+- `revisionBrief.userOverrides` 是因用户明确要求而豁免的非证据类检查项，不得把它们当作缺陷修回基础 Rubric 的默认写法。
 - 只做与 repair 有关的修改，保存报告，再用同一 `runId` 提交。
 
 ### `nextAction=deliver`

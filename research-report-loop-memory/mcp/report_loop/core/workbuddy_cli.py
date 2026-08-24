@@ -139,6 +139,7 @@ def call_workbuddy(
     command = discover_command()
     selected_model = str(
         model
+        or os.environ.get("RESEARCH_REPORT_LOOP_WB_MODEL")
         or os.environ.get("RESEARCH_REPORT_LOOP_JUDGE_MODEL")
         or DEFAULT_MODEL
     ).strip()

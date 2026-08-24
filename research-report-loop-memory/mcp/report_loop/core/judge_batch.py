@@ -213,8 +213,15 @@ def _report_stats(report_text: str) -> Dict:
 
 
 def _full_case_context(case: Dict, report_text: str = "") -> Dict:
+    case_input = case.get("input") or {}
+    user_requirements = (
+        str(case_input.get("intake") or "").strip()
+        if isinstance(case_input, dict)
+        else ""
+    )
     context = {
         "case_id": str(case.get("case_id") or ""),
+        "user_requirements": user_requirements,
         "background": _background_context(case),
         "report_stats": _report_stats(report_text),
     }
@@ -238,7 +245,7 @@ def _dimension_case_context(
         return full
     return {
         key: full[key]
-        for key in ("case_id", *keys)
+        for key in ("case_id", "user_requirements", *keys)
         if key in full
     }
 
