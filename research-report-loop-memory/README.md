@@ -20,6 +20,20 @@ Criterion Slot、Scope Overlay、Personal 权重和版本冻结规则见 [Rubric
 - `research-report-loop`：Rubric 编译、Judge、版本采纳与停止。
 - `research-report-memory-v2-0821`：L0/L1/L2B Capture、Review、Manage 与 Forget。
 
+## Curator Prompt 双版本
+
+- **V1 Gate-first（默认）**：`agents/research-report-memory-curator.md`。以显式 Layer Gate、Scope 和 Payload 自检为主，适合作为稳定对照。
+- **V2 Letta-first（实验）**：`prompts/research-report-memory-curator-v2-letta-first.md`。以未来行为、完整历史、渐进更新和高层记忆成本为判断主体，同时保留相同的 Scope、Rubric Set、Criterion Slot 与 MCP 契约。
+
+两个版本不会同时暴露为两个同名 Agent。构建时只把选定 Prompt 写入安装包的 `agents/research-report-memory-curator.md`：
+
+```bash
+npm run build:release:prompt-v1
+npm run build:release:prompt-v2
+```
+
+默认 `npm run build:release` 仍使用 V1，不会改变当前 WorkBuddy 行为。V1/V2 使用相同插件 ID，A/B 测试时应分轮安装，并使用相同的初始 Memory 快照。
+
 ## 本地数据
 
 - Report Loop：`~/.research-report-loop/runs/<run-id>/`

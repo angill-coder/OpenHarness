@@ -8,9 +8,22 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, ".codebuddy-plugin/plugin.json"), "utf8"));
 const pluginName = manifest.name;
 const version = manifest.version;
+const curatorPromptArgIndex = process.argv.indexOf("--curator-prompt");
+const curatorPromptExplicit = curatorPromptArgIndex >= 0;
+const curatorPromptVariant = curatorPromptExplicit
+  ? process.argv[curatorPromptArgIndex + 1]
+  : "v1-gate-first";
+const curatorPromptSources = {
+  "v1-gate-first": "agents/research-report-memory-curator.md",
+  "v2-letta-first": "prompts/research-report-memory-curator-v2-letta-first.md",
+};
+if (!curatorPromptSources[curatorPromptVariant]) {
+  throw new Error(`Unsupported curator prompt variant: ${curatorPromptVariant}`);
+}
 const platformKey = `${process.platform}-${process.arch}`;
 const releaseRoot = path.join(root, "release");
-const packageName = `${pluginName}-${version}-${platformKey}`;
+const promptSuffix = curatorPromptExplicit ? `-prompt-${curatorPromptVariant}` : "";
+const packageName = `${pluginName}-${version}${promptSuffix}-${platformKey}`;
 const outputDir = path.join(releaseRoot, packageName);
 const pluginDir = path.join(outputDir, "plugins", pluginName);
 const zipPath = `${outputDir}.zip`;
@@ -79,6 +92,10 @@ for (const item of [
   "README.md",
   "LICENSE.md",
 ]) copyPlugin(item);
+fs.copyFileSync(
+  path.join(root, curatorPromptSources[curatorPromptVariant]),
+  path.join(pluginDir, "agents/research-report-memory-curator.md"),
+);
 
 function removeGeneratedFiles(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -161,6 +178,16 @@ fs.writeFileSync(path.join(pluginDir, "package.json"), `${JSON.stringify({
   engines: { node: ">=22.16.0", python: ">=3.10" },
 }, null, 2)}\n`);
 
+fs.writeFileSync(path.join(pluginDir, "BUILD-INFO.json"), `${JSON.stringify({
+  name: pluginName,
+  version,
+  platform: process.platform,
+  arch: process.arch,
+  node: process.version,
+  builtAt: new Date().toISOString(),
+  curatorPromptVariant,
+}, null, 2)}\n`);
+
 const marketplace = {
   name: "research-report-loop-memory-local",
   description: "Installable local marketplace for Research Report Loop and Memory",
@@ -194,4 +221,4 @@ if (fs.existsSync(zipPath)) {
   const digest = crypto.createHash("sha256").update(fs.readFileSync(zipPath)).digest("hex");
   fs.writeFileSync(`${zipPath}.sha256`, `${digest}  ${path.basename(zipPath)}\n`);
 }
-process.stdout.write(`Release built: ${outputDir}\n`);
+process.stdout.write(`Release built: ${outputDir}\nCurator prompt: ${curatorPromptVariant}\n`);

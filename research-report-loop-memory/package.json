@@ -1,6 +1,6 @@
 {
   "name": "research-report-loop-memory",
-  "version": "1.0.0-mvp.3",
+  "version": "1.0.0-mvp.4",
   "private": true,
   "type": "module",
   "description": "Integrated report writing loop with L0/L1 evidence and Git-backed L2B Rubrics",
@@ -11,8 +11,10 @@
     "start:memory": "node --import tsx mcp/src/server.ts",
     "start:loop": "sh scripts/run-python.sh mcp/report_loop/server.py",
     "build:release": "node scripts/build-release.mjs",
+    "build:release:prompt-v1": "node scripts/build-release.mjs --curator-prompt v1-gate-first",
+    "build:release:prompt-v2": "node scripts/build-release.mjs --curator-prompt v2-letta-first",
     "test": "npm run test:memory && npm run test:loop",
-    "test:memory": "node --import tsx --test mcp/test/mcp.integration.test.ts mcp/test/relevance.test.ts mcp/test/rubric-repository.test.ts mcp/test/storage-layout-v2.test.ts mcp/test/user-shortcut.test.ts mcp/test/integrated-contract.test.ts mcp/test/memory-guard.test.ts mcp/test/asset-path.test.ts",
+    "test:memory": "node --import tsx --test mcp/test/mcp.integration.test.ts mcp/test/relevance.test.ts mcp/test/rubric-repository.test.ts mcp/test/storage-layout-v2.test.ts mcp/test/user-shortcut.test.ts mcp/test/integrated-contract.test.ts mcp/test/memory-guard.test.ts mcp/test/asset-path.test.ts mcp/test/curator-prompt-variants.test.ts",
     "test:loop": "PYTHONPYCACHEPREFIX=/tmp/research-report-loop-memory-pycache sh scripts/run-python.sh -m unittest discover -s tests -p 'test_*.py'",
     "syntaxcheck": "tsc --noEmit --noCheck && PYTHONPYCACHEPREFIX=/tmp/research-report-loop-memory-pycache sh scripts/run-python.sh -m compileall -q mcp/report_loop hooks/report-loop-guard.py"
   },

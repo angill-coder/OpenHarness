@@ -17,7 +17,7 @@ from mcp.report_loop.core.runtime import ReportLoopError, ReportLoopRuntime  # n
 
 
 SERVER_NAME = "research-report-loop"
-SERVER_VERSION = "1.0.0-mvp.3"
+SERVER_VERSION = "1.0.0-mvp.4"
 runtime = ReportLoopRuntime()
 
 
