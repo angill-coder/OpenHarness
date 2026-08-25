@@ -40,11 +40,13 @@ description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究
 
 在当前工作目录保存可编辑的 Markdown 初稿 V1。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
 
+V1 保存完成之前，不读取 Report Loop 执行卡，不检查或测试 Python Runner。
+
 ### 第 3 步：启动 Report Loop
 
-完整读取并执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V1 和素材路径构造 Job，只启动一次 Python Runner。
+确认 V1 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V1 和素材路径构造 Job，正常流程只启动一次 Python Runner。
 
-宿主不得自行执行 Judge、Rewrite 或旧 Report Loop MCP 流程。等待 Runner 完成后，只交付返回的 `finalArtifactPath`；写作前不要 Recall Memory。
+Python Runner 是已经验证的黑盒组件。宿主不得事前阅读源码、运行测试、执行 `--help` 或预检，也不得自行执行 Judge、Rewrite 或旧 Report Loop MCP 流程。等待 Runner 完成后，只交付返回的 `finalArtifactPath`；写作前不要 Recall Memory。
 
 ### 第 4 步：处理用户反馈
 
@@ -57,9 +59,3 @@ Judge 反馈和自动改写不得进入 Memory。主 Agent 不直接调用 Memor
 - Runner 失败时，按 `loop-orchestration.md` 保留可用的历史最佳版本；宿主不得接管中间 Judge 或 Rewrite。
 - Capture 失败不回滚已完成的报告修改，也不得通过热改插件或写入 `~/.workbuddy/MEMORY.md` 补偿。
 - 只交付最终可编辑报告；除非用户主动询问，不展开内部评分、版本试错和工具调用过程。
-
-## 参考
-
-- 写作规则与报告结构：[writing-instructions.md](references/writing-instructions.md)（产出前必读）
-- Python Runner 与 Report Loop 契约：[loop-orchestration.md](references/loop-orchestration.md)
-- 用户反馈与长期写作记忆：[memory-orchestration.md](references/memory-orchestration.md)

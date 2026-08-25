@@ -15,6 +15,10 @@ test("integrated Skill uses the Python runner and versioned Rubric Set", () => {
     path.join(root, "skills/research-report-loop/references/memory-orchestration.md"),
     "utf8",
   );
+  const architecture = fs.readFileSync(
+    path.join(root, "docs/report-loop-architecture.md"),
+    "utf8",
+  );
   assert.match(skill, /Python Runner/su);
   assert.match(skill, /userInputEvidence/u);
   assert.match(skill, /可被素材验证、反驳或修正的完整判断/u);
@@ -22,12 +26,19 @@ test("integrated Skill uses the Python runner and versioned Rubric Set", () => {
   assert.match(skill, /不要为了适配多选框而压缩观点/u);
   assert.match(skill, /只启动一次 Python Runner/u);
   assert.match(skill, /finalArtifactPath/u);
+  assert.match(skill, /V1 保存完成之前，不读取 Report Loop 执行卡/u);
+  assert.match(skill, /已经验证的黑盒组件/u);
+  assert.match(skill, /不得事前阅读源码、运行测试、执行 `--help` 或预检/u);
   assert.match(loop, /"schemaVersion": 2/u);
-  assert.match(loop, /Resolution Judge.*sourceL1/su);
-  assert.match(loop, /all six dimension Judges/u);
+  assert.match(loop, /# Report Loop 执行卡/u);
+  assert.match(loop, /<PLUGIN_ROOT>.*run-python\.sh.*runner\.py.*--job/su);
   assert.match(loop, /run-python\.cmd.*runner\.py.*--job/su);
-  assert.match(loop, /matching shell wrapper/u);
-  assert.match(loop, /only execution entry/u);
+  assert.match(loop, /直接启动一次 Python Runner/u);
+  assert.match(loop, /不要事前阅读 Runner 源码、运行测试、执行 `--help` 或预检/u);
+  assert.doesNotMatch(loop, /sourceL1|rubric_compiler|judge_batch|Persistent Rewriter/u);
+  assert.match(architecture, /Resolution Judge.*sourceL1/su);
+  assert.match(architecture, /judge_batch\.py/u);
+  assert.match(architecture, /Persistent Rewriter/u);
   assert.match(skill, /operation=capture/u);
   assert.match(skill, /Memory MCP/u);
   assert.match(skill, /不得因用户反馈修改 Skill、Base Rubrics、插件代码/u);
@@ -62,5 +73,5 @@ test("integrated manifests register only Memory MCP plus Curator and Reflection"
   );
   assert.match(orchestration, /report-memory-v2/u);
   assert.match(skill, /旧 Report Loop MCP 流程/u);
-  assert.match(loop, /Report Loop has no MCP server/u);
+  assert.match(loop, /不调用 MCP/u);
 });

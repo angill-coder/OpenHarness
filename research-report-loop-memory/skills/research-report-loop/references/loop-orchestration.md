@@ -1,41 +1,53 @@
-# Report Loop Python orchestration contract
+# Report Loop 执行卡
 
-The App completes the three intake fields, writes V1 with the user-selected main model, then invokes the Python runner once. The App must not run Judge or Rewrite turns itself.
+只在初稿 V1 已保存后读取本文件。Report Loop 是已经验证的黑盒组件：按以下模板构造 Job，然后直接启动一次 Python Runner。不要事前阅读 Runner 源码、运行测试、执行 `--help` 或预检。
 
-## Job schema
+## 1. 构造 Job
+
+将 Job 保存为当前报告目录下的 JSON 文件。所有文件路径使用绝对路径。
 
 ```json
 {
   "schemaVersion": 2,
-  "originalUserQuery": "the initial report request",
+  "originalUserQuery": "用户最初的报告请求",
   "intakeContext": {
-    "reportBackground": {"value": "confirmed background"},
-    "materialHypothesis": {"value": "confirmed hypothesis"},
-    "priorityMaterials": [{"path": "C:/workspace/interview.docx", "displayName": "interview.docx"}],
+    "reportBackground": {"value": "已确认的汇报背景"},
+    "materialHypothesis": {"value": "已确认的完整 hypothesis"},
+    "priorityMaterials": [
+      {"path": "/absolute/path/to/material", "displayName": "material"}
+    ],
     "userInputEvidence": {
-      "reportBackground": "exact user-authored text",
-      "materialHypothesis": "exact user-authored text",
-      "priorityMaterials": "exact user-authored text"
+      "reportBackground": "用户消息中的对应原文",
+      "materialHypothesis": "用户消息中的对应原文",
+      "priorityMaterials": "用户消息中的对应原文"
     }
   },
-  "v1ArtifactPath": "C:/workspace/report-v1.md",
-  "structuredDataPath": "C:/workspace/structured_data.json",
+  "audience": "已确认的受众；没有则为空字符串",
+  "project": "当前项目名称；没有则为空字符串",
+  "v1ArtifactPath": "/absolute/path/to/report-v1.md",
+  "structuredDataPath": "/absolute/path/to/structured_data.json",
   "judgeProvider": "workbuddy",
-  "hostModel": {"modelId": "the App-selected model", "effort": "optional"},
-  "outputPath": "C:/workspace/report-final.md"
+  "hostModel": {"modelId": "当前宿主模型 ID", "effort": "当前 effort，可省略"},
+  "outputPath": "/absolute/path/to/report-final.md"
 }
 ```
 
-Run `scripts/run-python.cmd mcp/report_loop/runner.py --job <absolute-job-path>` on Windows, or the matching shell wrapper on macOS/Linux.
-All three `userInputEvidence` values are mandatory exact excerpts from user-authored messages. System/App/tool-provided paths and attachment metadata are candidate materials only and cannot satisfy this gate. The runner rejects the Job before Judge if any evidence value is missing or empty.
+三项 `userInputEvidence` 必须分别保存用户消息中的真实原文。系统、App、工具提供的路径、附件名称或自动摘要不能代替用户确认。没有 `structured_data.json` 时删除 `structuredDataPath`，不要填写不存在的路径。
 
-Report Loop has no MCP server and exposes no `start / submit / finish / status` tools. The Python runner is its only execution entry, and the App invokes it exactly once per run.
+## 2. 直接执行
 
+WorkBuddy 加载 Skill 时会返回 Skill Base Directory；插件根目录是该目录的上两级。直接使用插件自带启动脚本，不搜索其他 Report Loop，不调用 MCP。
 
-The runner owns the loop. `judgeProvider` defaults to `workbuddy` and may be set to `codex`. Every Judge round starts one isolated CLI process per active Rubric dimension: WorkBuddy uses locked `deepseek-v4-pro / medium`, while Codex uses locked `gpt-5.6-sol / medium`. A transport failure, empty response, or invalid Judge JSON activates a run-wide circuit breaker to the WorkBuddy App host model; a low score does not. Query and all three intake fields are included in every dimension call. Dimension processes, Judge rounds, and Rewriter never share context.
+- macOS / Linux：`<PLUGIN_ROOT>/scripts/run-python.sh <PLUGIN_ROOT>/mcp/report_loop/runner.py --job <ABS_JOB_PATH>`
+- Windows：`<PLUGIN_ROOT>\scripts\run-python.cmd <PLUGIN_ROOT>\mcp\report_loop\runner.py --job <ABS_JOB_PATH>`
 
-Before the first Judge round, the runner loads Base Rubrics plus the matching `core`, `audience`, and `project` Memory Rubrics. A single Resolution Judge decides which Memory Rubrics apply to the current task and may inspect their `sourceL1` evidence when useful. The runner freezes the resulting Resolution Plan and compiled rubric for the whole run; all six dimension Judges use that same frozen standard. Later Memory updates affect only a new run.
+命令执行期间等待 Runner 完成，不并行启动第二个 Runner，不由宿主接管 Judge 或 Rewrite。
 
-Rewrite is serial with Judge and uses one long-lived WorkBuddy CLI stream process for the entire run. It uses `hostModel.modelId` and optional effort, receives V1 context on its first turn, and thereafter retains writing, sanitized Judge feedback, and failed-attempt memory. Raw Judge output is never passed to it. Each rewrite starts from the best accepted report.
+## 3. 处理结果
 
-There is no version limit or Python iteration ledger. Stop when the best accepted score reaches 5, two consecutive candidates are rejected, or 60 minutes elapse. Infrastructure failures return the best judged version with `judge_unavailable` or `rewrite_unavailable`. The runner atomically copies the historical best report to `outputPath` and prints one final JSON object for the App.
+Runner 最终输出一个 JSON 对象：
+
+- 成功：交付 `finalArtifactPath` 指向的文件。
+- `judge_unavailable` 或 `rewrite_unavailable`：交付返回的历史最佳文件并简要说明自动评测或改写未完成。
+- 明确指出 Job 字段缺失或格式错误：只修正该字段并重试一次。
+- 其他错误：保留 V1 和已有历史最佳版本，如实报告错误；不要通过阅读源码、运行测试或手工执行 Judge/Rewrite 来接管流程。
