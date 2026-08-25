@@ -29,8 +29,12 @@ The App completes the three intake fields, writes V1 with the user-selected main
 Run `scripts/run-python.cmd mcp/report_loop/runner.py --job <absolute-job-path>` on Windows, or the matching shell wrapper on macOS/Linux.
 All three `userInputEvidence` values are mandatory exact excerpts from user-authored messages. System/App/tool-provided paths and attachment metadata are candidate materials only and cannot satisfy this gate. The runner rejects the Job before Judge if any evidence value is missing or empty.
 
+Report Loop has no MCP server and exposes no `start / submit / finish / status` tools. The Python runner is its only execution entry, and the App invokes it exactly once per run.
+
 
 The runner owns the loop. `judgeProvider` defaults to `workbuddy` and may be set to `codex`. Every Judge round starts one isolated CLI process per active Rubric dimension: WorkBuddy uses locked `deepseek-v4-pro / medium`, while Codex uses locked `gpt-5.6-sol / medium`. A transport failure, empty response, or invalid Judge JSON activates a run-wide circuit breaker to the WorkBuddy App host model; a low score does not. Query and all three intake fields are included in every dimension call. Dimension processes, Judge rounds, and Rewriter never share context.
+
+Before the first Judge round, the runner loads Base Rubrics plus the matching `core`, `audience`, and `project` Memory Rubrics. A single Resolution Judge decides which Memory Rubrics apply to the current task and may inspect their `sourceL1` evidence when useful. The runner freezes the resulting Resolution Plan and compiled rubric for the whole run; all six dimension Judges use that same frozen standard. Later Memory updates affect only a new run.
 
 Rewrite is serial with Judge and uses one long-lived WorkBuddy CLI stream process for the entire run. It uses `hostModel.modelId` and optional effort, receives V1 context on its first turn, and thereafter retains writing, sanitized Judge feedback, and failed-attempt memory. Raw Judge output is never passed to it. Each rewrite starts from the best accepted report.
 

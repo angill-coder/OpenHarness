@@ -11,8 +11,8 @@
 ## 写作与 Judge
 
 - 写作前不执行 Memory Recall。宿主 Agent只按本轮用户要求和 `research-report-loop` Skill 写初稿。
-- L2B 变化时，Memory Curator 用 Criterion Slot 和 Scope Overlay 升级 Git-backed Rubric Set；不为 Audience×Project 组合保存完整副本。
-- Python Runner 启动时只做确定性 Scope 解析并冻结：`Base → core → audience → project`。相同 Criterion 按高优先级覆盖，不同 Criterion 同时保留。
+- L2B 变化时，Memory Curator 只维护独立的 Git-backed Memory Rubrics，不修改 Base，也不为 Audience×Project 组合保存完整副本。
+- Python Runner 读取 Base 以及当前 `core / audience / project` Memory Rubrics；Resolution Judge 根据本轮任务判断激活项，必要时读取对应的 `sourceL1`，随后冻结 Resolution Plan 与 compiled rubric，供六维 Judge 共同使用。
 - 同一 Loop 中 Memory 即使更新，也不改变已经冻结的 Rubrics；下一次新建 Loop 才读取新 Revision。
 
 ## 用户反馈后 Capture
@@ -40,5 +40,5 @@
 
 - 本轮用户明确要求决定当前交付目标。
 - Base Rubrics 的红线与硬门槛不能被 Memory 删除或弱化。
-- Memory Scope 内只对相同 `criterionKey` 按 `project > audience > core > Base` 消解冲突；有效 Memory 要求优先于 Skill 的一般风格默认值。
-- 该顺序只用于应用与冲突消解，不用于反推 Memory Scope。
+- Scope 候选按当前任务的 `core + audience + project` 读取；语义重复、适用场景和冲突由 Resolution Judge 结合任务解释，六维 Judge 不再各自重解释 Memory。
+- 当前任务命中的 Audience/Project 只用于检索候选 Memory，不能反推已有记忆或新反馈的 Scope；Scope 仍由 Curator 根据反馈语义判断。
