@@ -27,12 +27,14 @@
   "v1ArtifactPath": "/absolute/path/to/report-v1.md",
   "structuredDataPath": "/absolute/path/to/structured_data.json",
   "judgeProvider": "workbuddy",
-  "hostModel": {"modelId": "当前宿主模型 ID", "effort": "当前 effort，可省略"},
+  "hostModel": {"effort": "当前 effort，可省略；整个字段也可省略"},
   "outputPath": "/absolute/path/to/report-final.md"
 }
 ```
 
 三项 `userInputEvidence` 必须分别保存用户消息中的真实原文。系统、App、工具提供的路径、附件名称或自动摘要不能代替用户确认。没有 `structured_data.json` 时删除 `structuredDataPath`，不要填写不存在的路径。
+
+不要猜测或填写宿主模型 ID。Job 写入成功后，插件 Hook 会记录本次 WorkBuddy `sessionId`；Runner 据此从主会话 trace 读取准确的 `requestModelId`。同一 workspace 存在多个活跃会话而 session 标识缺失时，Runner 会明确拒绝，不按“最近会话”猜测。
 
 ## 2. 直接执行
 

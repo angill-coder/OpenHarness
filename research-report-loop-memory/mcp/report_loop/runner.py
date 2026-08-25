@@ -20,6 +20,10 @@ from mcp.report_loop.core.judge_provider import (
     JudgeProviderError,
     locked_report_judge_settings,
 )
+from mcp.report_loop.core.host_model_resolver import (
+    HostModelResolutionError,
+    resolve_host_model_id,
+)
 from mcp.report_loop.core.persistent_rewriter import PersistentRewriter, RewriterError
 from mcp.report_loop.core.runtime import ReportLoopError, ReportLoopRuntime
 
@@ -36,6 +40,7 @@ def _required_text(value: Any, name: str) -> str:
 
 
 def load_job(path: Path) -> dict[str, Any]:
+    path = path.expanduser().resolve()
     job = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(job, dict) or job.get("schemaVersion") != 2:
         raise JobError("schemaVersion must be 2")
@@ -81,11 +86,15 @@ def load_job(path: Path) -> dict[str, Any]:
     if not v1.is_file():
         raise JobError(f"V1 report does not exist: {v1}")
     normalized["v1ArtifactPath"] = str(v1)
-    host_model = job.get("hostModel")
+    host_model = job.get("hostModel") or {}
     if not isinstance(host_model, dict):
-        raise JobError("hostModel must be an object")
+        raise JobError("hostModel must be an object when provided")
+    try:
+        host_model_id = resolve_host_model_id(path)
+    except HostModelResolutionError as exc:
+        raise JobError(str(exc)) from exc
     normalized["hostModel"] = {
-        "modelId": _required_text(host_model.get("modelId"), "hostModel.modelId"),
+        "modelId": host_model_id,
         **({"effort": str(host_model["effort"]).strip()} if str(host_model.get("effort") or "").strip() else {}),
     }
     try:

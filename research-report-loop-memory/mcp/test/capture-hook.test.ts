@@ -120,3 +120,28 @@ test("hook manifest contains no PreToolUse or report-loop/file gate", () => {
   const source = fs.readFileSync(hookPath, "utf8");
   assert.doesNotMatch(source, /present_files|artifactPath|snapshotRevision/u);
 });
+
+test("successful Report Loop Job write stamps the exact WorkBuddy session", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-session-"));
+  const jobDir = fs.mkdtempSync(path.join(os.tmpdir(), "report-loop-job-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(jobDir, { recursive: true, force: true }));
+  const jobPath = path.join(jobDir, "report_loop_job.json");
+  fs.writeFileSync(jobPath, JSON.stringify({
+    schemaVersion: 2,
+    v1ArtifactPath: path.join(jobDir, "report-v1.md"),
+    outputPath: path.join(jobDir, "report-final.md"),
+  }));
+
+  invoke("post-tool", {
+    session_id: "session-sidecar-0001",
+    tool_name: "Write",
+    tool_input: { file_path: jobPath },
+    tool_response: { status: "completed" },
+  }, stateDir);
+
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(`${jobPath}.session.json`, "utf8")),
+    { version: 1, sessionId: "session-sidecar-0001" },
+  );
+});

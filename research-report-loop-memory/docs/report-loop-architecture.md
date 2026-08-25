@@ -20,6 +20,6 @@ Runner 启动后读取 Base Rubrics 以及与 `core`、`audience`、`project` �
 
 每个 Judge round 按有效 Rubric Dimension 启动隔离进程。WorkBuddy Provider 固定使用 `deepseek-v4-pro / medium`；Codex Provider 固定使用 `gpt-5.6-sol / medium`。传输失败、空响应或非法 Judge JSON 会触发运行级 WorkBuddy host-model 回退，低分本身不会触发回退。
 
-Rewrite 与 Judge 串行。Persistent Rewriter 使用 Job 中的 `hostModel.modelId` 和可选 effort，首轮获得 V1 与用户上下文，之后保留已清洗的修改反馈和失败尝试；原始 Judge 输出不会直接传入 Rewriter。
+Rewrite 与 Judge 串行。插件 Hook 为 Job 记录准确的 WorkBuddy `sessionId`，Runner 再从该主会话 trace 读取 `requestModelId`；Persistent Rewriter 使用这个实际宿主模型和可选 effort。首轮获得 V1 与用户上下文，之后保留已清洗的修改反馈和失败尝试；原始 Judge 输出不会直接传入 Rewriter。
 
 Runner 在最佳版本达到 5 分、连续两个候选版本被拒绝或达到 60 分钟时停止。基础设施故障返回已经完成 Judge 的历史最佳版本，并以 `judge_unavailable` 或 `rewrite_unavailable` 标记。最终文件通过原子替换写入 Job 的 `outputPath`。

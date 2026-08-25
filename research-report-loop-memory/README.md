@@ -24,7 +24,7 @@ Hook 不注册 `PreToolUse`，不负责写前 Recall、报告文件校验或 Rep
 
 ## Report Loop 模型与隔离
 
-- Writer 与 Rewriter 使用 WorkBuddy App 主对话中用户选择的模型；Job 必须提供 `hostModel.modelId`，不设置回退模型。
+- Writer 与 Rewriter 使用 WorkBuddy App 主对话中用户实际选择的模型；Hook 记录 session，Runner 从主会话 trace 自动读取 `requestModelId`，不再让 Agent 猜写模型 ID。
 - Judge Provider 默认 `workbuddy`，固定为 `deepseek-v4-pro / medium`；也可在 Job 中明确选择 `codex`，固定为 `gpt-5.6-sol / medium`。Judge Prompt 均通过 stdin 传入。只有调用失败、空响应或输出不满足 Judge JSON 合约时，才熔断到 WorkBuddy App 当前主模型，评分低不会触发回退。
 - 三项开场输入必须附带用户消息原文；系统/App 注入的路径和附件清单只算候选素材，不能确认重点素材或替代用户回答。
 - 每个 Rubric Dimension 和每轮 Judge 使用独立 CLI 进程与上下文；query 和三项 intake 会传给每个 Judge。

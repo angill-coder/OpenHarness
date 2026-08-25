@@ -218,7 +218,7 @@ fs.writeFileSync(path.join(pluginDir, "BUILD-INFO.json"), `${JSON.stringify({
   defaultJudgeProvider: "workbuddy",
   judgeDefaults,
   judgeFallbackProvider: "workbuddy",
-  judgeFallbackModelSource: "hostModel",
+  judgeFallbackModelSource: "workbuddy-trace-requestModelId",
   judgeFallbackTriggers: ["transport_error", "empty_response", "invalid_judge_json"],
   intakeUserEvidenceRequired: true,
   judgePromptTransport: "stdin",

@@ -22,6 +22,8 @@ const MEMORY_MANAGEMENT_PATTERN =
   /(?:记忆|memory).{0,24}(?:查看|列出|纠错|修正|改成|改为|调整|归类|分类|scope|合并|删除|忘记|清除)|(?:查看|列出|纠错|修正|改成|改为|调整|归类|分类|scope|合并|删除|忘记|清除).{0,24}(?:记忆|memory)/iu;
 const NEW_REPORT_PATTERN = /另一份|再写|重新写|新(?:的)?报告|换.{0,8}(?:报告|汇报|主题)/iu;
 const CANCEL_REPORT_PATTERN = /(?:不写了|不用写了|取消(?:这次|本次)?(?:报告|任务)?|先暂停|停止(?:写作|任务)?|算了)/iu;
+const WRITE_TOOL_PATTERN = /^(?:write|edit|create_file)$/iu;
+const REPORT_LOOP_SIDECAR_SUFFIX = ".session.json";
 
 function emptyState(sessionId) {
   return {
@@ -145,6 +147,31 @@ async function saveState(state) {
   await fs.rename(temporary, file);
 }
 
+async function writeReportLoopSessionSidecar(toolName, toolInput, sessionId) {
+  if (!WRITE_TOOL_PATTERN.test(toolName)) return;
+  const targetValue = toolInput?.file_path ?? toolInput?.filePath ?? toolInput?.path;
+  if (typeof targetValue !== "string" || !targetValue.trim()) return;
+  const target = path.resolve(targetValue.trim());
+  let stat;
+  try {
+    stat = await fs.stat(target);
+  } catch {
+    return;
+  }
+  if (!stat.isFile() || stat.size > 1024 * 1024) return;
+  let payload;
+  try {
+    payload = JSON.parse(await fs.readFile(target, "utf8"));
+  } catch {
+    return;
+  }
+  if (payload?.schemaVersion !== 2 || !payload?.v1ArtifactPath || !payload?.outputPath) return;
+  const sidecar = `${target}${REPORT_LOOP_SIDECAR_SUFFIX}`;
+  const temporary = `${sidecar}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, `${JSON.stringify({ version: 1, sessionId }, null, 2)}\n`, { mode: 0o600 });
+  await fs.rename(temporary, sidecar);
+}
+
 function printJson(payload) {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
@@ -197,6 +224,8 @@ async function onPostTool(input) {
   const result = input.tool_response !== undefined ? input.tool_response : input.tool_result;
   const successful = successfulToolResult(result);
   let message = "";
+
+  if (successful) await writeReportLoopSessionSidecar(actualToolName, toolInput, state.sessionId);
 
   if (successful && detectSkillActivation(toolName, toolInput)) state.active = true;
   if (successful && actualToolName.endsWith("report_loop_finish")) {

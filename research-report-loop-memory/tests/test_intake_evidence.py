@@ -1,4 +1,5 @@
 import copy
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,8 +15,14 @@ class IntakeEvidenceTests(unittest.TestCase):
         self.material.write_text("material", encoding="utf-8")
         self.v1 = self.root / "report-v1.md"
         self.v1.write_text("# report", encoding="utf-8")
+        self.previous_host_model = os.environ.get("RESEARCH_REPORT_LOOP_HOST_MODEL_ID")
+        os.environ["RESEARCH_REPORT_LOOP_HOST_MODEL_ID"] = "codewise-jump"
 
     def tearDown(self):
+        if self.previous_host_model is None:
+            os.environ.pop("RESEARCH_REPORT_LOOP_HOST_MODEL_ID", None)
+        else:
+            os.environ["RESEARCH_REPORT_LOOP_HOST_MODEL_ID"] = self.previous_host_model
         self.temporary.cleanup()
 
     def job(self):
