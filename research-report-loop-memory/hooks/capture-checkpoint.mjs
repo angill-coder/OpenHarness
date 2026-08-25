@@ -16,6 +16,8 @@ const REPORT_TASK_PATTERN =
 const REVISION_FEEDBACK_PATTERN =
   /(?:这份|这版|上一版|上版|刚才|刚刚|现有|当前(?:版本|稿件|报告)|初稿|终稿|你(?:刚才)?写的|上面(?:的)?).{0,40}(?:报告|汇报|正文|摘要|章节|段落|标题|内容|写法|表达)?|(?:正文|摘要|章节|段落|标题|表格|bullet).{0,24}(?:太|不够|过于|改成|改为|删掉|删除|去掉|保留|调整|压缩|展开|补充|缺少)|(?:太|不够|过于).{0,24}(?:简洁|冗长|啰嗦|口语|正式|完整|清晰|直接|深入|浅)/iu;
 const LONG_TERM_PREFERENCE_PATTERN = /以后|下次|长期|始终|所有报告|每份报告|都这样写|固定写法/iu;
+const REPORT_CONTEXT_PATTERN =
+  /(?:是指|指的是|都是指|都指|别名|简称|全称|身份是|汇报对象是)|(?:我是|用户是|我在|用户在|我来自|用户来自).{0,36}(?:分析师|研究员|产品经理|咨询顾问|公司|团队|部门)|(?:本项目|这个项目|当前项目|项目背景|项目口径|统一口径|项目术语)/iu;
 const MEMORY_MANAGEMENT_PATTERN =
   /(?:记忆|memory).{0,24}(?:查看|列出|纠错|修正|改成|改为|调整|归类|分类|scope|合并|删除|忘记|清除)|(?:查看|列出|纠错|修正|改成|改为|调整|归类|分类|scope|合并|删除|忘记|清除).{0,24}(?:记忆|memory)/iu;
 const NEW_REPORT_PATTERN = /另一份|再写|重新写|新(?:的)?报告|换.{0,8}(?:报告|汇报|主题)/iu;
@@ -29,6 +31,7 @@ function emptyState(sessionId) {
     reportProduced: false,
     capturePending: false,
     pendingFeedback: "",
+    pendingKind: "writing",
     updatedAt: new Date().toISOString(),
   };
 }
@@ -158,21 +161,27 @@ async function onPrompt(input) {
   const revisionFeedback = classified.relevant && REVISION_FEEDBACK_PATTERN.test(prompt)
     && !NEW_REPORT_PATTERN.test(prompt);
   const longTermPreference = classified.relevant && LONG_TERM_PREFERENCE_PATTERN.test(prompt);
+  const reportContext = state.active && REPORT_CONTEXT_PATTERN.test(prompt);
   const memoryManagement = MEMORY_MANAGEMENT_PATTERN.test(prompt) && !revisionFeedback;
 
   if (reportTask) state.active = true;
-  if (!reportTask && !memoryManagement && classified.relevant
-    && (state.reportProduced || revisionFeedback || (state.active && longTermPreference))) {
+  if (!reportTask && !memoryManagement && (classified.relevant || reportContext)
+    && (state.reportProduced || revisionFeedback || reportContext || (state.active && longTermPreference))) {
     state.active = true;
     state.capturePending = true;
-    state.pendingFeedback = classified.writingText;
+    state.pendingFeedback = classified.relevant ? classified.writingText : prompt;
+    state.pendingKind = classified.relevant ? "writing" : "context";
   }
 
   await saveState(state);
   const systemMessage = state.capturePending
     ? [
-      `检测到用户对报告写法的反馈：${state.pendingFeedback}。`,
-      "先落实当前报告修改，再通过 Agent/Task 委派 research-report-memory-curator 执行 operation=capture。",
+      state.pendingKind === "context"
+        ? `检测到报告相关背景或实体纠正：${state.pendingFeedback}。`
+        : `检测到用户对报告写法的反馈：${state.pendingFeedback}。`,
+      state.pendingKind === "context"
+        ? "无需为纯背景纠正改写报告；直接通过 Agent/Task 委派 research-report-memory-curator 执行 operation=capture。"
+        : "先落实当前报告修改，再通过 Agent/Task 委派 research-report-memory-curator 执行 operation=capture。",
       "这是独立的 research-report-memory-v2-0821（L0 Writing Episode / L1 Atom / L2B Rubrics），不是 WorkBuddy MEMORY.md 或项目日志。",
       "不要由主 Agent 直接调用 Memory MCP，也不要把 WorkBuddy 原生 Memory 当作替代写入。",
     ].join(" ")
@@ -203,10 +212,12 @@ async function onPostTool(input) {
     if (MEMORY_AGENT_MARKER.test(serialized)) {
       state.capturePending = false;
       state.pendingFeedback = "";
+      state.pendingKind = "writing";
       message = "Report Memory Capture 已完成。";
     } else if (MEMORY_AGENT_FAILURE_MARKER.test(serialized) || !successful) {
       state.capturePending = false;
       state.pendingFeedback = "";
+      state.pendingKind = "writing";
       message = "Report Memory Capture 明确失败；允许结束，但必须如实说明未写入专用记忆。";
     }
   }

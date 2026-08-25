@@ -2,66 +2,63 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const currentPath = path.join(root, "agents/research-report-memory-curator.md");
-const lettaPath = path.join(root, "prompts/research-report-memory-curator-v2-letta-first.md");
-const current = fs.readFileSync(currentPath, "utf8");
-const letta = fs.readFileSync(lettaPath, "utf8");
+const root = path.resolve(import.meta.dirname, "../..");
+const current = fs.readFileSync(path.join(root, "agents/research-report-memory-curator.md"), "utf8");
+const letta = fs.readFileSync(path.join(root, "prompts/research-report-memory-curator-v2-letta-first.md"), "utf8");
+const reflection = fs.readFileSync(path.join(root, "agents/research-report-memory-reflection.md"), "utf8");
 
-const sharedContract = [
-  "name: research-report-memory-curator",
-  "mcp__research-report-memory-v2-0821__writing_memory_recall",
-  "mcp__research-report-memory-v2-0821__writing_memory_capture_payload",
-  "mcp__research-report-memory-v2-0821__writing_memory_forget",
-  "traceability / structure / narrative / insight / coverage / expression",
-  "snapshotRevision",
-  "externalSourceId",
-  "conversationExcerpt",
-  "sourceRefs",
-  "sourceL1Ids",
-  "baseRubricIndex",
-  "rubricDocuments",
-  "rubricSetVersion",
-  "scopeValue",
-  "criterionKey",
-  "add / extend / override / disable",
-  "MEMORY_RECALL_COMPLETED",
-  "MEMORY_CAPTURE_COMPLETED",
-];
-
-test("both curator prompts keep the same domain and MCP contract", () => {
-  for (const marker of sharedContract) {
-    assert.ok(current.includes(marker), `current prompt is missing ${marker}`);
-    assert.ok(letta.includes(marker), `Letta-first prompt is missing ${marker}`);
-  }
+test("both Curator prompts keep the same Memory MCP and independent rubric contract", () => {
+  for (const prompt of [current, letta]) for (const marker of [
+    "name: research-report-memory-curator",
+    "writing_memory_recall",
+    "writing_memory_capture_payload",
+    "L0 Writing Episode",
+    "L1 Atom Memory",
+    "L2B Memory Rubrics",
+    "core / audience / project",
+    "statement",
+    "sourceRefs",
+    "sourceL1Ids",
+    "Base Rubrics",
+    "agentContext",
+    "agentContextDocument",
+    '"snapshotRevision"',
+    '"episode"',
+    '"conversationExcerpt"',
+    'sourceRefs:["new:<operationRef>"]',
+    "第二次仍失败",
+  ]) assert.ok(prompt.includes(marker), `prompt is missing ${marker}`);
 });
 
-test("Letta-first variant makes conservative experiential judgment the primary frame", () => {
-  for (const marker of [
-    "未来行为变得更好",
-    "综合全部相关经验",
-    "保持高层记忆精简",
-    "渐进更新",
-    "不新增或不更新 L2B",
-    "不要使用固定命中次数或打分阈值",
-  ]) assert.ok(letta.includes(marker), `Letta-first prompt is missing ${marker}`);
-});
-
-test("both curator prompts keep the integrated Rubric Set evolution contract", () => {
+test("both Curator prompts forbid guessed Capture fields and distinguish updated from unchanged L1 sources", () => {
   for (const prompt of [current, letta]) {
-    assert.match(prompt, /Base → core → audience → project/u);
-    assert.match(prompt, /dimension=personal/u);
-    assert.match(prompt, /operation=extend/u);
-    assert.match(prompt, /Base 红线不可 `override \/ disable`/u);
-    assert.match(prompt, /最多一次 Capture/u);
+    assert.match(prompt, /不使用 `episodes` 或 `feedbackReviewSnapshot`/u);
+    assert.match(prompt, /更新或合并既有 L1.*旧 `sourceL1Ids`/u);
   }
 });
 
-test("the active prompt remains the current V1 control", () => {
-  assert.match(current, /## 3\. Layer Filter/u);
-  assert.doesNotMatch(current, /Research Report Memory Curator — Letta-first Integrated Variant/u);
-  assert.match(letta, /Research Report Memory Curator — Letta-first Integrated Variant/u);
-  assert.doesNotMatch(letta, /## 3\. Layer Filter/u);
+test("Memory Agent is principle-based and does not pre-resolve Base", () => {
+  for (const prompt of [current, letta]) {
+    assert.match(prompt, /只维护独立 Memory Rubrics/u);
+    assert.match(prompt, /Resolution Judge/u);
+    assert.doesNotMatch(prompt, /dimension=personal|operation=extend|Base → core → audience → project/u);
+  }
+});
+
+test("Letta-first variant retains conservative experiential judgment", () => {
+  for (const marker of ["未来写作和评测变得更好", "作为一个整体理解", "最小且有长期价值的更新", "保持 L2B 不变", "不要使用固定命中次数、打分阈值", "不是要求每轮逐层晋升的流程"])
+    assert.ok(letta.includes(marker), `Letta-first prompt is missing ${marker}`);
+  assert.doesNotMatch(letta, /普通单次反馈通常停在 L1|明确强烈的长期要求可更快进入 L2B/u);
+});
+
+test("Letta-first variant retains current Scope and Capture safety contracts", () => {
+  for (const marker of ["当前任务的受众和项目不能反推 Scope", "范围不明时停在 L0", "L1 `action=update|merge` 使用复数 `targetIds`", "Capture 期间不得单独 Forget", "operation=manage"])
+    assert.ok(letta.includes(marker), `Letta-first prompt is missing current contract ${marker}`);
+});
+
+test("Reflection consolidates the same layers and only commits increments", () => {
+  for (const marker of ["Investigate", "Reflect", "Update", "Commit", '"mode": "reflection"', "reflectionThrough", "只维护独立 Memory Rubrics", "agentContext", "agentContextDocument"])
+    assert.ok(reflection.includes(marker), `Reflection prompt is missing ${marker}`);
+  assert.doesNotMatch(reflection, /dimension=personal|operation=extend/u);
 });

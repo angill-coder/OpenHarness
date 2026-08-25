@@ -7,169 +7,86 @@ import test from "node:test";
 import { RubricRepository } from "../src/rubric-repository.ts";
 import { scopeStorageKey } from "../src/scope-paths.ts";
 
-test("L2B uses Git-backed judge-ready JSON and incremental patches", async () => {
+const item = (id: string, statement: string, source = `atom-${id}`) => ({
+  id, statement, status: "active" as const, sourceL1Ids: [source],
+});
+
+test("L2B stores independent Git-backed Memory Rubrics and upserts in place", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-l2b-"));
   try {
     const repository = new RubricRepository(dataDir);
     await repository.initialize();
-    const initialHead = await repository.head();
-    const first = await repository.applyPatches([{
-      scope: "core",
-      upsertItems: [{
-        id: "MR-EXPRESSION-SUMMARY",
-        criterionKey: "structure.s1",
-        operation: "extend",
-        dimension: "structure",
-        label: "摘要精简",
-        desc: "摘要控制在2–3行，仅呈现核心观点与关键推导逻辑。",
-        effect: "摘要冗长会稀释核心结论。",
-        requirements: [{ key: "summary.max_lines", text: "摘要控制在2–3行" }],
-        redline: false,
-        status: "active",
-        sourceL1Ids: ["m_source_1"],
-      }],
-    }], "seed-summary-rubric");
-    assert.notEqual(first.head, initialHead);
+    const first = await repository.applyPatches([{ scope: "core", upsertItems: [item("MR-SUMMARY", "摘要保持精简。", "atom-1")] }], "seed");
     assert.equal(first.rubricSetVersion, "v1");
-    assert.deepEqual(first.changedPaths, ["system/rubrics.json"]);
-
-    await repository.applyPatches([{
-      scope: "core",
-      upsertItems: [{
-        id: "MR-EXPRESSION-SUMMARY",
-        criterionKey: "structure.s1",
-        operation: "extend",
-        dimension: "structure",
-        label: "摘要精简",
-        desc: "摘要控制在2–3行，仅呈现核心结论及其推导逻辑。",
-        effect: "摘要冗长会增加管理者阅读成本。",
-        requirements: [{ key: "summary.max_lines", text: "摘要控制在2–3行" }],
-        redline: false,
-        status: "active",
-        sourceL1Ids: ["m_source_1", "m_source_2"],
-      }],
-    }], "merge-summary-evidence");
-
+    await repository.applyPatches([{ scope: "core", upsertItems: [{ ...item("MR-SUMMARY", "摘要控制在 2–3 行。", "atom-1"), sourceL1Ids: ["atom-1", "atom-2"] }] }], "update");
     const document = (await repository.recall({}))[0];
-    assert.equal(document.rubrics.length, 1, "upsert replaces the item instead of appending a duplicate");
-    assert.deepEqual(document.rubrics[0].sourceL1Ids, ["m_source_1", "m_source_2"]);
-    assert.equal((await repository.manifest()).version, "v2");
-    const jsonPath = path.join(repository.root, "system", "rubrics.json");
-    assert.ok(fs.existsSync(jsonPath));
-    const markdownView = fs.readFileSync(path.join(repository.root, "views", "rubric-set.md"), "utf8");
-    assert.match(markdownView, /Research Report Rubric Set v2/u);
-    assert.match(markdownView, /Criterion: `structure\.s1`/u);
-    assert.equal(fs.existsSync(path.join(repository.root, "system", "l2-context.md")), false);
+    assert.equal(document.schemaVersion, 3);
+    assert.deepEqual(document.rubrics, [{ id: "MR-SUMMARY", statement: "摘要控制在 2–3 行。", status: "active", sourceL1Ids: ["atom-1", "atom-2"] }]);
+    const view = fs.readFileSync(path.join(repository.root, "views", "rubric-set.md"), "utf8");
+    assert.match(view, /Statement: 摘要控制在 2–3 行/u);
+    assert.doesNotMatch(view, /Criterion|Operation|Dimension/u);
     assert.match(execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd: repository.root, encoding: "utf8" }), /update L2B rubrics/u);
-  } finally {
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
 
-test("L2B repository keeps core, audience and project scopes separate", async () => {
+test("same-scope patches accumulate and scopes remain isolated", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-l2b-scope-"));
   try {
     const repository = new RubricRepository(dataDir);
     await repository.initialize();
-    await repository.applyPatches([{
-      scope: "audience",
-      scopeValue: "管理委员会",
-      upsertItems: [{
-        id: "MR-AUDIENCE-DECISION",
-        criterionKey: "structure.decision_first",
-        operation: "add",
-        dimension: "structure",
-        label: "讨论项前置",
-        desc: "报告开头直接给出需要受众讨论或决策的问题。",
-        effect: "讨论项后置会降低决策效率。",
-        redline: false,
-        status: "active",
-        sourceL1Ids: ["m_audience"],
-      }],
-    }, {
-      scope: "project",
-      scopeValue: "DS时长分析",
-      upsertItems: [{
-        id: "MR-PROJECT-METRIC",
-        criterionKey: "insight.duration_decomposition",
-        operation: "add",
-        dimension: "insight",
-        label: "时长驱动拆解",
-        desc: "核心结论分别说明频次与单次时长的贡献。",
-        effect: "不拆解会掩盖增长机制。",
-        redline: false,
-        status: "active",
-        sourceL1Ids: ["m_project"],
-      }],
-    }], "scoped-rubrics");
-
-    const documents = await repository.recall({ audience: "管理委员会", project: "DS时长分析" });
+    await repository.applyPatches([
+      { scope: "core", upsertItems: [item("MR-C1", "核心规则一。")] },
+      { scope: "core", upsertItems: [item("MR-C2", "核心规则二。")] },
+      { scope: "audience", scopeValue: "管理委员会", upsertItems: [item("MR-A", "先给讨论项。", "atom-a")] },
+      { scope: "project", scopeValue: "时长分析", upsertItems: [item("MR-P", "拆解频次和单次时长。", "atom-p")] },
+    ], "scoped");
+    const documents = await repository.recall({ audience: "管理委员会", project: "时长分析" });
     assert.deepEqual(documents.map((value) => value.scope).sort(), ["audience", "core", "project"]);
-    assert.equal(documents.flatMap((value) => value.rubrics).length, 2);
-  } finally {
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
+    assert.deepEqual(documents.find((value) => value.scope === "core")?.rubrics.map((value) => value.id).sort(), ["MR-C1", "MR-C2"]);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
 
-test("scope paths remain isolated when readable slugs collide", async () => {
+test("scope path hashes prevent readable-slug collisions", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-l2b-collision-"));
   try {
     const repository = new RubricRepository(dataDir);
     await repository.initialize();
     const values = ["A/B", "A-B", "A B"];
     assert.equal(new Set(values.map(scopeStorageKey)).size, 3);
-    for (const [index, scopeValue] of values.entries()) {
-      await repository.applyPatches([{
-        scope: "project",
-        scopeValue,
-        upsertItems: [{
-          id: `MR-PROJECT-${index}`,
-          criterionKey: `structure.project_${index}`,
-          operation: "add",
-          dimension: "structure",
-          label: `项目规则${index}`,
-          desc: `只适用于项目 ${scopeValue}`,
-          effect: "不得串入其他项目。",
-          redline: false,
-          status: "active",
-          sourceL1Ids: [`m_project_${index}`],
-        }],
-      }], `scope-collision-${index}`);
+    for (const [index, value] of values.entries()) await repository.applyPatches([{ scope: "project", scopeValue: value, upsertItems: [item(`MR-P-${index}`, `只适用于 ${value}。`)] }], `scope-${index}`);
+    for (const [index, value] of values.entries()) {
+      const project = (await repository.recall({ project: value })).find((entry) => entry.scope === "project");
+      assert.deepEqual(project?.rubrics.map((entry) => entry.id), [`MR-P-${index}`]);
     }
-
-    for (const [index, scopeValue] of values.entries()) {
-      const project = (await repository.recall({ project: scopeValue }))
-        .find((value) => value.scope === "project");
-      assert.equal(project?.scopeValue, scopeValue);
-      assert.deepEqual(project?.rubrics.map((item) => item.id), [`MR-PROJECT-${index}`]);
-    }
-  } finally {
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
 });
 
-test("recall rejects a document whose stored scopeValue does not match the requested project", async () => {
+test("legacy schema v2 is read as independent schema v3 without mutating history", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-l2b-legacy-"));
+  try {
+    const repository = new RubricRepository(dataDir);
+    await repository.initialize();
+    const target = path.join(repository.root, "system", "rubrics.json");
+    fs.writeFileSync(target, `${JSON.stringify({ schemaVersion: 2, scope: "core", rubrics: [{ id: "MR-OLD", desc: "旧版摘要要求。", status: "active", sourceL1Ids: ["atom-old"] }] }, null, 2)}\n`);
+    execFileSync("git", ["add", "--all"], { cwd: repository.root });
+    execFileSync("git", ["commit", "-m", "seed legacy"], { cwd: repository.root });
+    const document = (await repository.recall({}))[0];
+    assert.equal(document.schemaVersion, 3);
+    assert.equal(document.rubrics[0].statement, "旧版摘要要求。");
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+});
+
+test("recall rejects mismatched stored scopeValue", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-l2b-mismatch-"));
   try {
     const repository = new RubricRepository(dataDir);
     await repository.initialize();
-    const relativePath = `projects/${scopeStorageKey("A/B")}/rubrics.json`;
-    const target = path.join(repository.root, relativePath);
+    const relative = `projects/${scopeStorageKey("A/B")}/rubrics.json`;
+    const target = path.join(repository.root, relative);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, `${JSON.stringify({
-      schemaVersion: 2,
-      scope: "project",
-      scopeValue: "A-B",
-      rubrics: [],
-    }, null, 2)}\n`);
+    fs.writeFileSync(target, `${JSON.stringify({ schemaVersion: 3, scope: "project", scopeValue: "A-B", rubrics: [] }, null, 2)}\n`);
     execFileSync("git", ["add", "--all"], { cwd: repository.root });
-    execFileSync("git", ["commit", "-m", "seed mismatched scope"], { cwd: repository.root });
-
-    await assert.rejects(
-      repository.recall({ project: "A/B" }),
-      /rubric_scope_value_mismatch/u,
-    );
-  } finally {
-    fs.rmSync(dataDir, { recursive: true, force: true });
-  }
+    execFileSync("git", ["commit", "-m", "seed mismatch"], { cwd: repository.root });
+    await assert.rejects(repository.recall({ project: "A/B" }), /rubric_scope_value_mismatch/u);
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
 });

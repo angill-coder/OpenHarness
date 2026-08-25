@@ -15,7 +15,8 @@
   ],
   "skills": "./skills",
   "agents": [
-    "./agents/research-report-memory-curator.md"
+    "./agents/research-report-memory-curator.md",
+    "./agents/research-report-memory-reflection.md"
   ],
   "hooks": "./hooks/hooks.json",
   "mcpServers": "./.mcp.json"

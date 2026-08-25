@@ -39,7 +39,7 @@ test("legacy L0/L1 roots migrate but V1 high-level repositories are never adopte
   }
 });
 
-test("scheduled maintenance cannot perform first L0/L1 legacy migration", async () => {
+test("scheduled reflection cannot perform first L0/L1 legacy migration", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-v2-layout-guard-"));
   try {
     fs.mkdirSync(path.join(dataDir, "episodes"));

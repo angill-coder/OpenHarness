@@ -94,6 +94,25 @@ test("explicit Curator failure releases the checkpoint", (t) => {
   );
 });
 
+test("report context corrections trigger Curator without forcing a rewrite", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-context-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  const session_id = "capture-context";
+  invoke("post-tool", {
+    session_id,
+    tool_name: "Skill",
+    tool_input: { skill: "research-report-loop" },
+    tool_response: { status: "ok" },
+  }, stateDir);
+  const correction = invoke("prompt", {
+    session_id,
+    prompt: "A 和决策委员会 A 都是指同一位决策者。",
+  }, stateDir);
+  assert.match(correction.systemMessage, /报告相关背景或实体纠正/u);
+  assert.match(correction.systemMessage, /无需为纯背景纠正改写报告/u);
+  assert.match(correction.systemMessage, /research-report-memory-curator/u);
+});
+
 test("hook manifest contains no PreToolUse or report-loop/file gate", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "hooks/hooks.json"), "utf8"));
   assert.deepEqual(Object.keys(manifest.hooks).sort(), ["PostToolUse", "Stop", "UserPromptSubmit"]);

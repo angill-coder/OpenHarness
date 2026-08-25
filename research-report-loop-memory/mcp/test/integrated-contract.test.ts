@@ -23,7 +23,7 @@ test("integrated Skill uses the Python runner and versioned Rubric Set", () => {
   assert.match(orchestration, /~\/\.workbuddy\/MEMORY\.md/u);
 });
 
-test("integrated manifests register only Memory MCP and one Curator", () => {
+test("integrated manifests register only Memory MCP plus Curator and Reflection", () => {
   const skill = fs.readFileSync(path.join(root, "skills/research-report-loop/SKILL.md"), "utf8");
   const plugin = JSON.parse(
     fs.readFileSync(path.join(root, ".codebuddy-plugin/plugin.json"), "utf8"),
@@ -32,7 +32,10 @@ test("integrated manifests register only Memory MCP and one Curator", () => {
   assert.equal(plugin.name, "research-report-loop-memory");
   assert.equal(plugin.mcpServers, "./.mcp.json");
   assert.deepEqual(Object.keys(mcp.mcpServers), ["research-report-memory-v2-0821"]);
-  assert.deepEqual(plugin.agents, ["./agents/research-report-memory-curator.md"]);
+  assert.deepEqual(plugin.agents, [
+    "./agents/research-report-memory-curator.md",
+    "./agents/research-report-memory-reflection.md",
+  ]);
   assert.equal(plugin.hooks, "./hooks/hooks.json");
   assert.match(skill, /research-report-memory-v2-0821/u);
   assert.match(skill, /Report Loop .* MCP Server/su);
