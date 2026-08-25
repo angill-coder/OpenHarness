@@ -17,6 +17,9 @@ test("integrated Skill uses the Python runner and versioned Rubric Set", () => {
   );
   assert.match(skill, /Python Runner/su);
   assert.match(skill, /userInputEvidence/u);
+  assert.match(skill, /可被素材验证、反驳或修正的完整判断/u);
+  assert.match(skill, /不能只写成主题、关键词或短标题/u);
+  assert.match(skill, /不要为了适配多选框而压缩观点/u);
   assert.match(skill, /只启动一次 Python Runner/u);
   assert.match(skill, /finalArtifactPath/u);
   assert.match(loop, /"schemaVersion": 2/u);
