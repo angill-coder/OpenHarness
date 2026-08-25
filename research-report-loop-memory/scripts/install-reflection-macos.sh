@@ -5,8 +5,9 @@ PLUGIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 LABEL=com.research-report.loop-memory.reflection
 SCHEDULE_FILE="$HOME/Library/LaunchAgents/$LABEL.plist"
 LEGACY_SCHEDULE_FILE="$HOME/Library/LaunchAgents/com.research-report.loop-memory.maintenance.plist"
-LOG_DIR="$HOME/.research-report-memory-v2-0821/reflection-logs"
-REFLECTION_DIR="${RESEARCH_REPORT_MEMORY_V2_0821_DIR:-$HOME/.research-report-memory-v2-0821}/reflection"
+DATA_DIR="${RESEARCH_REPORT_MEMORY_V2_0821_DIR:-$HOME/.research-report-memory-v2-0821}"
+LOG_DIR="$DATA_DIR/reflection-logs"
+REFLECTION_DIR="$DATA_DIR/reflection"
 STABLE_RUNNER="$REFLECTION_DIR/reflection-current.sh"
 
 mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR" "$REFLECTION_DIR"

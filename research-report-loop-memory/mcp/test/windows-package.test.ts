@@ -23,6 +23,24 @@ test("Windows and macOS launchers discover WorkBuddy runtimes", () => {
   assert.match(pythonSh, /\.workbuddy\/binaries\/python\/versions/u);
 });
 
+test("Reflection schedules resolve the currently installed plugin on both platforms", () => {
+  const windowsInstaller = fs.readFileSync(path.join(root, "scripts/install-reflection-windows.ps1"), "utf8");
+  const windowsLauncher = fs.readFileSync(path.join(root, "scripts/reflection-current.ps1"), "utf8");
+  const windowsReflection = fs.readFileSync(path.join(root, "scripts/run-memory-reflection-workbuddy.ps1"), "utf8");
+  const macInstaller = fs.readFileSync(path.join(root, "scripts/install-reflection-macos.sh"), "utf8");
+  const macLauncher = fs.readFileSync(path.join(root, "scripts/reflection-current.sh"), "utf8");
+
+  assert.match(windowsInstaller, /reflection-current\.ps1/u);
+  assert.match(windowsInstaller, /RESEARCH_REPORT_MEMORY_V2_0821_DIR/u);
+  assert.match(windowsLauncher, /installed_plugins\.json/u);
+  assert.match(windowsLauncher, /research-report-loop-memory@/u);
+  assert.match(windowsLauncher, /run-memory-reflection-workbuddy\.ps1/u);
+  assert.match(windowsReflection, /Join-Path \$WorkBuddyConfig "binaries\\node\\versions"/u);
+  assert.match(macInstaller, /reflection-current\.sh/u);
+  assert.match(macInstaller, /DATA_DIR=/u);
+  assert.match(macLauncher, /installed_plugins\.json/u);
+});
+
 test("release builder emits platform-native Memory MCP and Hook configurations", () => {
   const builder = fs.readFileSync(path.join(root, "scripts/build-release.mjs"), "utf8");
   assert.match(builder, /--target-platform/u);
@@ -33,6 +51,10 @@ test("release builder emits platform-native Memory MCP and Hook configurations",
   assert.match(builder, /run-node\.sh/u);
   assert.match(builder, /capture-checkpoint\.mjs/u);
   assert.match(builder, /deepseek-v4-pro/u);
+  assert.match(builder, /reflection-current\.ps1/u);
+  assert.match(builder, /defaultJudgeProvider: "workbuddy"/u);
+  assert.match(builder, /judgeDefaults/u);
+  assert.doesNotMatch(builder, /--judge-provider/u);
   assert.match(builder, /mcp\/report_loop/u);
 });
 
@@ -47,5 +69,6 @@ test("Report Loop runs only through the Python runner", () => {
   const preflight = fs.readFileSync(path.join(root, "scripts/verify-mcp-contract.mjs"), "utf8");
   assert.match(preflight, /writing_memory_recall/u);
   assert.match(preflight, /writing_memory_capture_payload/u);
+  assert.doesNotMatch(preflight, /"writing_memory_capture"/u);
   assert.doesNotMatch(preflight, /report_loop_(?:start|submit|finish|status)/u);
 });

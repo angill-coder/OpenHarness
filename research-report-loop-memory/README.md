@@ -64,7 +64,7 @@ node scripts/migrate-rubric-scope-paths.mjs
 node scripts/migrate-rubric-scope-paths.mjs --apply
 ```
 
-安装包中的 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1` 用于注册每天 16:30 的 Reflection 任务；任务只连接本插件的 Memory MCP，不启动 Report Loop Judge。
+安装包中的 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1` 用于注册每天 16:30 的 Reflection 任务；任务通过稳定启动器自动解析当前已安装的插件版本，只连接本插件的 Memory MCP，不启动 Report Loop Judge。
 
 ## Windows x64 安装包
 

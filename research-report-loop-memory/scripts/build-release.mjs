@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { buildSync } from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, ".codebuddy-plugin/plugin.json"), "utf8"));
@@ -13,17 +14,10 @@ const curatorPromptExplicit = curatorPromptArgIndex >= 0;
 const curatorPromptVariant = curatorPromptExplicit
   ? process.argv[curatorPromptArgIndex + 1]
   : "v1-gate-first";
-const judgeProviderArgIndex = process.argv.indexOf("--judge-provider");
-const judgeProvider = judgeProviderArgIndex >= 0
-  ? process.argv[judgeProviderArgIndex + 1]
-  : "workbuddy";
 const judgeDefaults = {
   workbuddy: { model: "deepseek-v4-pro", effort: "medium" },
   codex: { model: "gpt-5.6-sol", effort: "medium" },
 };
-if (!judgeDefaults[judgeProvider]) {
-  throw new Error(`Unsupported judge provider: ${judgeProvider}`);
-}
 const noArchive = process.argv.includes("--no-archive");
 const targetPlatformArgIndex = process.argv.indexOf("--target-platform");
 const targetPlatform = targetPlatformArgIndex >= 0
@@ -75,34 +69,33 @@ fs.rmSync(zipPath, { force: true });
 fs.rmSync(`${zipPath}.sha256`, { force: true });
 fs.mkdirSync(path.join(pluginDir, "dist"), { recursive: true });
 
-const esbuildCli = path.join(root, "node_modules/esbuild/bin/esbuild");
-run(process.execPath, [esbuildCli,
-  "mcp/src/server.ts",
-  "--bundle",
-  "--platform=node",
-  "--format=esm",
-  "--target=node22",
-  `--outfile=${path.join(pluginDir, "dist/memory-server.mjs")}`,
-  '--banner:js=import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
-  `--alias:ai=${path.join(root, "scripts/build-stubs/ai.mjs")}`,
-  `--alias:@ai-sdk/openai=${path.join(root, "scripts/build-stubs/openai.mjs")}`,
-  `--alias:undici=${path.join(root, "scripts/build-stubs/undici.mjs")}`,
-  `--alias:@node-rs/jieba=${path.join(root, "scripts/build-stubs/jieba.mjs")}`,
-  `--alias:@node-rs/jieba/dict.js=${path.join(root, "scripts/build-stubs/jieba-dict.mjs")}`,
-  "--external:sqlite-vec",
-  "--external:node-llama-cpp",
-  "--external:openclaw/*",
-  "--legal-comments=none",
-]);
-run(process.execPath, [esbuildCli,
-  "hooks/capture-checkpoint.mjs",
-  "--bundle",
-  "--platform=node",
-  "--format=esm",
-  "--target=node22",
-  `--outfile=${path.join(pluginDir, "dist/capture-checkpoint.mjs")}`,
-  "--legal-comments=none",
-]);
+buildSync({
+  entryPoints: [path.join(root, "mcp/src/server.ts")],
+  outfile: path.join(pluginDir, "dist/memory-server.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
+  alias: {
+    ai: path.join(root, "scripts/build-stubs/ai.mjs"),
+    "@ai-sdk/openai": path.join(root, "scripts/build-stubs/openai.mjs"),
+    undici: path.join(root, "scripts/build-stubs/undici.mjs"),
+    "@node-rs/jieba": path.join(root, "scripts/build-stubs/jieba.mjs"),
+    "@node-rs/jieba/dict.js": path.join(root, "scripts/build-stubs/jieba-dict.mjs"),
+  },
+  external: ["sqlite-vec", "node-llama-cpp", "openclaw/*"],
+  legalComments: "none",
+});
+buildSync({
+  entryPoints: [path.join(root, "hooks/capture-checkpoint.mjs")],
+  outfile: path.join(pluginDir, "dist/capture-checkpoint.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  legalComments: "none",
+});
 for (const item of [
   ".codebuddy-plugin/plugin.json",
   "agents",
@@ -121,6 +114,7 @@ for (const item of [
   "scripts/run-memory-reflection-workbuddy.sh",
   "scripts/run-memory-reflection-workbuddy.ps1",
   "scripts/reflection-current.sh",
+  "scripts/reflection-current.ps1",
   "scripts/install-reflection-macos.sh",
   "scripts/install-reflection-windows.ps1",
   "scripts/macos-reflection-schedule.plist.template",
@@ -222,8 +216,7 @@ fs.writeFileSync(path.join(pluginDir, "BUILD-INFO.json"), `${JSON.stringify({
   curatorPromptVariant,
   judgeProviders: ["workbuddy", "codex"],
   defaultJudgeProvider: "workbuddy",
-  judgeModel: judgeDefaults[judgeProvider].model,
-  judgeEffort: judgeDefaults[judgeProvider].effort,
+  judgeDefaults,
   judgeFallbackProvider: "workbuddy",
   judgeFallbackModelSource: "hostModel",
   judgeFallbackTriggers: ["transport_error", "empty_response", "invalid_judge_json"],
@@ -280,6 +273,7 @@ if (fs.existsSync(zipPath)) {
 }
 process.stdout.write(
   `Release built: ${outputDir}\nCurator prompt: ${curatorPromptVariant}`
-  + `\nJudge: ${judgeProvider} / ${judgeDefaults[judgeProvider].model}`
-  + ` / ${judgeDefaults[judgeProvider].effort}\n`,
+  + `\nDefault Judge: workbuddy / ${judgeDefaults.workbuddy.model}`
+  + ` / ${judgeDefaults.workbuddy.effort}; optional: codex / ${judgeDefaults.codex.model}`
+  + ` / ${judgeDefaults.codex.effort}\n`,
 );

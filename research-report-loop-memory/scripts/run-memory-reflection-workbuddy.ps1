@@ -13,7 +13,7 @@ $WorkBuddyConfig = if ($env:CODEBUDDY_CONFIG_DIR) {
 
 $NodeBin = $env:WORKBUDDY_NODE
 if (-not $NodeBin) {
-    $NodeBin = Get-ChildItem (Join-Path $HOME ".workbuddy\binaries\node\versions") -Filter node.exe -Recurse -ErrorAction SilentlyContinue |
+    $NodeBin = Get-ChildItem (Join-Path $WorkBuddyConfig "binaries\node\versions") -Filter node.exe -Recurse -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not $NodeBin) {
