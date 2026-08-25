@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_MODEL = "deepseek-v4-flash-ioa"
+DEFAULT_MODEL = "deepseek-v4-pro"
 DEFAULT_EFFORT = "medium"
 MAC_WORKBUDDY_CLI = Path(
     "/Applications/WorkBuddy.app/Contents/Resources/"
@@ -72,7 +72,7 @@ def discover_command(explicit: str | None = None) -> tuple[str, ...]:
     )
 
 
-def _environment(command: tuple[str, ...]) -> dict[str, str]:
+def build_environment(command: tuple[str, ...]) -> dict[str, str]:
     environment = dict(os.environ)
     environment.update(
         {
@@ -170,15 +170,14 @@ def call_workbuddy(
         "1",
         "--effort",
         selected_effort,
-        prompt,
     ]
     started = time.monotonic()
     try:
         completed = subprocess.run(
             args,
             cwd=tempfile.gettempdir(),
-            env=_environment(command),
-            stdin=subprocess.DEVNULL,
+            env=build_environment(command),
+            input=prompt,
             capture_output=True,
             text=True,
             encoding="utf-8",

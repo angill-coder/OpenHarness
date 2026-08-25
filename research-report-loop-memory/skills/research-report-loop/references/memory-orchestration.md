@@ -12,7 +12,7 @@
 
 - 写作前不执行 Memory Recall。宿主 Agent只按本轮用户要求和 `research-report-loop` Skill 写初稿。
 - L2B 变化时，Memory Curator 用 Criterion Slot 和 Scope Overlay 升级 Git-backed Rubric Set；不为 Audience×Project 组合保存完整副本。
-- `report_loop_start` 只做确定性 Scope 解析并冻结：`Base → core → audience → project`。相同 Criterion 按高优先级覆盖，不同 Criterion 同时保留。
+- Python Runner 启动时只做确定性 Scope 解析并冻结：`Base → core → audience → project`。相同 Criterion 按高优先级覆盖，不同 Criterion 同时保留。
 - 同一 Loop 中 Memory 即使更新，也不改变已经冻结的 Rubrics；下一次新建 Loop 才读取新 Revision。
 
 ## 用户反馈后 Capture

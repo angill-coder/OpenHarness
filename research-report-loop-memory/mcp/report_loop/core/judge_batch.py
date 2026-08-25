@@ -219,9 +219,15 @@ def _full_case_context(case: Dict, report_text: str = "") -> Dict:
         if isinstance(case_input, dict)
         else ""
     )
+    original_user_query = str(
+        case.get("original_user_query") or user_requirements
+    ).strip()
+    intake_context = case.get("intake_context") or {}
     context = {
         "case_id": str(case.get("case_id") or ""),
         "user_requirements": user_requirements,
+        "original_user_query": original_user_query,
+        "intake_context": intake_context,
         "background": _background_context(case),
         "report_stats": _report_stats(report_text),
     }
@@ -245,7 +251,13 @@ def _dimension_case_context(
         return full
     return {
         key: full[key]
-        for key in ("case_id", "user_requirements", *keys)
+        for key in (
+            "case_id",
+            "user_requirements",
+            "original_user_query",
+            "intake_context",
+            *keys,
+        )
         if key in full
     }
 
@@ -263,6 +275,9 @@ def judge_cases(
     max_retries: int = DEFAULT_JUDGE_MAX_RETRIES,
     existing_judgments: Optional[Dict[str, Dict]] = None,
     dimension_parallel: int = DEFAULT_DIMENSION_PARALLELISM,
+    fallback_call_model: Optional[Callable[[str], str]] = None,
+    fallback_active: Optional[Callable[[], bool]] = None,
+    activate_fallback: Optional[Callable[[str], None]] = None,
 ) -> List[Dict]:
     """批量 Judge，返回与输入 case 顺序一致的逐 case 结果。
 
@@ -293,19 +308,29 @@ def judge_cases(
 
         def invoke(prompt: str, dimension: str, expected_ids):
             last_error = None
-            for retry_index in range(max_retries + 1):
+            attempt_index = 0
+
+            def call_once(route: str, retry_index: int):
+                nonlocal attempt_index, last_error
+                attempt_index += 1
                 call_started = time.monotonic()
                 trace = {
                     "dimension": dimension or "all",
-                    "attempt": retry_index + 1,
+                    "attempt": attempt_index,
                     "retry": retry_index,
+                    "route": route,
                     "promptSha256": hashlib.sha256(
                         prompt.encode("utf-8")
                     ).hexdigest(),
                     "promptChars": len(prompt),
                 }
                 try:
-                    response = call_model(prompt)
+                    selected_call = (
+                        fallback_call_model
+                        if route == "fallback"
+                        else call_model
+                    )
+                    response = selected_call(prompt)
                     trace["response"] = str(response)[:12000]
                     parsed = extract_json(response)
                     checks, reasoning = _validate_payload(
@@ -320,7 +345,7 @@ def judge_cases(
                     })
                     with trace_lock:
                         call_traces.append(trace)
-                    return checks, reasoning, retry_index + 1
+                    return checks, reasoning
                 except Exception as exc:
                     last_error = exc
                     trace.update({
@@ -332,6 +357,26 @@ def judge_cases(
                     })
                     with trace_lock:
                         call_traces.append(trace)
+                    return None
+
+            use_fallback = bool(
+                fallback_call_model
+                and fallback_active is not None
+                and fallback_active()
+            )
+            if fallback_call_model and not use_fallback:
+                primary_result = call_once("primary", 0)
+                if primary_result is not None:
+                    return (*primary_result, attempt_index)
+                if activate_fallback is not None:
+                    activate_fallback(str(last_error))
+                use_fallback = True
+
+            route = "fallback" if use_fallback else "primary"
+            for retry_index in range(max_retries + 1):
+                result = call_once(route, retry_index)
+                if result is not None:
+                    return (*result, attempt_index)
             raise RuntimeError(
                 "%s Judge 失败（已重试 %d 次）: %s"
                 % (dimension or "整份报告", max_retries, last_error)
@@ -473,6 +518,11 @@ def judge_cases(
                 "strategy": strategy,
                 "model_calls": model_calls,
             }
+            if fallback_call_model is not None:
+                judge_meta["fallback_used"] = any(
+                    trace.get("route") == "fallback"
+                    for trace in call_traces
+                )
             if strategy == JUDGE_STRATEGY_PER_DIMENSION:
                 judge_meta["dimension_parallelism"] = min(
                     max(1, int(dimension_parallel or 1)),
@@ -551,6 +601,9 @@ def judge_report(
     strategy: str = JUDGE_STRATEGY_SINGLE,
     max_retries: int = DEFAULT_JUDGE_MAX_RETRIES,
     existing_judgment: Optional[Dict] = None,
+    fallback_call_model: Optional[Callable[[str], str]] = None,
+    fallback_active: Optional[Callable[[], bool]] = None,
+    activate_fallback: Optional[Callable[[str], None]] = None,
     dimension_parallel: int = DEFAULT_DIMENSION_PARALLELISM,
 ) -> Dict:
     """Judge exactly one report while preserving the OpenHarness check contract."""
@@ -569,4 +622,7 @@ def judge_report(
         existing_judgments=(
             {case_id: existing_judgment} if existing_judgment else None
         ),
+        fallback_call_model=fallback_call_model,
+        fallback_active=fallback_active,
+        activate_fallback=activate_fallback,
     )[0]

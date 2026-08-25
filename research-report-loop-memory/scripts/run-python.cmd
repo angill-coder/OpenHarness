@@ -20,7 +20,7 @@ if not defined PYTHON_BIN (
 :validate
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
-"%PYTHON_BIN%" -c "import sys;raise SystemExit(0 if sys.version_info^>=(3,10) else 1)"
+"%PYTHON_BIN%" -c "import sys;raise SystemExit(0 if max((3,10),sys.version_info[:2])==sys.version_info[:2] else 1)"
 if errorlevel 1 (
   >&2 echo research-report-loop requires Python 3.10 or newer. Set WORKBUDDY_PYTHON to a compatible python.exe.
   exit /b 1

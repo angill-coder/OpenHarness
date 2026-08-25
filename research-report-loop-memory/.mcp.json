@@ -1,19 +1,5 @@
 {
   "mcpServers": {
-    "research-report-loop": {
-      "command": "sh",
-      "args": [
-        "${PLUGIN_ROOT}/scripts/run-python.sh",
-        "${PLUGIN_ROOT}/mcp/report_loop/server.py"
-      ],
-      "env": {
-        "RESEARCH_REPORT_LOOP_DIR": "~/.research-report-loop",
-        "RESEARCH_REPORT_LOOP_JUDGE_PROVIDER": "codex",
-        "RESEARCH_REPORT_LOOP_CODEX_MODEL": "gpt-5.6-sol",
-        "RESEARCH_REPORT_LOOP_JUDGE_EFFORT": "medium",
-        "RESEARCH_REPORT_MEMORY_V2_0821_DIR": "~/.research-report-memory-v2-0821"
-      }
-    },
     "research-report-memory-v2-0821": {
       "command": "sh",
       "args": [

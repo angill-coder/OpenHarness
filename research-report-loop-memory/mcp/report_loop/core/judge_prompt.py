@@ -54,6 +54,17 @@ def build_judge_prompt(rubric, report_text, case_context) -> str:
         ])
     context = dict(case_context or {})
     context.pop("human_report", None)
+    if context.get("original_user_query"):
+        lines.extend(["", "## Original user query", str(context["original_user_query"])])
+    if context.get("intake_context"):
+        intake = context["intake_context"]
+        lines.extend([
+            "", "## Confirmed intake context",
+            "Report background: " + str((intake.get("reportBackground") or {}).get("value") or ""),
+            "Material hypothesis: " + str((intake.get("materialHypothesis") or {}).get("value") or ""),
+            "Priority materials: " + json.dumps(intake.get("priorityMaterials") or [], ensure_ascii=False),
+            "Material paths identify priority inputs; paths themselves are not evidence.",
+        ])
     if context.get("user_requirements"):
         lines.extend([
             "",

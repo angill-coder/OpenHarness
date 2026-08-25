@@ -1,6 +1,6 @@
 {
   "name": "research-report-loop-memory",
-  "version": "1.0.0-mvp.11",
+  "version": "1.0.0-mvp.18",
   "description": "宿主 Agent 写作、按 Rubric Dimension 并行 Judge，并从用户反馈演进版本化 Rubric Set",
   "author": {
     "name": "Research Report Team"
@@ -18,33 +18,5 @@
     "./agents/research-report-memory-curator.md"
   ],
   "hooks": "./hooks/hooks.json",
-  "mcpServers": {
-    "research-report-loop": {
-      "command": "sh",
-      "args": [
-        "${CODEBUDDY_PLUGIN_ROOT}/scripts/run-python.sh",
-        "${CODEBUDDY_PLUGIN_ROOT}/mcp/report_loop/server.py"
-      ],
-      "env": {
-        "RESEARCH_REPORT_LOOP_DIR": "~/.research-report-loop",
-        "RESEARCH_REPORT_LOOP_JUDGE_PROVIDER": "codex",
-        "RESEARCH_REPORT_LOOP_CODEX_MODEL": "gpt-5.6-sol",
-        "RESEARCH_REPORT_LOOP_JUDGE_EFFORT": "medium",
-        "RESEARCH_REPORT_MEMORY_V2_0821_DIR": "~/.research-report-memory-v2-0821"
-      }
-    },
-    "research-report-memory-v2-0821": {
-      "command": "sh",
-      "args": [
-        "${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh",
-        "--import",
-        "tsx",
-        "${CODEBUDDY_PLUGIN_ROOT}/mcp/src/server.ts"
-      ],
-      "env": {
-        "RESEARCH_REPORT_MEMORY_V2_0821_DIR": "~/.research-report-memory-v2-0821",
-        "RESEARCH_REPORT_BASE_RUBRIC_PATH": "${CODEBUDDY_PLUGIN_ROOT}/rubrics/v2_rubric_research.json"
-      }
-    }
-  }
+  "mcpServers": "./.mcp.json"
 }

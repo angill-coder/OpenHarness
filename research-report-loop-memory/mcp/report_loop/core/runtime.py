@@ -20,7 +20,7 @@ from .judge_batch import (
     judge_report,
 )
 from .judge_prompt import build_judge_prompt
-from .judge_provider import call_judge, resolve_settings
+from .judge_provider import PROVIDER_WORKBUDDY, call_judge, resolve_settings
 from .memory_rubric_provider import MemoryRubricProvider
 from .report_failure import failure_report_from_checks
 from .report_loop_gate import evaluate_candidate_gate
@@ -56,6 +56,8 @@ class ReportLoopRuntime:
         judge_provider: str | None = None,
         judge_model: str | None = None,
         judge_effort: str | None = None,
+        judge_fallback_model: str | None = None,
+        judge_fallback_effort: str | None = None,
     ) -> None:
         plugin_root = Path(__file__).resolve().parents[3]
         configured = os.environ.get("RESEARCH_REPORT_LOOP_DIR", "~/.research-report-loop")
@@ -75,6 +77,18 @@ class ReportLoopRuntime:
             model=judge_model,
             effort=judge_effort,
         )
+        self.judge_fallback_settings = (
+            resolve_settings(
+                provider=PROVIDER_WORKBUDDY,
+                model=judge_fallback_model,
+                effort=judge_fallback_effort,
+            )
+            if judge_fallback_model
+            else None
+        )
+        self._judge_fallback_active = threading.Event()
+        self._judge_fallback_reason: str | None = None
+        self._custom_judge_call = judge_call
         self.judge_call = judge_call or (
             lambda prompt: call_judge(prompt, settings=self.judge_settings)
         )
@@ -88,6 +102,15 @@ class ReportLoopRuntime:
         target = (self.runs_dir / value).resolve()
         target.relative_to(self.runs_dir)
         return target
+
+    def run_directory(self, run_id: str) -> Path:
+        """Return the validated directory for a Report Loop run."""
+        return self._run_dir(run_id)
+
+    def deadline_at(self, run_id: str) -> float:
+        """Return the immutable wall-clock deadline for a run."""
+        with self._lock:
+            return float(self._load(run_id)["deadlineAt"])
 
     @staticmethod
     def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
@@ -147,28 +170,42 @@ class ReportLoopRuntime:
     def start(
         self,
         *,
-        task: str,
+        task: str = "",
+        originalUserQuery: str | None = None,
+        intakeContext: dict[str, Any] | None = None,
+        writerModel: dict[str, Any] | None = None,
         audience: str = "",
         project: str = "",
         artifactPath: str | None = None,
         structuredDataPath: str | None = None,
         targetScore: float = 5.0,
-        maxJudgedVersions: int = 3,
+        maxJudgedVersions: int | None = None,
         maxElapsedSeconds: int = 3600,
-        skillVersion: str = "research-report-loop/1.0.0-mvp.11",
+        skillVersion: str = "research-report-loop/1.0.0-mvp.18",
     ) -> dict[str, Any]:
-        task = str(task or "").strip()
-        if not task:
-            raise ReportLoopError("task 不能为空")
+        original_query = str(originalUserQuery or task or "").strip()
+        if not original_query:
+            raise ReportLoopError("originalUserQuery 不能为空")
+        intake = copy.deepcopy(intakeContext or {})
+        if intakeContext is not None:
+            if not isinstance(intakeContext, dict):
+                raise ReportLoopError("intakeContext 必须是对象")
+            for field in ("reportBackground", "materialHypothesis"):
+                item = intake.get(field)
+                if not isinstance(item, dict) or not str(item.get("value") or "").strip():
+                    raise ReportLoopError(f"intakeContext.{field}.value 不能为空")
+            materials = intake.get("priorityMaterials")
+            if not isinstance(materials, list) or not materials:
+                raise ReportLoopError("intakeContext.priorityMaterials 至少包含一个文件")
+        task = str(task or "").strip() or original_query
         target = float(targetScore)
-        maximum = int(maxJudgedVersions)
         elapsed = int(maxElapsedSeconds)
         if target != 5.0:
-            raise ReportLoopError("当前 MVP 的目标分固定为 5.0")
-        if maximum != 3:
-            raise ReportLoopError("当前 MVP 最多评测 3 个报告版本")
-        if elapsed < 1:
-            raise ReportLoopError("maxElapsedSeconds 必须大于 0")
+            raise ReportLoopError("Report Loop 目标分固定为 5.0")
+        if maxJudgedVersions is not None and int(maxJudgedVersions) < 1:
+            raise ReportLoopError("maxJudgedVersions 必须为正整数或 null")
+        if elapsed != 3600:
+            raise ReportLoopError("Report Loop 最长运行时间固定为 3600 秒")
         if artifactPath:
             self._read_artifact(artifactPath, minimum_bytes=1)
         structured_data = self._load_structured_data(structuredDataPath)
@@ -199,9 +236,12 @@ class ReportLoopRuntime:
                 self._atomic_json(directory / "structured_data.json", structured_data)
             created = _now()
             run = {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "id": run_id,
                 "task": task,
+                "originalUserQuery": original_query,
+                "intakeContext": intake,
+                "writerModel": copy.deepcopy(writerModel or {}),
                 "audience": str(audience or "").strip(),
                 "project": str(project or "").strip(),
                 "initialArtifactPath": str(Path(artifactPath).expanduser().resolve()) if artifactPath else None,
@@ -221,15 +261,28 @@ class ReportLoopRuntime:
                 "judgeProvider": self.judge_settings.provider,
                 "judgeModel": self.judge_settings.model,
                 "judgeEffort": self.judge_settings.effort,
+                "judgeFallbackProvider": (
+                    self.judge_fallback_settings.provider
+                    if self.judge_fallback_settings else None
+                ),
+                "judgeFallbackModel": (
+                    self.judge_fallback_settings.model
+                    if self.judge_fallback_settings else None
+                ),
+                "judgeFallbackEffort": (
+                    self.judge_fallback_settings.effort
+                    if self.judge_fallback_settings else None
+                ),
                 "judgeStrategy": JUDGE_STRATEGY_PER_DIMENSION,
                 "judgeParallelism": judge_parallelism,
                 "stopPolicy": {
                     "targetScore": 5.0,
-                    "maxJudgedVersions": 3,
+                    "maxJudgedVersions": None,
                     "maxNoImprovement": 2,
                     "maxElapsedSeconds": elapsed,
                 },
                 "stopState": {"stopped": False, "code": None, "reason": None},
+                "deadlineAt": created + elapsed,
                 "status": "started",
                 "currentVersion": None,
                 "noImprovementStreak": 0,
@@ -243,8 +296,10 @@ class ReportLoopRuntime:
                 "judgeProvider": run["judgeProvider"],
                 "judgeModel": run["judgeModel"],
                 "judgeEffort": run["judgeEffort"],
+                "judgeFallbackProvider": run["judgeFallbackProvider"],
+                "judgeFallbackModel": run["judgeFallbackModel"],
                 "judgeParallelism": run["judgeParallelism"],
-                "maxJudgedVersions": 3,
+                "maxJudgedVersions": None,
                 "memoryRevision": run["memoryRevision"],
                 "memoryRubricIds": run["memoryRubricIds"],
             })
@@ -255,6 +310,8 @@ class ReportLoopRuntime:
             "judgeProvider": run["judgeProvider"],
             "judgeModel": run["judgeModel"],
             "judgeEffort": run["judgeEffort"],
+            "judgeFallbackProvider": run["judgeFallbackProvider"],
+            "judgeFallbackModel": run["judgeFallbackModel"],
             "judgeStrategy": run["judgeStrategy"],
             "judgeParallelism": run["judgeParallelism"],
             "memoryRevision": run["memoryRevision"],
@@ -316,9 +373,7 @@ class ReportLoopRuntime:
             reason = ("target_reached", "总分达到 5.0，且没有红线或硬门槛失败")
         elif int(run.get("noImprovementStreak") or 0) >= int(policy["maxNoImprovement"]):
             reason = ("no_improvement", "连续两个候选版本未被采纳")
-        elif len(run.get("revisions") or []) >= int(policy["maxJudgedVersions"]):
-            reason = ("max_versions_reached", "已完成最多 3 个报告版本的评测")
-        elif time.time() - float(run["createdAt"]) >= int(policy["maxElapsedSeconds"]):
+        elif time.time() >= float(run["deadlineAt"]):
             reason = ("time_budget_exhausted", "Report Loop 已达到最长运行时间")
         run["stopState"] = {
             "stopped": reason is not None,
@@ -365,7 +420,9 @@ class ReportLoopRuntime:
                     else:
                         preserve.append({
                             "checkId": check_id,
+                            "dimension": definition["dimension"],
                             "label": definition["label"],
+                            "requirement": definition["requirement"],
                         })
                 else:
                     repair.append({
@@ -406,13 +463,13 @@ class ReportLoopRuntime:
             ),
         }
 
-    def submit(self, *, runId: str, artifactPath: str) -> dict[str, Any]:
+    def submit(
+        self, *, runId: str, artifactPath: str, timeoutSeconds: float | None = None
+    ) -> dict[str, Any]:
         with self._lock:
             run = self._load(runId)
             if (run.get("stopState") or {}).get("stopped"):
                 raise ReportLoopError("Report Loop 已停止，不能再提交新版本")
-            if len(run.get("revisions") or []) >= 3:
-                raise ReportLoopError("Report Loop 已达到最多 3 个版本")
             minimum = int(os.environ.get("RESEARCH_REPORT_LOOP_MIN_REPORT_BYTES", "500"))
             source_path, report_text = self._read_artifact(artifactPath, minimum_bytes=minimum)
             version = f"v{len(run.get('revisions') or []) + 1}"
@@ -426,11 +483,40 @@ class ReportLoopRuntime:
                 )
             case = {
                 "case_id": runId,
+                "original_user_query": run.get("originalUserQuery") or run["task"],
+                "intake_context": copy.deepcopy(run.get("intakeContext") or {}),
                 "audience": run.get("audience"),
                 "input": {"intake": run["task"]},
                 "turns": [{"round": 0, "label": "report_task", "prompt": run["task"]}],
                 "structured_data": structured_data,
             }
+            remaining = max(0.0, float(run["deadlineAt"]) - time.time())
+            requested = remaining if timeoutSeconds is None else min(
+                remaining, float(timeoutSeconds)
+            )
+            if requested <= 0:
+                raise ReportLoopError("报告循环已达到最长运行时间")
+            judge_call = self._custom_judge_call or (
+                lambda prompt: call_judge(
+                    prompt, settings=self.judge_settings, timeout_seconds=requested
+                )
+            )
+            fallback_call = (
+                (
+                    lambda prompt: call_judge(
+                        prompt,
+                        settings=self.judge_fallback_settings,
+                        timeout_seconds=requested,
+                    )
+                )
+                if self.judge_fallback_settings
+                else None
+            )
+
+            def activate_fallback(reason: str) -> None:
+                if not self._judge_fallback_active.is_set():
+                    self._judge_fallback_reason = reason
+                    self._judge_fallback_active.set()
 
         try:
             result = judge_report(
@@ -438,11 +524,14 @@ class ReportLoopRuntime:
                 report_text,
                 rubric,
                 build_judge_prompt,
-                self.judge_call,
+                judge_call,
                 extract_json,
                 strategy=JUDGE_STRATEGY_PER_DIMENSION,
                 max_retries=DEFAULT_JUDGE_MAX_RETRIES,
                 dimension_parallel=int(run.get("judgeParallelism") or DEFAULT_DIMENSION_PARALLELISM),
+                fallback_call_model=fallback_call,
+                fallback_active=self._judge_fallback_active.is_set,
+                activate_fallback=activate_fallback,
             )
         except Exception as exc:
             with self._lock:
@@ -458,6 +547,12 @@ class ReportLoopRuntime:
             raise ReportLoopError(f"Judge 未完成: {error}")
 
         scored = score_labeled_check_judgment(result.get("checks") or {}, rubric)
+        fallback_used = bool((result.get("judge_meta") or {}).get("fallback_used"))
+        actual_settings = (
+            self.judge_fallback_settings
+            if fallback_used and self.judge_fallback_settings
+            else self.judge_settings
+        )
         judgment = {
             "checks": result.get("checks") or {},
             "checkScores": normalize_check_scores(result.get("checks") or {}),
@@ -469,9 +564,11 @@ class ReportLoopRuntime:
             "caseFailedGate": scored.get("case_failed_gate", False),
             "judgeMeta": result.get("judge_meta") or {},
             "judgeTrace": result.get("judge_trace") or {},
-            "judgeProvider": run["judgeProvider"],
-            "judgeModel": run["judgeModel"],
-            "judgeEffort": run["judgeEffort"],
+            "judgeProvider": actual_settings.provider,
+            "judgeModel": actual_settings.model,
+            "judgeEffort": actual_settings.effort,
+            "judgeFallbackUsed": fallback_used,
+            "judgeFallbackReason": self._judge_fallback_reason if fallback_used else None,
             "createdAt": _now(),
         }
         failure_report = failure_report_from_checks(
@@ -553,17 +650,23 @@ class ReportLoopRuntime:
                     if value not in {"met", 1, 1.0}
                 ],
                 "revisionBrief": brief,
+                "adoptionGate": item["adoptionGate"],
                 "nextAction": "deliver" if run["stopState"]["stopped"] else "revise",
                 "stopReason": run["stopState"]["reason"],
                 "stopCode": run["stopState"]["code"],
                 "bestVersion": run["currentVersion"],
                 "bestArtifactPath": str((run_dir / best["reportPath"]).resolve()),
                 "judgedVersions": len(run["revisions"]),
-                "maxJudgedVersions": 3,
+                "maxJudgedVersions": None,
             }
 
     def finish(self, *, runId: str, reason: str | None = None) -> dict[str, Any]:
-        allowed_reasons = {"judge_unavailable", "user_cancelled"}
+        allowed_reasons = {
+            "judge_unavailable",
+            "rewrite_unavailable",
+            "user_cancelled",
+            "time_budget_exhausted",
+        }
         with self._lock:
             run = self._load(runId)
             if not run.get("currentVersion"):
@@ -577,11 +680,12 @@ class ReportLoopRuntime:
                 run["stopState"] = {
                     "stopped": True,
                     "code": reason,
-                    "reason": (
-                        "Judge 基础设施不可用，保留当前最佳已评测版本"
-                        if reason == "judge_unavailable"
-                        else "用户取消后续迭代"
-                    ),
+                    "reason": {
+                        "judge_unavailable": "Judge infrastructure unavailable; returning the best judged version",
+                        "rewrite_unavailable": "Rewriter infrastructure unavailable; returning the best judged version",
+                        "user_cancelled": "User cancelled further iteration",
+                        "time_budget_exhausted": "Report Loop reached its 60-minute deadline",
+                    }[reason],
                 }
                 run["status"] = "completed"
                 self._save(run)
@@ -596,6 +700,10 @@ class ReportLoopRuntime:
                 "stopCode": run["stopState"]["code"],
                 "stopReason": run["stopState"]["reason"],
                 "judgedVersions": len(run["revisions"]),
+                "judgeProvider": best["judgment"]["judgeProvider"],
+                "judgeModel": best["judgment"]["judgeModel"],
+                "judgeEffort": best["judgment"]["judgeEffort"],
+                "judgeFallbackUsed": bool(best["judgment"].get("judgeFallbackUsed")),
             }
 
     def status(self, *, runId: str) -> dict[str, Any]:
