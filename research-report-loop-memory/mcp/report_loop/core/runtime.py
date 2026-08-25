@@ -26,6 +26,7 @@ from .report_failure import failure_report_from_checks
 from .report_loop_gate import evaluate_candidate_gate
 from .report_scoring import normalize_check_scores, score_labeled_check_judgment
 from .rubric_compiler import compile_rubric
+from .rubric_resolution import failed_resolution_plan, resolve_memory_rubrics
 from .workbuddy_cli import extract_json
 
 
@@ -215,11 +216,38 @@ class ReportLoopRuntime:
         base_rubric = json.loads(base_rubric_raw)
         if not base_rubric.get("dimensions"):
             raise ReportLoopError("基础 Rubrics 没有 dimensions")
-        rubric, memory_snapshot = compile_rubric(
+        memory_snapshot = (
+            self.memory_provider.load(
+                audience=str(audience or "").strip(),
+                project=str(project or "").strip(),
+            )
+            if self.memory_provider is not None
+            else {
+                "status": "disabled", "revision": None, "rubricSetVersion": None,
+                "documents": [], "items": [], "warnings": [],
+            }
+        )
+        try:
+            resolution_plan = resolve_memory_rubrics(
+                base_rubric,
+                memory_snapshot,
+                task=task,
+                audience=str(audience or "").strip(),
+                project=str(project or "").strip(),
+                call_model=self.judge_call,
+                extract_json=extract_json,
+                load_sources=(
+                    self.memory_provider.load_sources
+                    if self.memory_provider is not None
+                    else None
+                ),
+            )
+        except Exception as exc:
+            resolution_plan = failed_resolution_plan(memory_snapshot, str(exc))
+        rubric, compile_metadata = compile_rubric(
             base_rubric,
-            provider=self.memory_provider,
-            audience=str(audience or "").strip(),
-            project=str(project or "").strip(),
+            memory_snapshot=memory_snapshot,
+            resolution_plan=resolution_plan,
         )
         rubric_raw = json.dumps(rubric, ensure_ascii=False, indent=2) + "\n"
         judge_parallelism = max(
@@ -230,6 +258,9 @@ class ReportLoopRuntime:
         directory = self._run_dir(run_id)
         with self._lock:
             directory.mkdir(parents=True, exist_ok=False, mode=0o700)
+            self._atomic_json(directory / "base_rubric.json", base_rubric)
+            self._atomic_json(directory / "memory_rubrics.json", memory_snapshot)
+            self._atomic_json(directory / "rubric_resolution_plan.json", resolution_plan)
             frozen_rubric = directory / "compiled_rubric.json"
             frozen_rubric.write_text(rubric_raw, encoding="utf-8")
             if structured_data is not None:
@@ -248,16 +279,19 @@ class ReportLoopRuntime:
                 "structuredDataPath": "structured_data.json" if structured_data is not None else None,
                 "skillVersion": str(skillVersion or ""),
                 "rubricVersion": rubric.get("version"),
-                "baseRubricVersion": memory_snapshot.get("baseRubricVersion"),
-                "rubricSetVersion": memory_snapshot.get("rubricSetVersion"),
-                "rubricResolverHash": memory_snapshot.get("resolverHash"),
-                "personalRubricsActive": bool(memory_snapshot.get("personalActive")),
+                "baseRubricVersion": compile_metadata.get("baseRubricVersion"),
+                "rubricSetVersion": compile_metadata.get("rubricSetVersion"),
+                "rubricResolverHash": compile_metadata.get("resolverHash"),
+                "resolutionStatus": compile_metadata.get("resolutionStatus"),
+                "resolutionPlanHash": compile_metadata.get("resolutionPlanHash"),
+                "resolutionPromptVersion": compile_metadata.get("resolutionPromptVersion"),
                 "rubricSha256": hashlib.sha256(rubric_raw.encode("utf-8")).hexdigest(),
                 "memoryRevision": memory_snapshot.get("revision"),
                 "memoryRubricIds": [
                     item.get("id") for item in memory_snapshot.get("items") or []
                 ],
-                "rubricCompile": memory_snapshot,
+                "appliedMemoryRubricIds": compile_metadata.get("appliedMemoryRubricIds") or [],
+                "rubricCompile": compile_metadata,
                 "judgeProvider": self.judge_settings.provider,
                 "judgeModel": self.judge_settings.model,
                 "judgeEffort": self.judge_settings.effort,
@@ -302,6 +336,8 @@ class ReportLoopRuntime:
                 "maxJudgedVersions": None,
                 "memoryRevision": run["memoryRevision"],
                 "memoryRubricIds": run["memoryRubricIds"],
+                "resolutionStatus": run["resolutionStatus"],
+                "resolutionPlanHash": run["resolutionPlanHash"],
             })
         return {
             "status": "started",
@@ -318,7 +354,9 @@ class ReportLoopRuntime:
             "memoryRubricIds": run["memoryRubricIds"],
             "rubricSetVersion": run["rubricSetVersion"],
             "rubricResolverHash": run["rubricResolverHash"],
-            "personalRubricsActive": run["personalRubricsActive"],
+            "resolutionStatus": run["resolutionStatus"],
+            "resolutionPlanHash": run["resolutionPlanHash"],
+            "appliedMemoryRubricIds": run["appliedMemoryRubricIds"],
             "nextAction": "submit",
         }
 

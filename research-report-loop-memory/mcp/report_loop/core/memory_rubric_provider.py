@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import subprocess
 import unicodedata
 from pathlib import Path
@@ -80,14 +81,15 @@ class MemoryRubricProvider:
         if completed.returncode != 0:
             return None
         value = json.loads(completed.stdout)
-        if not isinstance(value, dict) or value.get("schemaVersion") not in (1, 2):
+        if not isinstance(value, dict) or value.get("schemaVersion") not in (1, 2, 3):
             raise ValueError(f"invalid memory rubric document: {relative_path}")
-        value["schemaVersion"] = 2
+        value["schemaVersion"] = 3
         value["rubrics"] = [
             {
-                **item,
-                "criterionKey": str(item.get("criterionKey") or item.get("id") or ""),
-                "operation": str(item.get("operation") or "add"),
+                "id": str(item.get("id") or "").strip(),
+                "statement": str(item.get("statement") or item.get("desc") or "").strip(),
+                "status": str(item.get("status") or "active"),
+                "sourceL1Ids": list(item.get("sourceL1Ids") or []),
             }
             for item in value.get("rubrics") or []
             if isinstance(item, dict)
@@ -111,6 +113,45 @@ class MemoryRubricProvider:
         if not isinstance(value, dict) or value.get("schemaVersion") != 1:
             raise ValueError("invalid rubric set manifest")
         return value
+
+    def load_sources(self, source_l1_ids: list[str]) -> list[dict[str, Any]]:
+        """Read only the exact L1 atoms referenced by selected L2B rubrics."""
+
+        requested = list(dict.fromkeys(
+            str(value or "").strip() for value in source_l1_ids if str(value or "").strip()
+        ))
+        if not requested:
+            return []
+        database = self.memory_data_dir / "l0-l1-memory" / "memorycore" / "vectors.db"
+        if not database.is_file():
+            return []
+        placeholders = ",".join("?" for _ in requested)
+        try:
+            with sqlite3.connect(f"{database.resolve().as_uri()}?mode=ro", uri=True, timeout=3) as connection:
+                rows = connection.execute(
+                    f"""SELECT record_id, content, metadata_json
+                        FROM l1_records
+                        WHERE record_id IN ({placeholders})""",
+                    requested,
+                ).fetchall()
+        except sqlite3.Error:
+            return []
+        by_id: dict[str, dict[str, Any]] = {}
+        for record_id, content, metadata_raw in rows:
+            try:
+                metadata = json.loads(metadata_raw or "{}")
+            except json.JSONDecodeError:
+                metadata = {}
+            if metadata.get("domain") != "report_writing":
+                continue
+            by_id[str(record_id)] = {
+                "id": str(record_id),
+                "content": str(content or "").strip(),
+                "scope": metadata.get("scope"),
+                "scopeValue": metadata.get("scopeValue"),
+                "lifecycle": metadata.get("lifecycle"),
+            }
+        return [by_id[value] for value in requested if value in by_id]
 
     def load(self, *, audience: str = "", project: str = "") -> dict[str, Any]:
         if not self.repository.exists():
@@ -174,11 +215,22 @@ class MemoryRubricProvider:
                     "scopeValue": scope_value or None,
                     "itemIds": item_ids,
                 })
-            items = sorted(
+            ordered = sorted(
                 selected,
                 key=lambda item: (
                     _SCOPE_PRIORITY[str(item.get("scope") or "core")],
-                    str(item.get("criterionKey") or ""),
+                    str(item["id"]),
+                ),
+            )
+            # The same stable Memory ID may be refined at a narrower Scope.
+            # Keep only the most specific selected version before model resolution.
+            by_id: dict[str, dict[str, Any]] = {}
+            for item in ordered:
+                by_id[str(item["id"])] = item
+            items = sorted(
+                by_id.values(),
+                key=lambda item: (
+                    _SCOPE_PRIORITY[str(item.get("scope") or "core")],
                     str(item["id"]),
                 ),
             )
