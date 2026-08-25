@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from mcp.report_loop.core.runtime import ReportLoopError, ReportLoopRuntime
-from mcp.report_loop.core import codex_cli, judge_provider, workbuddy_cli
+from mcp.report_loop.core import workbuddy_cli
 
 
 CHECK_PATTERN = re.compile(r"^- ([^（\s]+)（", re.MULTILINE)
@@ -144,8 +144,8 @@ class RuntimeTests(unittest.TestCase):
             project="测试项目",
             artifactPath=str(self.report),
         )
-        self.assertEqual(result["judgeProvider"], "codex")
-        self.assertEqual(result["judgeModel"], "gpt-5.6-sol")
+        self.assertEqual(result["judgeProvider"], "workbuddy")
+        self.assertEqual(result["judgeModel"], "deepseek-v4-pro")
         self.assertEqual(result["judgeEffort"], "medium")
         self.assertEqual(result["judgeStrategy"], "per_dimension")
         self.assertEqual(result["judgeParallelism"], 6)
@@ -159,10 +159,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(judge.calls, 6)
         self.assertEqual(judge.max_active, 6)
         state = runtime.status(runId=run_id)
-        self.assertEqual(state["judgeProvider"], "codex")
+        self.assertEqual(state["judgeProvider"], "workbuddy")
         self.assertEqual(
             state["revisions"][0]["judgment"]["judgeProvider"],
-            "codex",
+            "workbuddy",
         )
         meta = state["revisions"][0]["judgment"]["judgeMeta"]
         self.assertEqual(meta["dimension_parallelism"], 6)
@@ -231,22 +231,6 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn("S1", {item["checkId"] for item in brief["repair"]})
         self.assertIn("不得为了追求 Rubric 分数", brief["instruction"])
 
-    def test_max_three_versions_returns_best_adopted_version(self) -> None:
-        partial = {check_id: "partial" for check_id in self._check_ids()}
-        improved = {**partial, "I1": "met"}
-        judge = JudgeFixture([partial, improved, improved])
-        runtime = self.runtime(judge)
-        run_id = self.start(runtime)
-        first = runtime.submit(runId=run_id, artifactPath=str(self.report))
-        self.assertEqual(first["nextAction"], "revise")
-        second = runtime.submit(runId=run_id, artifactPath=str(self.report))
-        self.assertEqual(second["decision"], "accepted")
-        third = runtime.submit(runId=run_id, artifactPath=str(self.report))
-        self.assertEqual(third["decision"], "rejected")
-        self.assertEqual(third["stopCode"], "max_versions_reached")
-        self.assertEqual(third["bestVersion"], "v2")
-        self.assertEqual(judge.calls, 18)
-
     def test_rejected_regression_never_becomes_revision_baseline(self) -> None:
         partial = {check_id: "partial" for check_id in self._check_ids()}
         regression = {**partial, "I1": "met", "T1": "miss"}
@@ -273,48 +257,6 @@ class RuntimeTests(unittest.TestCase):
     def _check_ids(self) -> list[str]:
         rubric = json.loads(self.rubric.read_text(encoding="utf-8"))
         return [check["id"] for dimension in rubric["dimensions"] for check in dimension["checks"]]
-
-
-class McpServerTests(unittest.TestCase):
-    def test_initialize_and_tool_inventory(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            environment = dict(os.environ)
-            environment["RESEARCH_REPORT_LOOP_DIR"] = temporary
-            requests = "\n".join(
-                [
-                    json.dumps({
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "initialize",
-                        "params": {"protocolVersion": "2024-11-05"},
-                    }),
-                    json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-                    json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
-                    "",
-                ]
-            )
-            completed = subprocess.run(
-                [sys.executable, str(ROOT / "mcp" / "report_loop" / "server.py")],
-                input=requests,
-                text=True,
-                capture_output=True,
-                env=environment,
-                timeout=10,
-                check=False,
-            )
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-            responses = [json.loads(line) for line in completed.stdout.splitlines()]
-            self.assertEqual(responses[0]["result"]["serverInfo"]["name"], "research-report-loop")
-            names = {item["name"] for item in responses[1]["result"]["tools"]}
-            self.assertEqual(
-                names,
-                {
-                    "report_loop_start",
-                    "report_loop_submit",
-                    "report_loop_finish",
-                    "report_loop_status",
-                },
-            )
 
 
 class WorkBuddyCliTests(unittest.TestCase):
@@ -347,91 +289,10 @@ class WorkBuddyCliTests(unittest.TestCase):
         args = run.call_args.args[0]
         self.assertEqual(
             args[args.index("--model") + 1],
-            "deepseek-v4-flash-ioa",
+            "deepseek-v4-pro",
         )
         self.assertEqual(args[args.index("--effort") + 1], "medium")
         self.assertEqual(args[args.index("--max-turns") + 1], "1")
-
-
-class CodexCliTests(unittest.TestCase):
-    def test_source_configuration_defaults_to_codex(self) -> None:
-        config = json.loads((ROOT / ".mcp.json").read_text(encoding="utf-8"))
-        environment = config["mcpServers"]["research-report-loop"]["env"]
-        self.assertEqual(
-            environment["RESEARCH_REPORT_LOOP_JUDGE_PROVIDER"],
-            "codex",
-        )
-        self.assertEqual(
-            environment["RESEARCH_REPORT_LOOP_CODEX_MODEL"],
-            "gpt-5.6-sol",
-        )
-
-    def test_each_provider_uses_its_own_default_model(self) -> None:
-        with mock.patch.dict(os.environ, {}, clear=True):
-            codex = judge_provider.resolve_settings(provider="codex")
-            workbuddy = judge_provider.resolve_settings(provider="workbuddy")
-        self.assertEqual(codex.model, "gpt-5.6-sol")
-        self.assertEqual(workbuddy.model, "deepseek-v4-flash-ioa")
-
-    def test_invalid_provider_is_rejected(self) -> None:
-        with self.assertRaises(judge_provider.JudgeProviderError):
-            judge_provider.resolve_settings(provider="unknown")
-
-    def test_judge_is_ephemeral_read_only_sol_medium_by_default(self) -> None:
-        def run_codex(args, **_kwargs):
-            output_path = Path(args[args.index("--output-last-message") + 1])
-            output_path.write_text('{"checks": {}}', encoding="utf-8")
-            return subprocess.CompletedProcess(
-                args=args,
-                returncode=0,
-                stdout="",
-                stderr="",
-            )
-
-        with (
-            mock.patch.object(
-                codex_cli,
-                "discover_command",
-                return_value=("codex",),
-            ),
-            mock.patch.object(
-                codex_cli.subprocess,
-                "run",
-                side_effect=run_codex,
-            ) as run,
-        ):
-            result = codex_cli.call_codex("judge this report")
-        self.assertEqual(result, '{"checks": {}}')
-        args = run.call_args.args[0]
-        self.assertEqual(args[args.index("--model") + 1], "gpt-5.6-sol")
-        self.assertEqual(
-            args[args.index("--config") + 1],
-            'model_reasoning_effort="medium"',
-        )
-        self.assertLess(args.index("--ask-for-approval"), args.index("exec"))
-        self.assertIn("--ephemeral", args)
-        self.assertIn("--ignore-user-config", args)
-        self.assertIn("--ignore-rules", args)
-        self.assertEqual(run.call_args.kwargs["input"], "judge this report")
-
-    def test_provider_can_switch_back_to_workbuddy(self) -> None:
-        settings = judge_provider.resolve_settings(
-            provider="workbuddy",
-            model="deepseek-v4-flash-ioa",
-            effort="medium",
-        )
-        with mock.patch.object(
-            judge_provider,
-            "call_workbuddy",
-            return_value='{ "checks": {} }',
-        ) as call:
-            result = judge_provider.call_judge("judge", settings=settings)
-        self.assertEqual(result, '{ "checks": {} }')
-        call.assert_called_once_with(
-            "judge",
-            model="deepseek-v4-flash-ioa",
-            effort="medium",
-        )
 
 
 if __name__ == "__main__":

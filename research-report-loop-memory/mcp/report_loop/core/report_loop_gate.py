@@ -36,9 +36,34 @@ def evaluate_candidate_gate(
         candidate_scores.get("red_line_fails", 0)
         > current_scores.get("red_line_fails", 0)
     )
+    overall_missing = (
+        "overall" not in candidate_scores or "overall" not in current_scores
+    )
+    candidate_overall = (
+        float(candidate_scores["overall"]) if not overall_missing else None
+    )
+    current_overall = (
+        float(current_scores["overall"]) if not overall_missing else None
+    )
+    overall_delta = (
+        round(candidate_overall - current_overall, 3)
+        if candidate_overall is not None and current_overall is not None
+        else None
+    )
+    overall_regressed = overall_delta is not None and overall_delta < 0
+    overall_non_decreasing = not overall_missing and not overall_regressed
     return {
-        "accepted": improved and regressed is None and not red_line_new,
+        "accepted": (
+            improved
+            and regressed is None
+            and not red_line_new
+            and overall_non_decreasing
+        ),
         "improved": improved,
         "regressed_dimension": regressed,
         "red_line_new": red_line_new,
+        "overall_missing": overall_missing,
+        "overall_regressed": overall_regressed,
+        "overall_non_decreasing": overall_non_decreasing,
+        "overall_delta": overall_delta,
     }

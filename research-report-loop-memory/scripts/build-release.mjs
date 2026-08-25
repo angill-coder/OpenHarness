@@ -14,10 +14,17 @@ const curatorPromptVariant = curatorPromptExplicit
   ? process.argv[curatorPromptArgIndex + 1]
   : "v1-gate-first";
 const judgeProviderArgIndex = process.argv.indexOf("--judge-provider");
-const judgeProviderExplicit = judgeProviderArgIndex >= 0;
-const judgeProvider = judgeProviderExplicit
+const requestedJudgeProvider = judgeProviderArgIndex >= 0
   ? process.argv[judgeProviderArgIndex + 1]
-  : "codex";
+  : "workbuddy";
+if (requestedJudgeProvider !== "workbuddy") {
+  throw new Error("Only the WorkBuddy Judge provider is supported");
+}
+const judgeProvider = "workbuddy";
+const judgeDefaults = {
+  workbuddy: { model: "deepseek-v4-pro", effort: "medium" },
+};
+const noArchive = process.argv.includes("--no-archive");
 const targetPlatformArgIndex = process.argv.indexOf("--target-platform");
 const targetPlatform = targetPlatformArgIndex >= 0
   ? process.argv[targetPlatformArgIndex + 1]
@@ -30,13 +37,6 @@ if (!new Set(["darwin", "linux", "win32"]).has(targetPlatform)) {
   throw new Error(`Unsupported target platform: ${targetPlatform}`);
 }
 if (!targetArch?.trim()) throw new Error("Target architecture is required");
-const judgeDefaults = {
-  codex: { model: "gpt-5.6-sol", effort: "medium" },
-  workbuddy: { model: "deepseek-v4-flash-ioa", effort: "medium" },
-};
-if (!judgeDefaults[judgeProvider]) {
-  throw new Error(`Unsupported judge provider: ${judgeProvider}`);
-}
 const curatorPromptSources = {
   "v1-gate-first": "agents/research-report-memory-curator.md",
   "v2-letta-first": "prompts/research-report-memory-curator-v2-letta-first.md",
@@ -47,7 +47,7 @@ if (!curatorPromptSources[curatorPromptVariant]) {
 const platformKey = `${targetPlatform}-${targetArch}`;
 const releaseRoot = path.join(root, "release");
 const promptSuffix = curatorPromptExplicit ? `-prompt-${curatorPromptVariant}` : "";
-const judgeSuffix = judgeProviderExplicit ? `-judge-${judgeProvider}` : "";
+const judgeSuffix = "";
 const packageName = `${pluginName}-${version}${promptSuffix}${judgeSuffix}-${platformKey}`;
 const outputDir = path.join(releaseRoot, packageName);
 const pluginDir = path.join(outputDir, "plugins", pluginName);
@@ -75,8 +75,8 @@ fs.rmSync(zipPath, { force: true });
 fs.rmSync(`${zipPath}.sha256`, { force: true });
 fs.mkdirSync(path.join(pluginDir, "dist"), { recursive: true });
 
-const esbuild = path.join(root, "node_modules/.bin/esbuild");
-run(esbuild, [
+const esbuildCli = path.join(root, "node_modules/esbuild/bin/esbuild");
+run(process.execPath, [esbuildCli,
   "mcp/src/server.ts",
   "--bundle",
   "--platform=node",
@@ -94,7 +94,7 @@ run(esbuild, [
   "--external:openclaw/*",
   "--legal-comments=none",
 ]);
-run(esbuild, [
+run(process.execPath, [esbuildCli,
   "hooks/capture-checkpoint.mjs",
   "--bundle",
   "--platform=node",
@@ -158,66 +158,18 @@ fs.writeFileSync(path.join(sqliteVecDir, "package.json"), `${JSON.stringify({
 const pluginRootToken = "${CODEBUDDY_PLUGIN_ROOT}";
 const windowsCommand = (runner, target) =>
   `""${pluginRootToken}\\scripts\\${runner}" "${pluginRootToken}\\${target}""`;
-const releaseMcp = targetPlatform === "win32" ? {
+const releaseMcp = {
   mcpServers: {
-    "research-report-loop": {
+    "research-report-memory-v2-0821": targetPlatform === "win32" ? {
       command: "cmd.exe",
-      args: [
-        "/d",
-        "/s",
-        "/c",
-        windowsCommand("run-python.cmd", "mcp\\report_loop\\server.py"),
-      ],
-      env: {
-        PYTHONUTF8: "1",
-        PYTHONIOENCODING: "utf-8",
-        RESEARCH_REPORT_LOOP_DIR: "~/.research-report-loop",
-        RESEARCH_REPORT_LOOP_JUDGE_PROVIDER: judgeProvider,
-        [judgeProvider === "codex"
-          ? "RESEARCH_REPORT_LOOP_CODEX_MODEL"
-          : "RESEARCH_REPORT_LOOP_WB_MODEL"]: judgeDefaults[judgeProvider].model,
-        RESEARCH_REPORT_LOOP_JUDGE_EFFORT: judgeDefaults[judgeProvider].effort,
-        RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
-      },
-    },
-    "research-report-memory-v2-0821": {
-      command: "cmd.exe",
-      args: [
-        "/d",
-        "/s",
-        "/c",
-        windowsCommand("run-node.cmd", "dist\\memory-server.mjs"),
-      ],
+      args: ["/d", "/s", "/c", windowsCommand("run-node.cmd", "dist\\memory-server.mjs")],
       env: {
         RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
         RESEARCH_REPORT_BASE_RUBRIC_PATH: `${pluginRootToken}\\rubrics\\v2_rubric_research.json`,
       },
-    },
-  },
-} : {
-  mcpServers: {
-    "research-report-loop": {
+    } : {
       command: "sh",
-      args: [
-        "${CODEBUDDY_PLUGIN_ROOT}/scripts/run-python.sh",
-        "${CODEBUDDY_PLUGIN_ROOT}/mcp/report_loop/server.py",
-      ],
-      env: {
-        RESEARCH_REPORT_LOOP_DIR: "~/.research-report-loop",
-        RESEARCH_REPORT_LOOP_JUDGE_PROVIDER: judgeProvider,
-        [judgeProvider === "codex"
-          ? "RESEARCH_REPORT_LOOP_CODEX_MODEL"
-          : "RESEARCH_REPORT_LOOP_WB_MODEL"]: judgeDefaults[judgeProvider].model,
-        RESEARCH_REPORT_LOOP_JUDGE_EFFORT: judgeDefaults[judgeProvider].effort,
-        RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
-      },
-    },
-    "research-report-memory-v2-0821": {
-      command: "sh",
-      args: [
-        "${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh",
-        "${CODEBUDDY_PLUGIN_ROOT}/dist/memory-server.mjs",
-      ],
+      args: ["${CODEBUDDY_PLUGIN_ROOT}/scripts/run-node.sh", "${CODEBUDDY_PLUGIN_ROOT}/dist/memory-server.mjs"],
       env: {
         RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
         RESEARCH_REPORT_BASE_RUBRIC_PATH: "${CODEBUDDY_PLUGIN_ROOT}/rubrics/v2_rubric_research.json",
@@ -267,9 +219,15 @@ fs.writeFileSync(path.join(pluginDir, "BUILD-INFO.json"), `${JSON.stringify({
   node: process.version,
   builtAt: new Date().toISOString(),
   curatorPromptVariant,
-  judgeProvider,
-  judgeModel: judgeDefaults[judgeProvider].model,
-  judgeEffort: judgeDefaults[judgeProvider].effort,
+  judgeProviders: ["workbuddy"],
+  defaultJudgeProvider: "workbuddy",
+  judgeModel: judgeDefaults.workbuddy.model,
+  judgeEffort: judgeDefaults.workbuddy.effort,
+  judgeFallbackProvider: "workbuddy",
+  judgeFallbackModelSource: "hostModel",
+  judgeFallbackTriggers: ["transport_error", "empty_response", "invalid_judge_json"],
+  intakeUserEvidenceRequired: true,
+  judgePromptTransport: "stdin",
 }, null, 2)}\n`);
 
 const marketplace = {
@@ -301,6 +259,7 @@ for (const executable of [
 }
 
 fs.mkdirSync(releaseRoot, { recursive: true });
+if (!noArchive) {
 if (process.platform === "win32") {
   run("powershell.exe", [
     "-NoProfile",
@@ -315,6 +274,7 @@ if (process.platform === "win32") {
 if (fs.existsSync(zipPath)) {
   const digest = crypto.createHash("sha256").update(fs.readFileSync(zipPath)).digest("hex");
   fs.writeFileSync(`${zipPath}.sha256`, `${digest}  ${path.basename(zipPath)}\n`);
+}
 }
 process.stdout.write(
   `Release built: ${outputDir}\nCurator prompt: ${curatorPromptVariant}`
