@@ -29,7 +29,7 @@ test("research-report delegates recall and capture without changing its writing 
 test("Curator uses L0/L1/L2B with an insensitive evidence-based filter", () => {
   const agent = fs.readFileSync(path.join(root, "agents/research-report-memory-curator.md"), "utf8");
   const toolLine = agent.match(/^tools:.*$/mu)?.[0] ?? "";
-  assert.match(toolLine, /mcp__research-report-memory-v2-0821__writing_memory_recall/u);
+  assert.match(toolLine, /mcp__report-memory-v2__writing_memory_recall/u);
   assert.match(toolLine, /writing_memory_capture_payload.*writing_memory_forget/u);
   assert.doesNotMatch(toolLine, /v2-mvp|ToolSearch|DeferExecuteTool/u);
 
@@ -78,7 +78,7 @@ test("semantic and recall templates expose only stable L2B rubrics", () => {
   assert.doesNotMatch(recall, /writing_context|specific_memories|<writing-context>/u);
 });
 
-test("plugin and maintenance use isolated V2-0821 identifiers", () => {
+test("plugin and reflection use the report-memory-v2 service identifier", () => {
   const plugin = JSON.parse(fs.readFileSync(path.join(root, ".codebuddy-plugin/plugin.json"), "utf8"));
   assert.equal(plugin.name, "research-report-memory-v2-0821");
   assert.deepEqual(plugin.agents, ["./agents/research-report-memory-curator.md"]);
@@ -87,11 +87,11 @@ test("plugin and maintenance use isolated V2-0821 identifiers", () => {
     "~/.research-report-memory-v2-0821",
   );
   const mcp = JSON.parse(fs.readFileSync(path.join(root, ".mcp.json"), "utf8"));
-  assert.equal(mcp.mcpServers["research-report-memory-v2-0821"].command, "sh");
+  assert.equal(mcp.mcpServers["report-memory-v2"].command, "sh");
 
-  const script = fs.readFileSync(path.join(root, "scripts/run-memory-maintenance-workbuddy.sh"), "utf8");
+  const script = fs.readFileSync(path.join(root, "scripts/run-memory-reflection-workbuddy.sh"), "utf8");
   assert.match(script, /RESEARCH_REPORT_MEMORY_V2_0821_DIR/u);
-  assert.match(script, /mcp__research-report-memory-v2-0821__writing_memory_recall/u);
+  assert.match(script, /report-memory-v2/u);
   assert.match(script, /L0\/L1.*L2B/u);
   assert.doesNotMatch(script, /research-report-memory-v2-mvp|RESEARCH_REPORT_MEMORY_V2_DIR/u);
 });

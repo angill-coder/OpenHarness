@@ -4,11 +4,11 @@ import { z } from "zod";
 import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
 
 const server = new McpServer(
-  { name: "research-report-memory-v2-0821", version: "2.1.0-mvp.18" },
+  { name: "report-memory-v2", version: "2.1.0-mvp.19" },
   {
     capabilities: { logging: {} },
     instructions: [
-      "research-report 专用写作记忆 V2-0821。",
+      "report-memory-v2：research-report 专用写作记忆服务。",
       "实时 Recall/Capture/Forget 由 research-report-memory-curator WB Sub-agent 调用；后台 consolidation 由 research-report-memory-reflection WB Sub-agent 调用。主写作 Agent 只有在 Hook 授权后才能使用 Recover 暂存待复核记忆。",
       "L0 Episode 和 L1 Atom 使用 TencentDB MemoryCore；L2B 是独立的 Git-backed Memory Rubrics，不改写 Base Rubrics。",
       "Scope 仅使用 core/audience/project；冲突优先级为本轮要求 > project > audience > core > research-report skill。",

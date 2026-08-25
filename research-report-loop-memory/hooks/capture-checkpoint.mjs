@@ -182,7 +182,7 @@ async function onPrompt(input) {
       state.pendingKind === "context"
         ? "无需为纯背景纠正改写报告；直接通过 Agent/Task 委派 research-report-memory-curator 执行 operation=capture。"
         : "先落实当前报告修改，再通过 Agent/Task 委派 research-report-memory-curator 执行 operation=capture。",
-      "这是独立的 research-report-memory-v2-0821（L0 Writing Episode / L1 Atom / L2B Rubrics），不是 WorkBuddy MEMORY.md 或项目日志。",
+      "这是独立的 report-memory-v2（L0 Writing Episode / L1 Atom / L2B Rubrics），不是 WorkBuddy MEMORY.md 或项目日志。",
       "不要由主 Agent 直接调用 Memory MCP，也不要把 WorkBuddy 原生 Memory 当作替代写入。",
     ].join(" ")
     : "";

@@ -31,12 +31,12 @@ test("integrated manifests register only Memory MCP plus Curator and Reflection"
   const mcp = JSON.parse(fs.readFileSync(path.join(root, ".mcp.json"), "utf8"));
   assert.equal(plugin.name, "research-report-loop-memory");
   assert.equal(plugin.mcpServers, "./.mcp.json");
-  assert.deepEqual(Object.keys(mcp.mcpServers), ["research-report-memory-v2-0821"]);
+  assert.deepEqual(Object.keys(mcp.mcpServers), ["report-memory-v2"]);
   assert.deepEqual(plugin.agents, [
     "./agents/research-report-memory-curator.md",
     "./agents/research-report-memory-reflection.md",
   ]);
   assert.equal(plugin.hooks, "./hooks/hooks.json");
-  assert.match(skill, /research-report-memory-v2-0821/u);
+  assert.match(skill, /report-memory-v2/u);
   assert.match(skill, /Report Loop .* MCP Server/su);
 });

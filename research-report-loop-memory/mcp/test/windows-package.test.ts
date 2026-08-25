@@ -43,7 +43,7 @@ test("Report Loop runs only through the Python runner", () => {
   assert.equal(fs.existsSync(path.join(root, "mcp/report_loop/core/codex_cli.py")), false);
 
   const sourceMcp = JSON.parse(fs.readFileSync(path.join(root, ".mcp.json"), "utf8"));
-  assert.deepEqual(Object.keys(sourceMcp.mcpServers), ["research-report-memory-v2-0821"]);
+  assert.deepEqual(Object.keys(sourceMcp.mcpServers), ["report-memory-v2"]);
 
   const preflight = fs.readFileSync(path.join(root, "scripts/verify-mcp-contract.mjs"), "utf8");
   assert.match(preflight, /writing_memory_recall/u);

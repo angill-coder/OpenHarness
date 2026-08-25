@@ -35,7 +35,7 @@ function serverArgs(projectRoot: string): string[] {
 test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-v2-0821-e2e-"));
   const projectRoot = path.resolve(import.meta.dirname, "../..");
-  const client = new Client({ name: "research-report-memory-v2-0821-test", version: "2.1.0" }, { capabilities: {} });
+  const client = new Client({ name: "report-memory-v2-test", version: "2.1.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
     command: "sh",
     args: serverArgs(projectRoot),

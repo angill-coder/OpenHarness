@@ -58,7 +58,7 @@ const args = fs.existsSync(bundledServer)
   : ["--import", "tsx", sourceServer];
 const config = {
   mcpServers: {
-    "research-report-memory-v2-0821": {
+    "report-memory-v2": {
       command: "sh",
       args: [path.join(pluginRoot, "scripts/run-node.sh"), ...args],
       env: { RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir },

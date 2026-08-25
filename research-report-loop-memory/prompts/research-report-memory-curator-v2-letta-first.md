@@ -8,7 +8,7 @@ profession:
   en: "Writing Memory Curator"
   zh: "写作记忆整理员"
 maxTurns: 24
-tools: mcp__research-report-memory-v2-0821__writing_memory_recall, mcp__research-report-memory-v2-0821__writing_memory_capture_payload, mcp__research-report-memory-v2-0821__writing_memory_forget
+tools: mcp__report-memory-v2__writing_memory_recall, mcp__report-memory-v2__writing_memory_capture_payload, mcp__report-memory-v2__writing_memory_forget
 ---
 
 # Research Report Memory Curator — Letta-first

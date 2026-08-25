@@ -18,7 +18,7 @@
 插件恢复独立 Memory 插件的两条调度链：
 
 - **实时 Capture**：Capture-only Hook 识别已交付报告后的明确写作反馈，提醒宿主先修改报告，再通过 Agent/Task 委派 `research-report-memory-curator` 调用专用 MCP。Stop 最多检查一次是否遗漏 Capture；明确成功或失败后放行。
-- **定时 Dreaming**：macOS LaunchAgent 或 Windows Task Scheduler 每天 16:30 启动一次隔离的 WorkBuddy CLI Curator，复审待处理 L0/L1 和疑似冲突，并只提交 L2B 增量修改。
+- **定时 Reflection**：macOS LaunchAgent 或 Windows Task Scheduler 每天 16:30 启动一次隔离的 WorkBuddy CLI Reflection Agent，复审待处理 L0/L1 和疑似冲突，并只提交 L2B 增量修改。
 
 Hook 不注册 `PreToolUse`，不负责写前 Recall、报告文件校验或 Report Loop 状态管理，也不要求主 Agent 直接调用 MCP。Capture 明确失败不会回滚已完成报告。
 
@@ -32,7 +32,7 @@ Hook 不注册 `PreToolUse`，不负责写前 Recall、报告文件校验或 Rep
 ## MCP 与 Runner 边界
 
 - Report Loop 不注册 MCP Server；`mcp/report_loop/runner.py` 是唯一循环入口，负责 Rubric 编译、Judge、Rewrite、版本采纳与停止。
-- 仅 `research-report-memory-v2-0821` 注册为 MCP Server，用于 L0/L1/L2B Capture、Review、Manage 与 Forget。
+- 仅 `report-memory-v2` 注册为 MCP Server，用于 L0/L1/L2B Capture、Review、Manage 与 Forget。
 
 ## Curator Prompt 双版本
 
@@ -51,7 +51,7 @@ npm run build:release:prompt-v2
 ## 本地数据
 
 - Report Loop：`~/.research-report-loop/runs/<run-id>/`
-- Memory：`~/.research-report-memory-v2-0821/`
+- Memory：`~/.research-report-memory-v2-0821/`（为兼容已有数据保留；MCP 服务名为 `report-memory-v2`）
 - Rubric Set Git Repository：`~/.research-report-memory-v2-0821/l2b-rubrics/personal/default/`
 - 人类可读视图：上述目录的 `views/rubric-set.md`；Judge 以 JSON 和冻结文件为准。
 
@@ -64,7 +64,7 @@ node scripts/migrate-rubric-scope-paths.mjs
 node scripts/migrate-rubric-scope-paths.mjs --apply
 ```
 
-安装包中的 `scripts/install-maintenance-macos.sh` 或 `scripts/install-maintenance-windows.ps1` 用于注册每天 16:30 的 Dreaming 任务；任务只连接本插件的 Memory MCP，不启动 Report Loop Judge。
+安装包中的 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1` 用于注册每天 16:30 的 Reflection 任务；任务只连接本插件的 Memory MCP，不启动 Report Loop Judge。
 
 ## Windows x64 安装包
 
@@ -76,10 +76,10 @@ Windows 包使用 `cmd.exe + run-node.cmd` 启动 Memory MCP，并使用 `run-py
 scripts\run-node.cmd scripts\verify-mcp-contract.mjs
 ```
 
-如需启用每天 16:30 的 Memory Dreaming，可执行：
+如需启用每天 16:30 的 Memory Reflection，可执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-maintenance-windows.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-reflection-windows.ps1
 ```
 
 ## macOS 安装包

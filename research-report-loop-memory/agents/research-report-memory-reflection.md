@@ -8,7 +8,7 @@ profession:
   en: "Writing Memory Reflection"
   zh: "写作记忆反思"
 maxTurns: 20
-tools: mcp__research-report-memory-v2-0821__writing_memory_recall, mcp__research-report-memory-v2-0821__writing_memory_capture_payload
+tools: mcp__report-memory-v2__writing_memory_recall, mcp__report-memory-v2__writing_memory_capture_payload
 ---
 
 # Research Report Memory Reflection

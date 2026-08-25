@@ -118,11 +118,12 @@ for (const item of [
   "scripts/register-workbuddy-local.mjs",
   "scripts/migrate-rubric-scope-paths.mjs",
   "scripts/verify-mcp-contract.mjs",
-  "scripts/run-memory-maintenance-workbuddy.sh",
-  "scripts/run-memory-maintenance-workbuddy.ps1",
-  "scripts/install-maintenance-macos.sh",
-  "scripts/install-maintenance-windows.ps1",
-  "scripts/maintenance-launchagent.plist.template",
+  "scripts/run-memory-reflection-workbuddy.sh",
+  "scripts/run-memory-reflection-workbuddy.ps1",
+  "scripts/reflection-current.sh",
+  "scripts/install-reflection-macos.sh",
+  "scripts/install-reflection-windows.ps1",
+  "scripts/macos-reflection-schedule.plist.template",
   "README.md",
   "LICENSE.md",
 ]) copyPlugin(item);
@@ -160,7 +161,7 @@ const windowsCommand = (runner, target) =>
   `""${pluginRootToken}\\scripts\\${runner}" "${pluginRootToken}\\${target}""`;
 const releaseMcp = {
   mcpServers: {
-    "research-report-memory-v2-0821": targetPlatform === "win32" ? {
+    "report-memory-v2": targetPlatform === "win32" ? {
       command: "cmd.exe",
       args: ["/d", "/s", "/c", windowsCommand("run-node.cmd", "dist\\memory-server.mjs")],
       env: {
@@ -252,8 +253,9 @@ fs.copyFileSync(path.join(root, "README.md"), path.join(outputDir, "README.md"))
 for (const executable of [
   "scripts/run-node.sh",
   "scripts/run-python.sh",
-  "scripts/run-memory-maintenance-workbuddy.sh",
-  "scripts/install-maintenance-macos.sh",
+  "scripts/run-memory-reflection-workbuddy.sh",
+  "scripts/reflection-current.sh",
+  "scripts/install-reflection-macos.sh",
 ]) {
   fs.chmodSync(path.join(pluginDir, executable), 0o755);
 }
