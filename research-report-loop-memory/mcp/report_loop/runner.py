@@ -93,7 +93,7 @@ def load_job(path: Path) -> dict[str, Any]:
             job.get("judgeProvider")
         ).provider
     except JudgeProviderError as exc:
-        raise JobError("judgeProvider must be workbuddy; Codex CLI is not supported") from exc
+        raise JobError("judgeProvider must be workbuddy or codex") from exc
     normalized["outputPath"] = str(
         Path(_required_text(job.get("outputPath"), "outputPath")).expanduser().resolve()
     )

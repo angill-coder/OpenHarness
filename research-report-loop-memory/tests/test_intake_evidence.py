@@ -76,6 +76,15 @@ class IntakeEvidenceTests(unittest.TestCase):
             payload["intakeContext"]["userInputEvidence"],
         )
 
+    def test_workbuddy_is_default_and_codex_is_optional(self):
+        default_job = load_job(self.write_job(self.job()))
+        self.assertEqual(default_job["judgeProvider"], "workbuddy")
+
+        payload = self.job()
+        payload["judgeProvider"] = "codex"
+        codex_job = load_job(self.write_job(payload))
+        self.assertEqual(codex_job["judgeProvider"], "codex")
+
 
 if __name__ == "__main__":
     unittest.main()

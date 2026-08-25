@@ -33,14 +33,13 @@ test("release builder emits platform-native Memory MCP and Hook configurations",
   assert.match(builder, /run-node\.sh/u);
   assert.match(builder, /capture-checkpoint\.mjs/u);
   assert.match(builder, /deepseek-v4-pro/u);
-  assert.doesNotMatch(builder, /gpt-5\.6-sol/u);
-  assert.doesNotMatch(builder, /RESEARCH_REPORT_LOOP_CODEX_MODEL/u);
+  assert.match(builder, /mcp\/report_loop/u);
 });
 
 test("Report Loop runs only through the Python runner", () => {
   assert.equal(fs.existsSync(path.join(root, "mcp/report_loop/runner.py")), true);
   assert.equal(fs.existsSync(path.join(root, "mcp/report_loop/server.py")), false);
-  assert.equal(fs.existsSync(path.join(root, "mcp/report_loop/core/codex_cli.py")), false);
+  assert.equal(fs.existsSync(path.join(root, "mcp/report_loop/core/codex_cli.py")), true);
 
   const sourceMcp = JSON.parse(fs.readFileSync(path.join(root, ".mcp.json"), "utf8"));
   assert.deepEqual(Object.keys(sourceMcp.mcpServers), ["report-memory-v2"]);

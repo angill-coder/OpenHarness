@@ -48,12 +48,12 @@ description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究
 1. 将用户最初请求单独保存为 originalUserQuery。
 2. 三项交互按真实字段保存，并把对应的用户原文逐字保存为 intakeContext.userInputEvidence.reportBackground、materialHypothesis 和 priorityMaterials；不得用系统路径、附件元数据或模型转述填充 evidence。
 3. 当前宿主模型按写作规则生成 Markdown 初稿 V1；同时记录用户在 App 主对话选择的 hostModel.modelId 和可选 effort。
-4. 写入 Job Schema v2 JSON；judgeProvider 省略或设为 workbuddy，不得使用 codex。然后只调用一次 scripts/run-python.cmd mcp/report_loop/runner.py --job <absolute-job-path>；macOS/Linux 使用对应的 run-python.sh。
+4. 写入 Job Schema v2 JSON；`judgeProvider` 省略时默认 `workbuddy`，也可明确设为 `codex`。然后只调用一次 scripts/run-python.cmd mcp/report_loop/runner.py --job <absolute-job-path>；macOS/Linux 使用对应的 run-python.sh。
 5. 等待 Runner 返回最终 JSON，只交付 finalArtifactPath。宿主不得接收中间 Judge 结果、参与改写或自行推进循环。
 
 Python Runner 启动时按 `Base → core → audience → project` 解析并冻结当前 Rubric Set。
 
-Runner 会为每个 Rubric Dimension 并发启动独立 WorkBuddy Judge CLI；基础配置为六个进程，Personal Rubric 生效时可扩展。Codex CLI 路径已删除。每个进程和每轮 Judge 均隔离上下文，但都收到 originalUserQuery 与完整 intakeContext。优先固定使用 deepseek-v4-pro、medium；仅当调用失败、空响应或 Judge JSON 不合规时，熔断到 WorkBuddy App 当前主模型。评分低不触发回退。
+Runner 会为每个 Rubric Dimension 并发启动独立 Judge CLI；基础配置为六个进程，Personal Rubric 生效时可扩展。默认使用 WorkBuddy `deepseek-v4-pro / medium`，明确选择 `codex` 时使用 `gpt-5.6-sol / medium`。每个进程和每轮 Judge 均隔离上下文，但都收到 originalUserQuery 与完整 intakeContext。仅当调用失败、空响应或 Judge JSON 不合规时，熔断到 WorkBuddy App 当前主模型；评分低不触发回退。
 
 Rewriter 与 Judge 串行、独立调用 CLI，并在整个 Run 内复用同一个 stream-json 进程。Rewriter 使用 hostModel，与初稿 Writer 的 App 主模型一致。首轮收到 query、三项交互和 V1；后续依靠同一进程保留写作、净化后的 Judge 建议和失败尝试记忆。不得把 Judge 原始输出传给 Rewriter。
 
