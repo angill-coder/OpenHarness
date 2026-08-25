@@ -14,16 +14,16 @@ const curatorPromptVariant = curatorPromptExplicit
   ? process.argv[curatorPromptArgIndex + 1]
   : "v1-gate-first";
 const judgeProviderArgIndex = process.argv.indexOf("--judge-provider");
-const requestedJudgeProvider = judgeProviderArgIndex >= 0
+const judgeProvider = judgeProviderArgIndex >= 0
   ? process.argv[judgeProviderArgIndex + 1]
   : "workbuddy";
-if (requestedJudgeProvider !== "workbuddy") {
-  throw new Error("Only the WorkBuddy Judge provider is supported");
-}
-const judgeProvider = "workbuddy";
 const judgeDefaults = {
   workbuddy: { model: "deepseek-v4-pro", effort: "medium" },
+  codex: { model: "gpt-5.6-sol", effort: "medium" },
 };
+if (!judgeDefaults[judgeProvider]) {
+  throw new Error(`Unsupported judge provider: ${judgeProvider}`);
+}
 const noArchive = process.argv.includes("--no-archive");
 const targetPlatformArgIndex = process.argv.indexOf("--target-platform");
 const targetPlatform = targetPlatformArgIndex >= 0
@@ -220,10 +220,10 @@ fs.writeFileSync(path.join(pluginDir, "BUILD-INFO.json"), `${JSON.stringify({
   node: process.version,
   builtAt: new Date().toISOString(),
   curatorPromptVariant,
-  judgeProviders: ["workbuddy"],
+  judgeProviders: ["workbuddy", "codex"],
   defaultJudgeProvider: "workbuddy",
-  judgeModel: judgeDefaults.workbuddy.model,
-  judgeEffort: judgeDefaults.workbuddy.effort,
+  judgeModel: judgeDefaults[judgeProvider].model,
+  judgeEffort: judgeDefaults[judgeProvider].effort,
   judgeFallbackProvider: "workbuddy",
   judgeFallbackModelSource: "hostModel",
   judgeFallbackTriggers: ["transport_error", "empty_response", "invalid_judge_json"],

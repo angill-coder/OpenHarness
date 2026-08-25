@@ -36,8 +36,8 @@ Hook 不注册 `PreToolUse`，不负责写前 Recall、报告文件校验或 Rep
 
 ## Curator Prompt 双版本
 
-- **V1 Gate-first（默认）**：`agents/research-report-memory-curator.md`。以显式 Layer Gate、Scope 和 Payload 自检为主，适合作为稳定对照。
-- **V2 Letta-first（实验）**：`prompts/research-report-memory-curator-v2-letta-first.md`。以未来行为、完整历史、渐进更新和高层记忆成本为判断主体，同时保留相同的 Scope、Rubric Set、Criterion Slot 与 MCP 契约。
+- **默认 Principle-first**：`agents/research-report-memory-curator.md`。以未来用途和最小必要更新为判断主体，保留 Scope、Layer 与 MCP 安全契约，但不使用机械晋升阈值。
+- **实验变体**：`prompts/research-report-memory-curator-v2-letta-first.md`。用于后续 A/B 验证；与默认版本共享 Runtime、Schema 和初始 Memory 快照。
 
 两个版本不会同时暴露为两个同名 Agent。构建时只把选定 Prompt 写入安装包的 `agents/research-report-memory-curator.md`：
 
@@ -46,7 +46,7 @@ npm run build:release:prompt-v1
 npm run build:release:prompt-v2
 ```
 
-默认 `npm run build:release` 仍使用 V1，不会改变当前 WorkBuddy 行为。V1/V2 使用相同插件 ID，A/B 测试时应分轮安装，并使用相同的初始 Memory 快照。
+默认 `npm run build:release` 使用当前 Principle-first Curator。两个变体使用相同插件 ID，A/B 测试时应分轮安装，并使用相同的初始 Memory 快照。
 
 ## 本地数据
 

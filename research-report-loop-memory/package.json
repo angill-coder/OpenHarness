@@ -12,6 +12,7 @@
     "start:loop": "sh scripts/run-python.sh mcp/report_loop/runner.py",
     "build:release": "node scripts/build-release.mjs",
     "build:local": "node scripts/build-release.mjs",
+    "build:release:codex": "node scripts/build-release.mjs --judge-provider codex",
     "build:release:windows": "node scripts/build-release.mjs --target-platform win32 --target-arch x64",
     "build:release:prompt-v1": "node scripts/build-release.mjs --curator-prompt v1-gate-first",
     "build:release:prompt-v2": "node scripts/build-release.mjs --curator-prompt v2-letta-first",
