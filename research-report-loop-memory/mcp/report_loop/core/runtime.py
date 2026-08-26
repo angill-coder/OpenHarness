@@ -182,7 +182,7 @@ class ReportLoopRuntime:
         targetScore: float = 5.0,
         maxJudgedVersions: int | None = None,
         maxElapsedSeconds: int = 3600,
-        skillVersion: str = "research-report-loop/1.0.0-mvp.31",
+        skillVersion: str = "research-report-loop/1.0.0-mvp.32",
     ) -> dict[str, Any]:
         original_query = str(originalUserQuery or task or "").strip()
         if not original_query:
@@ -197,7 +197,7 @@ class ReportLoopRuntime:
                     raise ReportLoopError(f"intakeContext.{field}.value 不能为空")
             materials = intake.get("priorityMaterials")
             if not isinstance(materials, list) or not materials:
-                raise ReportLoopError("intakeContext.priorityMaterials 至少包含一个文件")
+                raise ReportLoopError("intakeContext.priorityMaterials 至少包含一个素材文件或目录")
         task = str(task or "").strip() or original_query
         target = float(targetScore)
         elapsed = int(maxElapsedSeconds)

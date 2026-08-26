@@ -73,8 +73,8 @@ def load_job(path: Path) -> dict[str, Any]:
         if not isinstance(item, dict):
             raise JobError(f"priorityMaterials[{index}] must be an object")
         material = Path(_required_text(item.get("path"), f"priorityMaterials[{index}].path")).expanduser().resolve()
-        if not material.is_absolute() or not material.is_file():
-            raise JobError(f"priority material does not exist: {material}")
+        if not material.is_absolute() or not material.exists():
+            raise JobError(f"priority material path does not exist: {material}")
         display = _required_text(item.get("displayName"), f"priorityMaterials[{index}].displayName")
         key = os.path.normcase(str(material))
         if key in seen:

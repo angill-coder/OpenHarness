@@ -14,7 +14,7 @@
     "reportBackground": {"value": "已确认的汇报背景"},
     "materialHypothesis": {"value": "已确认的完整 hypothesis"},
     "priorityMaterials": [
-      {"path": "/absolute/path/to/material", "displayName": "material"}
+      {"path": "/absolute/path/to/material-or-directory", "displayName": "重点素材"}
     ],
     "userInputEvidence": {
       "reportBackground": "用户消息中的对应原文",
@@ -33,6 +33,8 @@
 ```
 
 三项 `userInputEvidence` 必须分别保存用户消息中的真实原文。系统、App、工具提供的路径、附件名称或自动摘要不能代替用户确认。没有 `structured_data.json` 时删除 `structuredDataPath`，不要填写不存在的路径。
+
+`priorityMaterials[].path` 可以指向一个具体文件，也可以指向一个素材目录；目录表示其中素材整体优先，不要为了满足 Job 格式递归展开成大量文件项。
 
 不要猜测或填写宿主模型 ID。Job 写入成功后，插件 Hook 会记录本次 WorkBuddy `sessionId`；Runner 据此从主会话 trace 读取准确的 `requestModelId`。同一 workspace 存在多个活跃会话而 session 标识缺失时，Runner 会明确拒绝，不按“最近会话”猜测。
 
