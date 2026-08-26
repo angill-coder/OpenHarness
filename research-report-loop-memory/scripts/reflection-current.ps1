@@ -11,10 +11,11 @@ if (-not (Test-Path $RegistryPath)) {
 }
 
 $Registry = Get-Content -Raw -Encoding utf8 $RegistryPath | ConvertFrom-Json
+$Plugins = if ($Registry.plugins) { $Registry.plugins } else { $Registry }
 $ExactKey = "research-report-loop-memory@research-report-loop-memory-local"
-$Entry = $Registry.$ExactKey
+$Entry = $Plugins.$ExactKey
 if (-not $Entry) {
-    $Fallback = $Registry.PSObject.Properties |
+    $Fallback = $Plugins.PSObject.Properties |
         Where-Object { $_.Name -like "research-report-loop-memory@*" } |
         Select-Object -First 1
     if ($Fallback) { $Entry = $Fallback.Value }
