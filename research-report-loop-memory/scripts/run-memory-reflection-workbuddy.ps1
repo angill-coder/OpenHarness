@@ -10,6 +10,11 @@ $WorkBuddyConfig = if ($env:CODEBUDDY_CONFIG_DIR) {
 } else {
     Join-Path $HOME ".workbuddy"
 }
+$McpName = if ($env:RESEARCH_REPORT_REFLECTION_MCP_NAME) {
+    $env:RESEARCH_REPORT_REFLECTION_MCP_NAME
+} else {
+    "report-memory-v2"
+}
 
 $NodeBin = $env:WORKBUDDY_NODE
 if (-not $NodeBin) {
@@ -50,17 +55,21 @@ $ReflectionDir = Join-Path $DataDir "reflection"
 $LogDir = Join-Path $DataDir "reflection-logs"
 New-Item -ItemType Directory -Force -Path $ReflectionDir, $LogDir | Out-Null
 $McpConfig = Join-Path $ReflectionDir "windows-mcp-config.json"
-$NodeRunner = Join-Path $PluginRoot "scripts\run-node.cmd"
+$NodeRunner = if ($env:RESEARCH_REPORT_REFLECTION_NODE_RUNNER) {
+    $env:RESEARCH_REPORT_REFLECTION_NODE_RUNNER
+} else {
+    Join-Path $PluginRoot "scripts\run-node.cmd"
+}
 $MemoryServer = Join-Path $PluginRoot "dist\memory-server.mjs"
 $CommandLine = '""{0}" "{1}""' -f $NodeRunner, $MemoryServer
+$McpServers = @{}
+$McpServers[$McpName] = @{
+    command = "cmd.exe"
+    args = @("/d", "/s", "/c", $CommandLine)
+    env = @{ RESEARCH_REPORT_MEMORY_V2_0821_DIR = $DataDir }
+}
 $Config = @{
-    mcpServers = @{
-        "report-memory-v2" = @{
-            command = "cmd.exe"
-            args = @("/d", "/s", "/c", $CommandLine)
-            env = @{ RESEARCH_REPORT_MEMORY_V2_0821_DIR = $DataDir }
-        }
-    }
+    mcpServers = $McpServers
 }
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($McpConfig, ($Config | ConvertTo-Json -Depth 8), $Utf8NoBom)

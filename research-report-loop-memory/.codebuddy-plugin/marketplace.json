@@ -8,7 +8,7 @@
     {
       "name": "research-report-loop-memory",
       "description": "Host writing, isolated Judge iteration, and long-term writing Memory Rubrics",
-      "version": "1.0.0-mvp.28",
+      "version": "1.0.0-mvp.29",
       "source": ".",
       "license": "MIT"
     }

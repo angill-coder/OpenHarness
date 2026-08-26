@@ -40,6 +40,10 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   assert.match(windowsInstaller, /reflection-current\.ps1/u);
   assert.match(windowsInstaller, /RESEARCH_REPORT_MEMORY_V2_0821_DIR/u);
   assert.match(windowsLauncher, /installed_plugins\.json/u);
+  assert.match(windowsLauncher, /\$Registry\.plugins/u);
+  assert.match(windowsLauncher, /\$Plugins\.\$ExactKey/u);
+  assert.match(windowsLauncher, /\$Plugins\.PSObject\.Properties/u);
+  assert.doesNotMatch(windowsLauncher, /\$Registry\.\$ExactKey/u);
   assert.match(windowsLauncher, /research-report-loop-memory@/u);
   assert.match(windowsLauncher, /run-memory-reflection-workbuddy\.ps1/u);
   assert.match(windowsReflection, /Join-Path \$WorkBuddyConfig "binaries\\node\\versions"/u);
