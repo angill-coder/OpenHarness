@@ -16,6 +16,11 @@ test("Windows and macOS launchers discover WorkBuddy runtimes", () => {
   assert.match(nodeCmd, /WORKBUDDY_NODE/u);
   assert.match(nodeCmd, /\.workbuddy\\binaries\\node\\versions/u);
   assert.match(nodeCmd, /node\.exe/u);
+  const nodeVersionCheck = nodeCmd
+    .split(/\r?\n/u)
+    .find((line) => line.includes("process.versions.node")) ?? "";
+  assert.match(nodeVersionCheck, /a>22\|\|\(a===22&&b>=16\)/u);
+  assert.doesNotMatch(nodeVersionCheck, /\^/u);
   assert.match(pythonCmd, /WORKBUDDY_PYTHON/u);
   assert.match(pythonCmd, /PYTHONUTF8=1/u);
   assert.match(pythonCmd, /PYTHONIOENCODING=utf-8/u);
