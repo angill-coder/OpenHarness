@@ -83,6 +83,23 @@ class IntakeEvidenceTests(unittest.TestCase):
             payload["intakeContext"]["userInputEvidence"],
         )
 
+    def test_priority_material_can_be_a_directory_without_expansion(self):
+        directory = self.root / "原始录音逐字稿"
+        directory.mkdir()
+        (directory / "访谈一.txt").write_text("transcript", encoding="utf-8")
+        payload = self.job()
+        payload["intakeContext"]["priorityMaterials"] = [{
+            "path": str(directory),
+            "displayName": "原始录音逐字稿",
+        }]
+
+        loaded = load_job(self.write_job(payload))
+
+        self.assertEqual(loaded["intakeContext"]["priorityMaterials"], [{
+            "path": str(directory.resolve()),
+            "displayName": "原始录音逐字稿",
+        }])
+
     def test_workbuddy_is_default_and_codex_is_optional(self):
         default_job = load_job(self.write_job(self.job()))
         self.assertEqual(default_job["judgeProvider"], "workbuddy")
