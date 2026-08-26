@@ -1,5 +1,7 @@
 # 调研洞察汇报助手 · Rubric 落地文档（六维 v0）
 
+> **历史文档提示（2026-08-12）**：本文保留早期六维 Rubric 的设计背景，不再镜像当前默认机器口径。当前默认以 `harness/artifacts/rubric_research.json`（v2.4）为准，原默认版本归档为 `harness/artifacts/v1_rubric_research.json`。
+
 > 配套 `调研洞察汇报助手_v0设计文档.md`（结构 + 数据 Schema）。本文档把该产品的评分标准从原「四维粗版」细化为**六维**，对齐用户对「面向最高管理层的汇报助手」的完整要求：金字塔 / MECE / 摘要格式 / 故事线 / 概念一致 / 风格禁令 / 图表可视化 / 支撑不足不硬输出。
 >
 > 三条铁律（沿用平台共识）：① **结构定质量上限**，MVP 里 Optimizer 只动 instructions/few_shots/memory_content，不动 flow/subagent/memory schema；② **可回溯性是生命线**，红线维度；③ **judge 校准不到 ≥0.85 一致率，不许开 Optimizer**——洞察/结构最主观，校准更关键。

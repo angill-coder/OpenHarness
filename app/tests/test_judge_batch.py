@@ -33,9 +33,9 @@ from server import (  # noqa: E402
 from session import Session  # noqa: E402
 
 
-def _load_v2_rubric():
+def _load_research_rubric():
     return json.loads(
-        (HARNESS / "artifacts" / "v2_rubric_research.json").read_text(
+        (HARNESS / "artifacts" / "rubric_research.json").read_text(
             encoding="utf-8"
         )
     )
@@ -922,7 +922,7 @@ class ModelOnlySessionTest(unittest.TestCase):
         with mock.patch.object(
             generator_mod,
             "_build_rubric_research",
-            side_effect=_load_v2_rubric,
+            side_effect=_load_research_rubric,
         ):
             session = Session(
                 "judge-proposal",
