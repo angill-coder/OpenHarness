@@ -151,13 +151,16 @@ fs.writeFileSync(path.join(sqliteVecDir, "package.json"), `${JSON.stringify({
 }, null, 2)}\n`);
 
 const pluginRootToken = "${CODEBUDDY_PLUGIN_ROOT}";
-const windowsCommand = (runner, target) =>
-  `""${pluginRootToken}\\scripts\\${runner}" "${pluginRootToken}\\${target}""`;
 const releaseMcp = {
   mcpServers: {
     "report-memory-v2": targetPlatform === "win32" ? {
       command: "cmd.exe",
-      args: ["/d", "/s", "/c", windowsCommand("run-node.cmd", "dist\\memory-server.mjs")],
+      args: [
+        "/d",
+        "/c",
+        `${pluginRootToken}\\scripts\\run-node.cmd`,
+        `${pluginRootToken}\\dist\\memory-server.mjs`,
+      ],
       env: {
         RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
         RESEARCH_REPORT_BASE_RUBRIC_PATH: `${pluginRootToken}\\rubrics\\v2_rubric_research.json`,
@@ -181,11 +184,11 @@ for (const registrations of Object.values(releaseHooks.hooks)) {
     for (const hook of registration.hooks ?? []) {
       const mode = hook.command.trim().split(/\s+/u).at(-1);
       hook.command = targetPlatform === "win32"
-        ? `cmd.exe /d /s /c ""${pluginRootToken}\\scripts\\run-node.cmd" `
-          + `"${pluginRootToken}\\dist\\capture-checkpoint.mjs" ${mode}"`
+        ? `cmd.exe /d /c call "${pluginRootToken}\\scripts\\run-node.cmd" `
+          + `"${pluginRootToken}\\dist\\capture-checkpoint.mjs" ${mode}`
         : "RESEARCH_REPORT_CAPTURE_HOOK_DIR=$HOME/.research-report-memory-v2-0821/capture-hook-state "
-          + `sh ${pluginRootToken}/scripts/run-node.sh `
-          + `${pluginRootToken}/dist/capture-checkpoint.mjs ${mode}`;
+          + `sh "${pluginRootToken}/scripts/run-node.sh" `
+          + `"${pluginRootToken}/dist/capture-checkpoint.mjs" ${mode}`;
     }
   }
 }

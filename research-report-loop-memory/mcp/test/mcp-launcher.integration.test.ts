@@ -6,11 +6,16 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-function serverArgs(projectRoot: string): string[] {
+function serverTransport(projectRoot: string) {
   const configured = process.env.RESEARCH_REPORT_MEMORY_SERVER_ENTRY?.trim();
-  if (!configured) return [path.join(projectRoot, "scripts/run-node.sh"), "--import", "tsx", "mcp/src/server.ts"];
-  const entry = path.isAbsolute(configured) ? configured : path.join(projectRoot, configured);
-  return [path.join(projectRoot, "scripts/run-node.sh"), entry];
+  const launcher = path.join(projectRoot, "scripts", process.platform === "win32" ? "run-node.cmd" : "run-node.sh");
+  const entry = configured
+    ? path.isAbsolute(configured) ? configured : path.join(projectRoot, configured)
+    : undefined;
+  const args = entry ? [entry] : ["--import", "tsx", "mcp/src/server.ts"];
+  return process.platform === "win32"
+    ? { command: "cmd.exe", args: ["/d", "/c", launcher, ...args] }
+    : { command: "sh", args: [launcher, ...args] };
 }
 
 test("unified MCP launches the packaged Python Runner outside the Agent contract", async () => {
@@ -20,8 +25,7 @@ test("unified MCP launches the packaged Python Runner outside the Agent contract
   fs.writeFileSync(jobPath, JSON.stringify({ schemaVersion: 1 }));
   const client = new Client({ name: "report-loop-launcher-test", version: "1" }, { capabilities: {} });
   const transport = new StdioClientTransport({
-    command: "sh",
-    args: serverArgs(projectRoot),
+    ...serverTransport(projectRoot),
     cwd: projectRoot,
     env: {
       ...process.env,

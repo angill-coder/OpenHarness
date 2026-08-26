@@ -142,16 +142,25 @@ def discover_command(explicit: str | None = None) -> tuple[str, ...]:
     workbuddy = shutil.which("workbuddy")
     if workbuddy:
         return (workbuddy,)
+    # Prefer the standalone Windows CLI over launching the desktop executable
+    # as a nested Node host. Concurrent desktop-hosted CLI processes may start
+    # the same local ACP listener before they ever submit a model request.
+    if os.name == "nt":
+        for name in ("codebuddy", "cbc"):
+            candidate = shutil.which(name)
+            if candidate:
+                return (candidate,)
     windows = _windows_desktop_command()
     if windows:
         return windows
     mac = _mac_workbuddy_command()
     if mac:
         return mac
-    for name in ("codebuddy", "cbc"):
-        candidate = shutil.which(name)
-        if candidate:
-            return (candidate,)
+    if os.name != "nt":
+        for name in ("codebuddy", "cbc"):
+            candidate = shutil.which(name)
+            if candidate:
+                return (candidate,)
     raise WorkBuddyError(
         "已启动 Report Loop，但未能定位 WorkBuddy 模型调用入口；"
         "请检查宿主是否提供 CODEBUDDY_CODE_PATH，或设置 "
@@ -255,10 +264,17 @@ def call_workbuddy(
         or os.environ.get("RESEARCH_REPORT_LOOP_JUDGE_EFFORT")
         or DEFAULT_EFFORT
     ).strip()
-    timeout = float(
-        timeout_seconds
-        or os.environ.get("RESEARCH_REPORT_LOOP_JUDGE_TIMEOUT", "900")
+    configured_timeout = float(
+        os.environ.get("RESEARCH_REPORT_LOOP_JUDGE_TIMEOUT", "900")
     )
+    requested_timeout = (
+        float(timeout_seconds)
+        if timeout_seconds is not None
+        else configured_timeout
+    )
+    # Keep the Report Loop budget as an outer deadline, but never let one
+    # Judge consume more than the configured per-call timeout before fallback.
+    timeout = min(requested_timeout, configured_timeout)
     args = [
         *command,
         "-p",

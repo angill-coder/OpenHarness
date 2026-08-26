@@ -25,11 +25,16 @@ function feedbackEpisode(task: string, feedback: string, extra: Record<string, u
   };
 }
 
-function serverArgs(projectRoot: string): string[] {
+function serverTransport(projectRoot: string) {
   const configured = process.env.RESEARCH_REPORT_MEMORY_SERVER_ENTRY?.trim();
-  if (!configured) return [path.join(projectRoot, "scripts/run-node.sh"), "--import", "tsx", "mcp/src/server.ts"];
-  const entry = path.isAbsolute(configured) ? configured : path.join(projectRoot, configured);
-  return [path.join(projectRoot, "scripts/run-node.sh"), entry];
+  const launcher = path.join(projectRoot, "scripts", process.platform === "win32" ? "run-node.cmd" : "run-node.sh");
+  const entry = configured
+    ? path.isAbsolute(configured) ? configured : path.join(projectRoot, configured)
+    : undefined;
+  const args = entry ? [entry] : ["--import", "tsx", "mcp/src/server.ts"];
+  return process.platform === "win32"
+    ? { command: "cmd.exe", args: ["/d", "/c", launcher, ...args] }
+    : { command: "sh", args: [launcher, ...args] };
 }
 
 test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics", async () => {
@@ -37,8 +42,7 @@ test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics"
   const projectRoot = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "report-memory-v2-test", version: "2.1.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
-    command: "sh",
-    args: serverArgs(projectRoot),
+    ...serverTransport(projectRoot),
     cwd: projectRoot,
     env: { ...process.env, RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir } as Record<string, string>,
     stderr: "pipe",
@@ -206,8 +210,7 @@ test("Memory Agent Context stores report background without creating L1 or L2B",
   const projectRoot = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "research-report-memory-agent-context-test", version: "2.1.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
-    command: "sh",
-    args: serverArgs(projectRoot),
+    ...serverTransport(projectRoot),
     cwd: projectRoot,
     env: { ...process.env, RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir } as Record<string, string>,
     stderr: "pipe",
@@ -273,8 +276,7 @@ test("project Atom inherits a missing scopeValue only from its Episode", async (
   const projectRoot = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "research-report-memory-scope-fallback-test", version: "2.1.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
-    command: "sh",
-    args: serverArgs(projectRoot),
+    ...serverTransport(projectRoot),
     cwd: projectRoot,
     env: { ...process.env, RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir } as Record<string, string>,
     stderr: "pipe",
