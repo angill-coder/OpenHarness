@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_MODEL = "deepseek-v4-pro"
+DEFAULT_MODEL = "deepseek-v4-pro-ioa"
 DEFAULT_EFFORT = "medium"
 MAC_WORKBUDDY_CLI = Path(
     "/Applications/WorkBuddy.app/Contents/Resources/"
@@ -23,6 +23,39 @@ MAC_WORKBUDDY_CLI = Path(
 
 class WorkBuddyError(RuntimeError):
     """WorkBuddy CLI discovery, execution, or response error."""
+
+
+_SAFE_ENVIRONMENT_KEYS = {
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "USERPROFILE",
+    "PATH",
+    "SHELL",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "REQUESTS_CA_BUNDLE",
+}
 
 
 def _windows_desktop_command(path: Path | None = None) -> tuple[str, ...] | None:
@@ -73,9 +106,27 @@ def discover_command(explicit: str | None = None) -> tuple[str, ...]:
 
 
 def build_environment(command: tuple[str, ...]) -> dict[str, str]:
-    environment = dict(os.environ)
+    # The Runner is started by a WorkBuddy host Hook. Inheriting the full App
+    # environment would leak its internal gateway, service-proxy, PAC and daemon
+    # context into a nested CLI. Such a CLI can start and open sockets but never
+    # submit a model request. Build a normal user CLI environment instead.
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key in _SAFE_ENVIRONMENT_KEYS or key.startswith("RESEARCH_REPORT_LOOP_")
+    }
+    config_dir = str(
+        Path(
+            os.environ.get("RESEARCH_REPORT_LOOP_WB_HOME")
+            or os.environ.get("CODEBUDDY_CONFIG_DIR")
+            or os.environ.get("WORKBUDDY_CONFIG_DIR")
+            or (Path.home() / ".workbuddy")
+        ).expanduser()
+    )
     environment.update(
         {
+            "CODEBUDDY_CONFIG_DIR": config_dir,
+            "WORKBUDDY_CONFIG_DIR": config_dir,
             "CODEBUDDY_DISABLE_AUTO_MEMORY": "1",
             "CODEBUDDY_MEMORY_RELEVANCE_DISABLED": "1",
             "CODEBUDDY_MEMORY_EXTRACTION_DISABLED": "1",
@@ -88,9 +139,6 @@ def build_environment(command: tuple[str, ...]) -> dict[str, str]:
         and Path(command[1]).name.lower() == "codebuddy"
     ):
         environment["ELECTRON_RUN_AS_NODE"] = "1"
-    configured_home = os.environ.get("RESEARCH_REPORT_LOOP_WB_HOME")
-    if configured_home:
-        environment["CODEBUDDY_CONFIG_DIR"] = str(Path(configured_home).expanduser())
     configured_product = os.environ.get("RESEARCH_REPORT_LOOP_WB_PRODUCT_CONFIG")
     if configured_product:
         environment["ACC_PRODUCT_CONFIG_PATH"] = str(Path(configured_product).expanduser())

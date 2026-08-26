@@ -35,7 +35,7 @@ function serverArgs(projectRoot: string): string[] {
 test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-v2-0821-e2e-"));
   const projectRoot = path.resolve(import.meta.dirname, "../..");
-  const client = new Client({ name: "research-report-memory-v2-0821-test", version: "2.1.0" }, { capabilities: {} });
+  const client = new Client({ name: "report-memory-v2-test", version: "2.1.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
     command: "sh",
     args: serverArgs(projectRoot),
@@ -51,7 +51,8 @@ test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics"
     await client.connect(transport);
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-      "writing_memory_capture", "writing_memory_capture_payload", "writing_memory_forget", "writing_memory_recall",
+      "report_loop_run",
+      "writing_memory_capture_payload", "writing_memory_forget", "writing_memory_recall",
     ]);
 
     const empty = payload(await client.callTool({
@@ -66,7 +67,7 @@ test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics"
       name: "writing_memory_recall",
       arguments: { task: "用户研究报告", query: feedback, purpose: "review", includeL1: true },
     }));
-    assert.ok(review1.baseRubricIndex.some((item: any) => item.criterionKey === "structure.s1"));
+    assert.equal(review1.baseRubricIndex, undefined, "Memory Agent must not pre-map Base checks");
     assert.equal(review1.rubricSetVersion, "v0");
     const first = payload(await client.callTool({
       name: "writing_memory_capture_payload",
@@ -133,14 +134,7 @@ test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics"
           scope: "core",
           upsertItems: [{
             id: "MR-EXPRESSION-SUMMARY-CONCISE",
-            criterionKey: "structure.s1",
-            operation: "extend",
-            dimension: "structure",
-            label: "摘要精简",
-            desc: "摘要控制在2–3行，仅呈现核心观点及其关键推导逻辑，不展开过程信息。",
-            effect: "摘要冗长会稀释核心结论并增加管理者阅读成本。",
-            requirements: [{ key: "summary.max_lines", text: "摘要控制在2–3行，仅呈现核心观点及其关键推导逻辑" }],
-            redline: false,
+            statement: "摘要控制在2–3行，仅呈现核心观点及其关键推导逻辑，不展开过程信息。",
             status: "active",
             sourceRefs: ["new:summary-long-term"],
           }],
@@ -157,13 +151,15 @@ test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics"
     }));
     assert.equal(recalled.judgeRubrics.length, 1);
     assert.equal(recalled.judgeRubrics[0].id, "MR-EXPRESSION-SUMMARY-CONCISE");
-    assert.match(recalled.context, /\[core\/structure\] 摘要精简/u);
+    assert.equal(recalled.memoryRubrics.length, 1);
+    assert.match(recalled.context, /\[core\] 摘要控制在2–3行/u);
     assert.deepEqual(recalled.sources.l1, [], "writing recall must not expose L1 by default");
 
     const rubricPath = path.join(dataDir, "l2b-rubrics", "personal", "default", "system", "rubrics.json");
     assert.ok(fs.existsSync(rubricPath));
     const storedRubrics = JSON.parse(fs.readFileSync(rubricPath, "utf8"));
-    assert.equal(storedRubrics.rubrics[0].desc, recalled.judgeRubrics[0].desc);
+    assert.equal(storedRubrics.schemaVersion, 3);
+    assert.equal(storedRubrics.rubrics[0].statement, recalled.memoryRubrics[0].statement);
     assert.equal(fs.existsSync(path.join(dataDir, "l2-l3-memory")), false);
 
     const invalid = payload(await client.callTool({
@@ -204,6 +200,73 @@ async function currentRevision(client: Client): Promise<string> {
   }));
   return review.snapshotRevision as string;
 }
+
+test("Memory Agent Context stores report background without creating L1 or L2B", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-agent-context-"));
+  const projectRoot = path.resolve(import.meta.dirname, "../..");
+  const client = new Client({ name: "research-report-memory-agent-context-test", version: "2.1.0" }, { capabilities: {} });
+  const transport = new StdioClientTransport({
+    command: "sh",
+    args: serverArgs(projectRoot),
+    cwd: projectRoot,
+    env: { ...process.env, RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir } as Record<string, string>,
+    stderr: "pipe",
+  });
+
+  try {
+    await client.connect(transport);
+    const feedback = "A 和决策委员会 A 都是指同一位决策者。";
+    const review = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "战略研究报告", query: feedback, purpose: "review", includeL1: true },
+    }));
+    assert.match(review.agentContext, /# Memory Agent Context/u);
+
+    const agentContextDocument = review.agentContext.replace(
+      "## Audiences\n",
+      "## Audiences\n- A、决策委员会 A：均指同一位决策者。\n",
+    );
+    const stored = payload(await client.callTool({
+      name: "writing_memory_capture_payload",
+      arguments: { payload: JSON.stringify({
+        feedback,
+        decision: "store",
+        mode: "feedback",
+        snapshotRevision: review.snapshotRevision,
+        episode: feedbackEpisode("战略研究报告", feedback, {
+          externalSourceId: "agent-context:audience-alias",
+          sessionId: "agent-context-session",
+        }),
+        agentContextDocument,
+      }) },
+    }));
+    assert.equal(stored.status, "stored");
+    assert.equal(stored.written, 0);
+    assert.equal(stored.rubricsWritten, 0);
+    assert.equal(stored.agentContextUpdated, true);
+
+    const next = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "另一份报告", query: "决策委员会 A", purpose: "review", includeL1: true },
+    }));
+    assert.match(next.agentContext, /A、决策委员会 A：均指同一位决策者/u);
+    assert.deepEqual(next.l1Memories, []);
+    assert.deepEqual(next.rubricDocuments.flatMap((document: any) => document.rubrics), []);
+    assert.equal(
+      fs.readFileSync(path.join(dataDir, "agent-context.md"), "utf8"),
+      agentContextDocument,
+    );
+
+    const reflection = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { purpose: "reflection", includeL1: true },
+    }));
+    assert.equal(reflection.agentContext, agentContextDocument);
+  } finally {
+    await client.close();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
 
 test("project Atom inherits a missing scopeValue only from its Episode", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-scope-fallback-"));

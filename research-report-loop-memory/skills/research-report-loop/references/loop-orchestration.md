@@ -1,37 +1,54 @@
-# Report Loop Python orchestration contract
+# Report Loop 执行卡
 
-The App completes the three intake fields, writes V1 with the user-selected main model, then invokes the Python runner once. The App must not run Judge or Rewrite turns itself.
+只在初稿 V1 已保存后读取本文件。Report Loop 是已经验证的黑盒组件：按以下模板构造 Job；Job 写入成功后，插件 Hook 会自动在宿主侧启动 Runner。不要搜索或调用 Report Loop MCP，不要事前阅读 Runner 源码、运行测试、执行 `--help` 或预检。
 
-## Job schema
+## 1. 构造 Job
+
+将 Job 保存为当前报告目录下的 JSON 文件。所有文件路径使用绝对路径。
 
 ```json
 {
   "schemaVersion": 2,
-  "originalUserQuery": "the initial report request",
+  "originalUserQuery": "用户最初的报告请求",
   "intakeContext": {
-    "reportBackground": {"value": "confirmed background"},
-    "materialHypothesis": {"value": "confirmed hypothesis"},
-    "priorityMaterials": [{"path": "C:/workspace/interview.docx", "displayName": "interview.docx"}],
+    "reportBackground": {"value": "已确认的汇报背景"},
+    "materialHypothesis": {"value": "已确认的完整 hypothesis"},
+    "priorityMaterials": [
+      {"path": "/absolute/path/to/material", "displayName": "material"}
+    ],
     "userInputEvidence": {
-      "reportBackground": "exact user-authored text",
-      "materialHypothesis": "exact user-authored text",
-      "priorityMaterials": "exact user-authored text"
+      "reportBackground": "用户消息中的对应原文",
+      "materialHypothesis": "用户消息中的对应原文",
+      "priorityMaterials": "用户消息中的对应原文"
     }
   },
-  "v1ArtifactPath": "C:/workspace/report-v1.md",
-  "structuredDataPath": "C:/workspace/structured_data.json",
+  "audience": "已确认的受众；没有则为空字符串",
+  "project": "当前项目名称；没有则为空字符串",
+  "v1ArtifactPath": "/absolute/path/to/report-v1.md",
+  "structuredDataPath": "/absolute/path/to/structured_data.json",
   "judgeProvider": "workbuddy",
-  "hostModel": {"modelId": "the App-selected model", "effort": "optional"},
-  "outputPath": "C:/workspace/report-final.md"
+  "hostModel": {"effort": "当前 effort，可省略；整个字段也可省略"},
+  "outputPath": "/absolute/path/to/report-final.md"
 }
 ```
 
-Run `scripts/run-python.cmd mcp/report_loop/runner.py --job <absolute-job-path>` on Windows, or the matching shell wrapper on macOS/Linux.
-All three `userInputEvidence` values are mandatory exact excerpts from user-authored messages. System/App/tool-provided paths and attachment metadata are candidate materials only and cannot satisfy this gate. The runner rejects the Job before Judge if any evidence value is missing or empty.
+三项 `userInputEvidence` 必须分别保存用户消息中的真实原文。系统、App、工具提供的路径、附件名称或自动摘要不能代替用户确认。没有 `structured_data.json` 时删除 `structuredDataPath`，不要填写不存在的路径。
 
+不要猜测或填写宿主模型 ID。Job 写入成功后，插件 Hook 会记录本次 WorkBuddy `sessionId`；Runner 据此从主会话 trace 读取准确的 `requestModelId`。同一 workspace 存在多个活跃会话而 session 标识缺失时，Runner 会明确拒绝，不按“最近会话”猜测。
 
-The runner owns the loop. `judgeProvider` is WorkBuddy-only; the Codex CLI route has been removed. Every Judge round starts one isolated WorkBuddy CLI process per active Rubric dimension. It first uses locked `deepseek-v4-pro` with `medium` effort. A transport failure, empty response, or invalid Judge JSON activates a run-wide circuit breaker to the WorkBuddy App host model; a low score does not. Query and all three intake fields are included in every dimension call. Dimension processes, Judge rounds, and Rewriter never share context.
+## 2. 等待宿主 Hook
 
-Rewrite is serial with Judge and uses one long-lived WorkBuddy CLI stream process for the entire run. It uses `hostModel.modelId` and optional effort, receives V1 context on its first turn, and thereafter retains writing, sanitized Judge feedback, and failed-attempt memory. Raw Judge output is never passed to it. Each rewrite starts from the best accepted report.
+Job 写入成功后，PostToolUse Hook 会在 Agent 沙箱外启动 Runner，并返回唯一的结果文件绝对路径和一条后台等待命令。立即使用 `Bash` 工具执行这条命令，设置 `run_in_background=true`，并保存工具返回的 `task_id`。等待任务完成后，WorkBuddy 会注入 `<task-notification>`；收到通知后调用 `TaskOutput(task_id)` 一次，读取完整 JSON 结果。
 
-There is no version limit or Python iteration ledger. Stop when the best accepted score reaches 5, two consecutive candidates are rejected, or 60 minutes elapse. Infrastructure failures return the best judged version with `judge_unavailable` or `rewrite_unavailable`. The runner atomically copies the historical best report to `outputPath` and prints one final JSON object for the App.
+后台等待任务只等待结果文件，不会再次启动 Runner，也不参与 Judge 或 Rewrite。不要反复 Read 结果/状态文件，不要自行编写 shell 轮询。
+
+不要执行 ToolSearch，不要调用 `report_loop_run`，不要检查 MCP 连接状态，也不要并行启动第二个 Loop。Hook 只是宿主侧 Launcher，不参与 Rubric、Judge、Rewrite 或停止条件判断。
+
+## 3. 处理结果
+
+Runner 最终输出一个 JSON 对象：
+
+- 成功：交付 `finalArtifactPath` 指向的文件。
+- `judge_unavailable` 或 `rewrite_unavailable`：交付返回的历史最佳文件并简要说明自动评测或改写未完成。
+- 明确指出 Job 字段缺失或格式错误：只修正该字段并重试一次。
+- 其他错误：保留 V1 和已有历史最佳版本，如实报告错误；不要通过阅读源码、运行测试或手工执行 Judge/Rewrite 来接管流程。

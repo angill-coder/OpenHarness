@@ -24,7 +24,7 @@ from mcp.report_loop.core import workbuddy_cli
 CHECK_PATTERN = re.compile(r"^- ([^（\s]+)（", re.MULTILINE)
 
 
-class PersonalRubricProvider:
+class MemoryRubricProviderFixture:
     def load(self, *, audience: str = "", project: str = "") -> dict:
         return {
             "status": "loaded",
@@ -33,21 +33,18 @@ class PersonalRubricProvider:
             "documents": [{"path": "system/rubrics.json", "scope": "core"}],
             "warnings": [],
             "items": [{
-                "id": "P1",
-                "criterionKey": "personal.forwardable_summary",
-                "operation": "add",
-                "dimension": "personal",
-                "label": "可转发摘要",
-                "desc": "交付时包含一行可以直接转发的摘要。",
-                "effect": "缺少可转发摘要会增加二次编辑成本。",
-                "redline": False,
+                "id": "MR1",
+                "statement": "交付时包含一行可以直接转发的摘要。",
                 "status": "active",
-                "sourceL1Ids": ["atom-personal"],
+                "sourceL1Ids": ["atom-1"],
                 "scope": "core",
                 "scopeValue": None,
                 "sourcePath": "system/rubrics.json",
             }],
         }
+
+    def load_sources(self, source_l1_ids: list[str]) -> list[dict]:
+        return [{"id": value, "content": "来源 L1", "scope": "core"} for value in source_l1_ids]
 
 
 class JudgeFixture:
@@ -63,8 +60,17 @@ class JudgeFixture:
         self.active = 0
         self.max_active = 0
         self.lock = threading.Lock()
+        self.resolution_calls = 0
 
     def __call__(self, prompt: str) -> str:
+        if "Rubric Resolution Judge" in prompt:
+            with self.lock:
+                self.calls += 1
+                self.resolution_calls += 1
+            return json.dumps({"schemaVersion": 1, "decisions": [{
+                "memoryId": "MR1", "mode": "additional", "dimension": "expression",
+                "targetCheckId": None, "judgeText": "交付时包含一行可直接转发的摘要", "reason": "独立长期要求",
+            }]}, ensure_ascii=False)
         with self.lock:
             call_index = self.calls
             self.calls += 1
@@ -145,7 +151,7 @@ class RuntimeTests(unittest.TestCase):
             artifactPath=str(self.report),
         )
         self.assertEqual(result["judgeProvider"], "workbuddy")
-        self.assertEqual(result["judgeModel"], "deepseek-v4-pro")
+        self.assertEqual(result["judgeModel"], "deepseek-v4-pro-ioa")
         self.assertEqual(result["judgeEffort"], "medium")
         self.assertEqual(result["judgeStrategy"], "per_dimension")
         self.assertEqual(result["judgeParallelism"], 6)
@@ -167,13 +173,13 @@ class RuntimeTests(unittest.TestCase):
         meta = state["revisions"][0]["judgment"]["judgeMeta"]
         self.assertEqual(meta["dimension_parallelism"], 6)
 
-    def test_personal_rubric_adds_a_seventh_parallel_judge_only_when_active(self) -> None:
+    def test_memory_is_resolved_once_then_frozen_into_one_of_six_dimensions(self) -> None:
         judge = JudgeFixture([{}], delay_seconds=0.05)
         runtime = ReportLoopRuntime(
-            data_dir=self.root / "personal-data",
+            data_dir=self.root / "memory-data",
             rubric_path=self.rubric,
             judge_call=judge,
-            memory_provider=PersonalRubricProvider(),
+            memory_provider=MemoryRubricProviderFixture(),
         )
         started = runtime.start(
             task="根据给定材料撰写战略研究报告",
@@ -182,11 +188,16 @@ class RuntimeTests(unittest.TestCase):
             artifactPath=str(self.report),
         )
         self.assertEqual(started["rubricSetVersion"], "v1")
-        self.assertTrue(started["personalRubricsActive"])
-        self.assertEqual(started["judgeParallelism"], 7)
+        self.assertEqual(started["resolutionStatus"], "resolved")
+        self.assertEqual(started["appliedMemoryRubricIds"], ["MR1"])
+        self.assertEqual(started["judgeParallelism"], 6)
         result = runtime.submit(runId=started["runId"], artifactPath=str(self.report))
-        self.assertEqual(judge.calls, 7)
-        self.assertIn("personal", result["dimensions"])
+        self.assertEqual(judge.resolution_calls, 1)
+        self.assertEqual(judge.calls, 7, "one resolution call plus six dimension judges")
+        self.assertNotIn("personal", result["dimensions"])
+        run_dir = self.root / "memory-data" / "runs" / started["runId"]
+        for filename in ["base_rubric.json", "memory_rubrics.json", "rubric_resolution_plan.json", "compiled_rubric.json"]:
+            self.assertTrue((run_dir / filename).is_file(), filename)
 
     def test_target_five_stops_after_first_version(self) -> None:
         judge = JudgeFixture([{}])
@@ -289,7 +300,7 @@ class WorkBuddyCliTests(unittest.TestCase):
         args = run.call_args.args[0]
         self.assertEqual(
             args[args.index("--model") + 1],
-            "deepseek-v4-pro",
+            "deepseek-v4-pro-ioa",
         )
         self.assertEqual(args[args.index("--effort") + 1], "medium")
         self.assertEqual(args[args.index("--max-turns") + 1], "1")

@@ -20,7 +20,12 @@ from mcp.report_loop.core.judge_provider import (
     JudgeProviderError,
     locked_report_judge_settings,
 )
+from mcp.report_loop.core.host_model_resolver import (
+    HostModelResolutionError,
+    resolve_host_model_id,
+)
 from mcp.report_loop.core.persistent_rewriter import PersistentRewriter, RewriterError
+from mcp.report_loop.core.memory_rubric_provider import MemoryRubricProvider
 from mcp.report_loop.core.runtime import ReportLoopError, ReportLoopRuntime
 
 
@@ -36,6 +41,7 @@ def _required_text(value: Any, name: str) -> str:
 
 
 def load_job(path: Path) -> dict[str, Any]:
+    path = path.expanduser().resolve()
     job = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(job, dict) or job.get("schemaVersion") != 2:
         raise JobError("schemaVersion must be 2")
@@ -81,11 +87,15 @@ def load_job(path: Path) -> dict[str, Any]:
     if not v1.is_file():
         raise JobError(f"V1 report does not exist: {v1}")
     normalized["v1ArtifactPath"] = str(v1)
-    host_model = job.get("hostModel")
+    host_model = job.get("hostModel") or {}
     if not isinstance(host_model, dict):
-        raise JobError("hostModel must be an object")
+        raise JobError("hostModel must be an object when provided")
+    try:
+        host_model_id = resolve_host_model_id(path)
+    except HostModelResolutionError as exc:
+        raise JobError(str(exc)) from exc
     normalized["hostModel"] = {
-        "modelId": _required_text(host_model.get("modelId"), "hostModel.modelId"),
+        "modelId": host_model_id,
         **({"effort": str(host_model["effort"]).strip()} if str(host_model.get("effort") or "").strip() else {}),
     }
     try:
@@ -93,7 +103,7 @@ def load_job(path: Path) -> dict[str, Any]:
             job.get("judgeProvider")
         ).provider
     except JudgeProviderError as exc:
-        raise JobError("judgeProvider must be workbuddy; Codex CLI is not supported") from exc
+        raise JobError("judgeProvider must be workbuddy or codex") from exc
     normalized["outputPath"] = str(
         Path(_required_text(job.get("outputPath"), "outputPath")).expanduser().resolve()
     )
@@ -131,12 +141,19 @@ def run(
 ) -> dict[str, Any]:
     settings = locked_report_judge_settings(job.get("judgeProvider"))
     model = job["hostModel"]
+    memory_dir = Path(
+        os.environ.get(
+            "RESEARCH_REPORT_MEMORY_V2_0821_DIR",
+            "~/.research-report-memory-v2-0821",
+        )
+    ).expanduser()
     runtime = runtime_factory(
         judge_provider=settings.provider,
         judge_model=settings.model,
         judge_effort=settings.effort,
         judge_fallback_model=model["modelId"],
         judge_fallback_effort=model.get("effort"),
+        memory_provider=MemoryRubricProvider(memory_dir),
     )
     model = job["hostModel"]
     started = runtime.start(
@@ -160,16 +177,22 @@ def run(
                 timeoutSeconds=deadline - time.time(),
             )
         except ReportLoopError as exc:
-            return {
-                "status": "error",
+            result = {
+                "status": "completed",
                 "runId": run_id,
+                "nextAction": "deliver",
                 "stopCode": "judge_unavailable",
-                "reason": str(exc),
+                "stopReason": str(exc),
+                "bestVersion": "v1",
+                "bestScore": None,
+                "bestArtifactPath": job["v1ArtifactPath"],
+                "judgedVersions": 0,
                 "judgeModel": settings.model,
                 "judgeEffort": settings.effort,
                 "judgeProvider": settings.provider,
                 "judgeFallbackProvider": "workbuddy",
                 "judgeFallbackModel": model["modelId"],
+                "judgeFallbackUsed": False,
             }
         while result["nextAction"] == "revise":
             if _cancelled(job):

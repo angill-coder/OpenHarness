@@ -9,43 +9,9 @@ import { L2B_RUBRICS_DIR } from "./storage-layout.ts";
 
 const execFileAsync = promisify(execFile);
 
-export const RUBRIC_DIMENSIONS = [
-  "traceability",
-  "structure",
-  "narrative",
-  "insight",
-  "coverage",
-  "expression",
-  "personal",
-] as const;
-
-export type RubricDimension = (typeof RUBRIC_DIMENSIONS)[number];
-
-export const RUBRIC_OPERATIONS = ["add", "extend", "override", "disable"] as const;
-export type RubricOperation = (typeof RUBRIC_OPERATIONS)[number];
-
-export interface RubricRequirement {
-  key: string;
-  text: string;
-}
-
-export interface RubricOptimizer {
-  pattern_id: string;
-  directive_hint: string;
-  priority: number;
-}
-
 export interface RubricItem {
   id: string;
-  criterionKey: string;
-  operation: RubricOperation;
-  dimension: RubricDimension;
-  label: string;
-  desc: string;
-  effect: string;
-  requirements?: RubricRequirement[];
-  redline: false;
-  optimizer?: RubricOptimizer;
+  statement: string;
   status: "active";
   sourceL1Ids: string[];
 }
@@ -58,7 +24,7 @@ export interface RubricPatch {
 }
 
 export interface LoadedRubricDocument {
-  schemaVersion: 2;
+  schemaVersion: 3;
   path: string;
   scope: WritingMemoryScope;
   scopeValue?: string;
@@ -66,7 +32,7 @@ export interface LoadedRubricDocument {
 }
 
 interface StoredRubricDocument {
-  schemaVersion: 2;
+  schemaVersion: 3;
   scope: WritingMemoryScope;
   scopeValue?: string;
   rubrics: RubricItem[];
@@ -99,23 +65,16 @@ function renderMarkdown(manifest: RubricSetManifest, documents: StoredRubricDocu
   for (const document of documents.sort((a, b) => `${a.scope}:${a.scopeValue ?? ""}`.localeCompare(`${b.scope}:${b.scopeValue ?? ""}`))) {
     lines.push("", `## ${document.scope}${document.scopeValue ? ` · ${document.scopeValue}` : ""}`);
     if (document.rubrics.length === 0) {
-      lines.push("", "_No overlay items._");
+      lines.push("", "_No Memory Rubrics._");
       continue;
     }
     for (const item of document.rubrics) {
       lines.push(
         "",
-        `### ${item.id} · ${item.label}`,
+        `### ${item.id}`,
         "",
-        `- Criterion: \`${item.criterionKey}\``,
-        `- Operation: \`${item.operation}\``,
-        `- Dimension: \`${item.dimension}\``,
-        `- Standard: ${item.desc}`,
-        `- Effect: ${item.effect}`,
+        `- Statement: ${item.statement}`,
       );
-      if (item.requirements?.length) {
-        lines.push("- Requirements:", ...item.requirements.map((value) => `  - \`${value.key}\`: ${value.text}`));
-      }
       lines.push(`- Sources: ${item.sourceL1Ids.map((value) => `\`${value}\``).join(", ")}`);
     }
   }
@@ -151,7 +110,7 @@ export class RubricRepository {
     await fs.mkdir(path.join(this.root, "system"), { recursive: true, mode: 0o700 });
     await fs.mkdir(path.join(this.root, ".memory"), { recursive: true, mode: 0o700 });
     await this.atomicWrite(path.join(this.root, "system", "rubrics.json"), serialize({
-      schemaVersion: 2,
+      schemaVersion: 3,
       scope: "core",
       rubrics: [],
     }));
@@ -166,7 +125,7 @@ export class RubricRepository {
     } satisfies RubricSetManifest, null, 2)}\n`);
     await fs.mkdir(path.join(this.root, "views"), { recursive: true, mode: 0o700 });
     const initialManifest = JSON.parse(await fs.readFile(path.join(this.root, "manifest.json"), "utf8")) as RubricSetManifest;
-    await this.atomicWrite(path.join(this.root, "views", "rubric-set.md"), renderMarkdown(initialManifest, [{ schemaVersion: 2, scope: "core", rubrics: [] }]));
+    await this.atomicWrite(path.join(this.root, "views", "rubric-set.md"), renderMarkdown(initialManifest, [{ schemaVersion: 3, scope: "core", rubrics: [] }]));
     await this.atomicWrite(path.join(this.root, ".memory", "provenance.jsonl"), "");
     await this.git(["add", "--all"], this.root);
     await this.git(["commit", "-m", "memory: initialize L2B rubric repository"], this.root);
@@ -250,7 +209,7 @@ export class RubricRepository {
     const safeRunId = storageSlug(runId);
     const worktree = path.join(this.worktreesRoot, `${Date.now()}-${safeRunId}`);
     const changedPaths = [...new Set(patches.map((patch) => this.pathFor(patch)))];
-    const documents: StoredRubricDocument[] = [];
+    const documentsByPath = new Map<string, StoredRubricDocument>();
     const existingDocuments = new Map<string, StoredRubricDocument>();
     for (const relativePath of await this.rubricPaths(this.root)) {
       const existing = await this.readDocument(relativePath);
@@ -259,21 +218,23 @@ export class RubricRepository {
 
     for (const patch of patches) {
       this.validateScope(patch);
-      const current = await this.readDocument(this.pathFor(patch));
+      const targetPath = this.pathFor(patch);
+      const current = documentsByPath.get(targetPath) ?? await this.readDocument(targetPath);
       const removeIds = new Set(patch.removeItemIds ?? []);
       const upserts = new Map((patch.upsertItems ?? []).map((item) => [item.id, item]));
       const rubrics = (current?.rubrics ?? [])
         .filter((item) => !removeIds.has(item.id) && !upserts.has(item.id));
       rubrics.push(...upserts.values());
       const document: StoredRubricDocument = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         scope: patch.scope,
         ...(patch.scopeValue ? { scopeValue: this.normalizeScopeValue(patch.scope, patch.scopeValue) } : {}),
         rubrics,
       };
       this.validateDocument(document);
-      documents.push(document);
+      documentsByPath.set(targetPath, document);
     }
+    const documents = [...documentsByPath.values()];
 
     try {
       await this.git(["worktree", "add", "--detach", worktree, baseHead], this.root);
@@ -324,25 +285,12 @@ export class RubricRepository {
   private validateDocument(document: StoredRubricDocument): void {
     this.validateScope(document);
     const ids = new Set<string>();
-    const criterionKeys = new Set<string>();
     for (const item of document.rubrics) {
       if (!item.id.trim() || ids.has(item.id)) throw new Error(`invalid_or_duplicate_rubric_id:${item.id}`);
       ids.add(item.id);
-      if (!item.criterionKey.trim() || criterionKeys.has(item.criterionKey)) throw new Error(`invalid_or_duplicate_criterion_key:${item.criterionKey}`);
-      criterionKeys.add(item.criterionKey);
-      if (!RUBRIC_OPERATIONS.includes(item.operation)) throw new Error(`invalid_rubric_operation:${item.id}`);
-      if (!RUBRIC_DIMENSIONS.includes(item.dimension)) throw new Error(`invalid_rubric_dimension:${item.id}`);
-      if (!item.label.trim() || !item.desc.trim() || !item.effect.trim()) throw new Error(`invalid_rubric_item:${item.id}`);
-      if (item.redline !== false || item.status !== "active") throw new Error(`memory_rubric_must_be_non_redline_active:${item.id}`);
+      if (!item.statement.trim()) throw new Error(`invalid_rubric_item:${item.id}`);
+      if (item.status !== "active") throw new Error(`memory_rubric_must_be_active:${item.id}`);
       if (item.sourceL1Ids.length === 0) throw new Error(`rubric_sources_required:${item.id}`);
-      const requirementKeys = new Set<string>();
-      for (const requirement of item.requirements ?? []) {
-        if (!requirement.key.trim() || !requirement.text.trim() || requirementKeys.has(requirement.key)) {
-          throw new Error(`invalid_or_duplicate_requirement:${item.id}:${requirement.key}`);
-        }
-        requirementKeys.add(requirement.key);
-      }
-      if (item.operation === "extend" && requirementKeys.size === 0) throw new Error(`extend_requirements_required:${item.id}`);
     }
   }
 
@@ -361,15 +309,19 @@ export class RubricRepository {
     let raw: string;
     try { raw = await this.git(["show", `HEAD:${relativePath}`], this.root); }
     catch { return undefined; }
-    const parsed = JSON.parse(raw) as StoredRubricDocument & { schemaVersion: number };
-    if (![1, 2].includes(parsed.schemaVersion)) throw new Error(`invalid_rubric_document_schema:${relativePath}`);
+    const parsed = JSON.parse(raw) as Omit<StoredRubricDocument, "rubrics" | "schemaVersion"> & {
+      schemaVersion: number;
+      rubrics: Array<Partial<RubricItem> & { id: string; desc?: string }>;
+    };
+    if (![1, 2, 3].includes(parsed.schemaVersion)) throw new Error(`invalid_rubric_document_schema:${relativePath}`);
     const normalized: StoredRubricDocument = {
       ...parsed,
-      schemaVersion: 2,
+      schemaVersion: 3,
       rubrics: (parsed.rubrics ?? []).map((item) => ({
-        ...item,
-        criterionKey: item.criterionKey?.trim() || item.id,
-        operation: item.operation ?? "add",
+        id: item.id,
+        statement: String(item.statement || item.desc || "").trim(),
+        status: "active",
+        sourceL1Ids: item.sourceL1Ids ?? [],
       })),
     };
     this.validateDocument(normalized);

@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "research-report-memory-v2-0821": {
+    "report-memory-v2": {
       "command": "sh",
       "args": [
         "${PLUGIN_ROOT}/scripts/run-node.sh",

@@ -1,19 +1,24 @@
-"""WorkBuddy-only Judge provider shared by Report Loop runtime and metadata."""
+"""Judge provider selection shared by Report Loop runtime and metadata."""
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
+from .codex_cli import DEFAULT_MODEL as DEFAULT_CODEX_MODEL
+from .codex_cli import call_codex
 from .workbuddy_cli import DEFAULT_MODEL as DEFAULT_WORKBUDDY_MODEL
 from .workbuddy_cli import call_workbuddy
 
 
+PROVIDER_CODEX = "codex"
 PROVIDER_WORKBUDDY = "workbuddy"
 DEFAULT_PROVIDER = PROVIDER_WORKBUDDY
 DEFAULT_EFFORT = "medium"
-LOCKED_REPORT_JUDGE_MODEL = "deepseek-v4-pro"
+LOCKED_REPORT_JUDGE_MODEL = "deepseek-v4-pro-ioa"
 LOCKED_REPORT_JUDGE_EFFORT = "medium"
+LOCKED_CODEX_JUDGE_MODEL = "gpt-5.6-sol"
+LOCKED_CODEX_JUDGE_EFFORT = "medium"
 
 
 class JudgeProviderError(RuntimeError):
@@ -34,13 +39,12 @@ def normalize_provider(value: str | None = None) -> str:
         or DEFAULT_PROVIDER
     ).strip().lower()
     provider = {
+        "codex_cli": PROVIDER_CODEX,
         "wb": PROVIDER_WORKBUDDY,
         "workbuddy_cli": PROVIDER_WORKBUDDY,
     }.get(provider, provider)
-    if provider != PROVIDER_WORKBUDDY:
-        raise JudgeProviderError(
-            "Judge Provider 仅支持 workbuddy；Codex CLI 路径已删除"
-        )
+    if provider not in {PROVIDER_WORKBUDDY, PROVIDER_CODEX}:
+        raise JudgeProviderError("Judge Provider 仅支持 workbuddy 或 codex")
     return provider
 
 
@@ -51,11 +55,21 @@ def resolve_settings(
     effort: str | None = None,
 ) -> JudgeSettings:
     selected_provider = normalize_provider(provider)
+    default_model = (
+        DEFAULT_CODEX_MODEL
+        if selected_provider == PROVIDER_CODEX
+        else DEFAULT_WORKBUDDY_MODEL
+    )
+    provider_model = (
+        os.environ.get("RESEARCH_REPORT_LOOP_CODEX_MODEL")
+        if selected_provider == PROVIDER_CODEX
+        else os.environ.get("RESEARCH_REPORT_LOOP_WB_MODEL")
+    )
     selected_model = str(
         model
-        or os.environ.get("RESEARCH_REPORT_LOOP_WB_MODEL")
+        or provider_model
         or os.environ.get("RESEARCH_REPORT_LOOP_JUDGE_MODEL")
-        or DEFAULT_WORKBUDDY_MODEL
+        or default_model
     ).strip()
     if not selected_model:
         raise JudgeProviderError("Judge 模型不能为空")
@@ -74,9 +88,16 @@ def resolve_settings(
 
 
 def locked_report_judge_settings(provider: str | None = None) -> JudgeSettings:
-    """Return WorkBuddy-only, model-locked Runner settings."""
+    """Return model-locked Runner settings; WorkBuddy remains the default."""
+    selected_provider = normalize_provider(provider)
+    if selected_provider == PROVIDER_CODEX:
+        return JudgeSettings(
+            provider=selected_provider,
+            model=LOCKED_CODEX_JUDGE_MODEL,
+            effort=LOCKED_CODEX_JUDGE_EFFORT,
+        )
     return JudgeSettings(
-        provider=normalize_provider(provider or PROVIDER_WORKBUDDY),
+        provider=selected_provider,
         model=LOCKED_REPORT_JUDGE_MODEL,
         effort=LOCKED_REPORT_JUDGE_EFFORT,
     )
@@ -88,7 +109,13 @@ def call_judge(
     settings: JudgeSettings,
     timeout_seconds: float | None = None,
 ) -> str:
-    normalize_provider(settings.provider)
+    if normalize_provider(settings.provider) == PROVIDER_CODEX:
+        return call_codex(
+            prompt,
+            model=settings.model,
+            effort=settings.effort,
+            timeout_seconds=timeout_seconds,
+        )
     return call_workbuddy(
         prompt,
         model=settings.model,

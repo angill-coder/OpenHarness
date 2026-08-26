@@ -1,108 +1,61 @@
 ---
 name: research-report-loop
-description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究报告或高管汇报，并从用户反馈中学习长期写作要求。当用户要求根据访谈、问卷、PDF、Word、Excel、CSV、structured_data 等素材生成研究报告、调研洞察、战略分析、复盘报告或管理层汇报时使用；初稿完成后必须调用按 Rubric Dimension 隔离的并行 Judge，由 Python Runner 调度隔离 Judge 与持久 Rewriter，直到达到停止条件，并交付历史最佳版本。
+description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究报告、复盘报告或高管汇报，并从用户反馈中学习长期写作要求。当用户要求根据访谈、问卷、PDF、Word、Excel、CSV、structured_data 或公开信息生成研究报告、调研洞察、战略分析或管理层汇报时使用。
 ---
 
-# Research Report Loop
+# 调研洞察汇报报告生成 · Report Loop
 
-## 目标
+## 目的
 
-使用当前宿主 Agent 完成报告初稿，再由 Python Runner 通过隔离 Judge 和持久 Rewriter 自动迭代。写作上下文与 Judge 上下文保持分离；最终交付历史最佳已采纳版本，而不是未经确认的最后一次修改。用户反馈由独立 Memory Curator 记录；L2B 变化会升级 Git-backed Rubric Set，新版本只在下一次 Python Runner 启动时按 Scope 解析进 Judge，不直接 Recall 到写作上下文。
+把用户提供的异构素材整理成一份面向管理层、可编辑的调研洞察报告，并在交付前自动完成评测和改写。
 
-## 专用 Report Memory
+本 Skill 包含两套配套机制：
 
-本插件使用独立的 `research-report-memory-v2-0821`，其层级是 L0 Writing Episode、L1 Atom Memory 和 L2B Rubrics Memory。它与 WorkBuddy 自带的 `~/.workbuddy/MEMORY.md`、项目 `.workbuddy/memory/**` 和工作日志不是同一套记忆。
+- **Report Loop**：宿主 Agent 完成初稿后，Python Runner 使用冻结的 Rubrics 调度隔离 Judge 和持久 Rewriter，最终交付历史最佳版本。
+- **Report Memory**：用户反馈后，宿主先修改当前报告，再委派 Memory Curator 提炼长期写作要求。Memory Rubrics 不进入写作上下文，而在后续 Report Loop 中参与 Judge。
 
-用户明确评价报告写法或提出可复用写作要求时，本身就构成 Capture 触发条件，不需要用户再说“请记住”。宿主必须在完成当前报告修改后，通过 Agent/Task 委派 `research-report-memory-curator`；只有 Curator 可以调用专用 Memory MCP。宿主不得把 WorkBuddy 原生 Memory 的读写当作 Capture 的替代，也不得声称原生 Memory 对应本插件的 L0/L1/L2B。
+## 执行步骤
 
-## 执行流程
+### 第 0 步：盘点并解析素材
 
-### 1. 确认写作输入
+先列出用户指定路径或当前任务范围内的相关文件，说明类型与主题；给素材和关键片段编内部来源号 `S-001`、`S-002`……来源号只用于核验，最终报告正文不展示。
 
-开场必须确认以下三项；只接受用户撰写的消息作为输入，用户已经在 query 或后续回复中明确写出的不要重复询问：
+- 根据文件类型完整读取内容，不只看文件名、摘要或局部页面。
+- 抽取关键数据、访谈原话和结论，同时标出素材之间的口径、来源冲突和信息缺口。
+- 若有 `structured_data.json`，完整读取并保留绝对路径，供 Report Loop 核验。
 
-1. 汇报背景：给谁看、支撑什么决策、什么场合。
-2. 材料假设：用户希望验证或证伪的判断。
-3. 重点素材：哪些文件或证据权重最高。
+### 第 1 步：确认写作输入
 
-系统、开发者、App 或工具注入的路径、附件清单、Files mentioned、素材发现结果，只表示“可用候选素材”，绝不表示用户确认了重点素材或优先级。模型不得根据文件名、路径、素材数量、上下文或常识自行补齐三项中的任何一项。
+素材解析完成后确认以下三项。用户已经明确提供的内容不要重复询问；缺失或含糊时，由 Agent 基于素材主动提出建议，并使用 `AskUserQuestion` 工具向用户确认。
 
-每项必须保存一段来自用户消息的原文证据；可以是初始 query 的原句，也可以是澄清回复。原文可以包含“这些文件”等依赖对话上下文的指代，但不得由模型改写、概括或合成。缺少任何一项用户原文时，必须向用户提问，并在该轮结束；不得读取素材、写 V1、构造 Job 或启动 Runner。
+1. **汇报背景**：给谁看、支撑什么决策、用于什么场合？
+2. **摘要观点假设（hypothesis）**：完成素材解析后，提炼 1–3 条可被素材验证、反驳或修正的完整判断，主动请用户确认、修改或补充。每条 hypothesis 应能在验证后直接转化为摘要核心观点，清楚说明判断对象、方向性结论及关键关系、原因或对比；不能只写成主题、关键词或短标题。观点必须来自素材，证据不足时保留不确定性。用户也可以直接提出自己的 hypothesis。不要为了适配多选框而压缩观点；交互控件不适合展示完整判断时，改用编号文本确认。
+3. **重点素材**：哪些文件或材料质量更高、应优先采用？
 
-澄清可以合并成一轮提问。收到用户回复并补齐三项后，继续完成素材分析、写作和 Report Loop，不要停在“准备开始”的过程说明。
+三项都必须保存一段用户消息原文，供 `intakeContext.userInputEvidence` 使用。系统、App、工具注入的路径和附件清单只是候选素材，不能代替用户确认。缺少用户原文时，在完成素材解析后一次性提问并结束本轮；收到回复后继续写作，不停在“准备开始”的过程说明。
 
-### 2. 读取写作规则和素材
+### 第 2 步：按规则写出初稿
 
-完整读取 [writing-instructions.md](references/writing-instructions.md)，按照其中的证据边界、三段结构、洞察和表达要求写作。
+产出前完整阅读 [writing-instructions.md](references/writing-instructions.md)，按其中的证据边界、三段结构、洞察和表达要求写作。
 
-优先读取用户指定的重点素材。若存在 `structured_data.json`，先完整读取并把路径保留给 Judge；原始资料用于补充语境和核验，不得篡改或补造证据。
+在当前工作目录保存可编辑的 Markdown 初稿 V1。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
 
-### 3. 写出初稿文件
+V1 保存完成之前，不读取 Report Loop 执行卡，不检查或测试 Python Runner。
 
-在当前工作目录创建可编辑的 Markdown 报告，例如 `report.md`。报告正文不得包含写作过程、Judge 说明、内部来源编号或工具状态。
+### 第 3 步：启动 Report Loop
 
-### 4. 启动并执行 Report Loop
+确认 V1 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V1 和素材路径构造 Job。Job 写入成功后，插件 Hook 会在宿主侧自动启动 Runner，并返回后台等待命令。用 `Bash(run_in_background=true)` 启动该命令并保存 `task_id`；收到 `<task-notification>` 后调用 `TaskOutput(task_id)` 读取完整结果。
 
-完整遵循 [loop-orchestration.md](references/loop-orchestration.md)。正式循环只允许由 Python Runner 控制：
+Hook 只负责在 Agent 沙箱外启动已经验证的 Python Runner；Report Loop 逻辑仍全部由 Python Runner 负责。宿主不得搜索或调用 Report Loop MCP，不得事前阅读源码、运行测试、执行 `--help` 或预检，也不得自行执行 Judge 或 Rewrite。取得结果后，只交付 `finalArtifactPath`；写作前不要 Recall Memory。
 
-1. 将用户最初请求单独保存为 originalUserQuery。
-2. 三项交互按真实字段保存，并把对应的用户原文逐字保存为 intakeContext.userInputEvidence.reportBackground、materialHypothesis 和 priorityMaterials；不得用系统路径、附件元数据或模型转述填充 evidence。
-3. 当前宿主模型按写作规则生成 Markdown 初稿 V1；同时记录用户在 App 主对话选择的 hostModel.modelId 和可选 effort。
-4. 写入 Job Schema v2 JSON；judgeProvider 省略或设为 workbuddy，不得使用 codex。然后只调用一次 scripts/run-python.cmd mcp/report_loop/runner.py --job <absolute-job-path>；macOS/Linux 使用对应的 run-python.sh。
-5. 等待 Runner 返回最终 JSON，只交付 finalArtifactPath。宿主不得接收中间 Judge 结果、参与改写或自行推进循环。
+### 第 4 步：处理用户反馈
 
-Python Runner 启动时按 `Base → core → audience → project` 解析并冻结当前 Rubric Set。
+用户对已交付报告提出修改意见时，先直接修改当前报告，不重新运行 Report Loop；只有用户明确要求重新评测时才再运行。修改成功后，按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `research-report-memory-curator` 执行 `operation=capture`，再交付修改结果。
 
-Runner 会为每个 Rubric Dimension 并发启动独立 WorkBuddy Judge CLI；基础配置为六个进程，Personal Rubric 生效时可扩展。Codex CLI 路径已删除。每个进程和每轮 Judge 均隔离上下文，但都收到 originalUserQuery 与完整 intakeContext。优先固定使用 deepseek-v4-pro、medium；仅当调用失败、空响应或 Judge JSON 不合规时，熔断到 WorkBuddy App 当前主模型。评分低不触发回退。
+Judge 反馈和自动改写不得进入 Memory。主 Agent 不直接调用 Memory MCP，也不得因用户反馈修改 Skill、Base Rubrics、插件代码或 WorkBuddy 原生 Memory。
 
-Rewriter 与 Judge 串行、独立调用 CLI，并在整个 Run 内复用同一个 stream-json 进程。Rewriter 使用 hostModel，与初稿 Writer 的 App 主模型一致。首轮收到 query、三项交互和 V1；后续依靠同一进程保留写作、净化后的 Judge 建议和失败尝试记忆。不得把 Judge 原始输出传给 Rewriter。
+## 故障与交付边界
 
-循环没有版本上限，也不建立 Python Iteration Ledger。仅在最佳已采纳版本达到 5 分、连续两个候选版本未被采纳或运行达到 60 分钟时正常停止；始终从历史最佳已采纳版本改写并交付历史最佳。
-
-Report Loop 不注册 MCP Server，也不暴露 start/submit/finish/status 工具；正式执行入口只有 Python Runner。写作前不要另行调用 `writing_memory_recall`，也不要把 Memory Context 拼进报告写作提示词。
-### 5. 交付
-
-向用户交付最终 Markdown 文件并简要说明报告已完成。除非用户主动询问，不展开内部评分、版本试错和工具调用过程。
-
-### 6. 用户反馈后的 Memory Capture
-
-完整遵循 [memory-orchestration.md](references/memory-orchestration.md)：
-
-1. 用户对已交付报告提出修改意见时，先直接修改当前报告文件；这是一次反馈修订，不重新启动或提交 Report Loop。
-2. 确认报告文件修改成功后，再通过 Agent/Task 委派 `research-report-memory-curator` 执行 `operation=capture`。主 Agent 不得直接调用 Memory MCP。
-3. 收到 `MEMORY_CAPTURE_COMPLETED` 或明确失败后，交付本轮修改结果并结束。
-
-用户只表达长期写作要求、明确不要求修改当前报告时，可以跳过文件修订，但仍必须委派 Curator Capture。只有用户明确要求“重新评测”或“再跑一轮 Judge”时，反馈修订后才运行新的 Report Loop。
-
-Judge 的分数、反馈和自动改写不属于用户偏好，绝不能触发 Capture。只有用户反馈和用户实际编辑进入 Memory 学习链。
-
-### 7. 插件资产边界
-
-报告写作和反馈修订期间，只能修改当前报告及用户明确指定的交付文件。以下内容是已安装插件的系统资产，不是用户报告，不得因写作反馈而修改：
-
-- `skills/**`、`SKILL.md` 和写作说明文件；
-- `rubrics/**` 中的 Base Rubric；
-- `dist/**`、`hooks/**`、`mcp/**`、插件 Manifest、脚本和 README；
-- `~/.workbuddy/MEMORY.md` 或项目 `.workbuddy/memory/**`。
-
-用户说“以后都这样写”仍然只进入 Memory Capture，不代表授权修改 Skill 或 Base Rubric。MCP 或插件故障时，不得自行修补安装目录、改写全局记忆或重启 Connector；保留已经完成的报告修改，如实说明 Capture 失败。只有用户明确提出开发或调试插件时，才在插件源码仓库处理，并通过新版本发布，不直接热改安装副本。
-
-## 故障处理
-
-- Job 缺少 hostModel.modelId、三项 intake 或有效 V1 时，Runner 必须在启动循环前失败，不得选择回退模型。
-- 初稿 Judge 从未成功时，Runner 返回 judge_unavailable；可以保留 V1，但不得宣称已经通过 Report Loop。
-- 已有成功评测版本后，Judge 或 Rewriter 失败时分别以 judge_unavailable 或 rewrite_unavailable 结束，并原子交付当前历史最佳版本。
-- 持久 Rewriter 进程崩溃后不得重启、重放 transcript 或另建 Iteration Ledger。
-- cancelFilePath 出现或进程收到取消信号时，以 user_cancelled 结束并交付已有最佳版本。
-- 不要因为故障重新生成已完成正文，也不要由宿主接管中间循环。
-- Memory Capture 失败不应回滚已完成报告；如实说明反馈未写入，不要由主 Agent 越权维护 L1/L2B，也不要修改 Skill、Rubric 或全局 Memory 作为替代。
-
-## 交付前检查
-
-- [ ] 三项开场输入均有用户撰写的原文证据；系统路径和附件清单未被当作确认；三个值字段及 userInputEvidence 已保存，未添加 inputType 或 optionId。
-- [ ] originalUserQuery 单独保存，初稿已由 App 主模型写入 Markdown。
-- [ ] Job Schema v2 包含 hostModel.modelId、V1、outputPath，以及有效的 judgeProvider（省略时为 workbuddy）。
-- [ ] Python Runner 只启动一次；宿主未接收中间 Judge、未参与 Rewrite。
-- [ ] Runner 已结束并返回 finalArtifactPath；交付内容来自历史最佳已采纳版本。
-- [ ] 如本轮收到用户写作反馈，已先修改当前报告、未重跑 Report Loop，再委派 Curator Capture；Judge 反馈未被 Capture。
-- [ ] 未修改已安装 Skill、Base Rubric、插件代码或全局/项目 Memory 文件。
+- Runner 失败时，按 `loop-orchestration.md` 保留可用的历史最佳版本；宿主不得接管中间 Judge 或 Rewrite。
+- Capture 失败不回滚已完成的报告修改，也不得通过热改插件或写入 `~/.workbuddy/MEMORY.md` 补偿。
+- 只交付最终可编辑报告；除非用户主动询问，不展开内部评分、版本试错和工具调用过程。

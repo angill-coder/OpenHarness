@@ -13,7 +13,7 @@ $WorkBuddyConfig = if ($env:CODEBUDDY_CONFIG_DIR) {
 
 $NodeBin = $env:WORKBUDDY_NODE
 if (-not $NodeBin) {
-    $NodeBin = Get-ChildItem (Join-Path $HOME ".workbuddy\binaries\node\versions") -Filter node.exe -Recurse -ErrorAction SilentlyContinue |
+    $NodeBin = Get-ChildItem (Join-Path $WorkBuddyConfig "binaries\node\versions") -Filter node.exe -Recurse -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
 }
 if (-not $NodeBin) {
@@ -46,16 +46,16 @@ if (-not $ProductConfig) {
 }
 if (-not $ProductConfig) { throw "WorkBuddy product.json not found; set WORKBUDDY_PRODUCT_CONFIG." }
 
-$MaintenanceDir = Join-Path $DataDir "maintenance"
-$LogDir = Join-Path $DataDir "maintenance-logs"
-New-Item -ItemType Directory -Force -Path $MaintenanceDir, $LogDir | Out-Null
-$McpConfig = Join-Path $MaintenanceDir "windows-mcp-config.json"
+$ReflectionDir = Join-Path $DataDir "reflection"
+$LogDir = Join-Path $DataDir "reflection-logs"
+New-Item -ItemType Directory -Force -Path $ReflectionDir, $LogDir | Out-Null
+$McpConfig = Join-Path $ReflectionDir "windows-mcp-config.json"
 $NodeRunner = Join-Path $PluginRoot "scripts\run-node.cmd"
 $MemoryServer = Join-Path $PluginRoot "dist\memory-server.mjs"
 $CommandLine = '""{0}" "{1}""' -f $NodeRunner, $MemoryServer
 $Config = @{
     mcpServers = @{
-        "research-report-memory-v2-0821" = @{
+        "report-memory-v2" = @{
             command = "cmd.exe"
             args = @("/d", "/s", "/c", $CommandLine)
             env = @{ RESEARCH_REPORT_MEMORY_V2_0821_DIR = $DataDir }
@@ -65,8 +65,8 @@ $Config = @{
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($McpConfig, ($Config | ConvertTo-Json -Depth 8), $Utf8NoBom)
 
-$Instructions = Get-Content -Raw -Encoding utf8 (Join-Path $PluginRoot "agents\research-report-memory-curator.md")
-$Prompt = "执行 operation=maintenance：只调用 research-report-memory-v2-0821 的 recall 和 capture_payload。读取 purpose=maintenance 的 Snapshot，只处理 pending、dirty 和疑似冲突，只提交增量修改；普通单次反馈不得自动晋升 L2B。没有待办时直接结束。"
+$Instructions = Get-Content -Raw -Encoding utf8 (Join-Path $PluginRoot "agents\research-report-memory-reflection.md")
+$Prompt = "执行 operation=reflection：按 Reflection Prompt 审视上次 checkpoint 后的写作经历。只调用一次 purpose=reflection 的 Recall；有工作时只调用一次 Capture Payload，且只提交增量修改；没有工作时直接结束。"
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $LogFile = Join-Path $LogDir "$Stamp.jsonl"
 
@@ -81,4 +81,4 @@ $env:RESEARCH_REPORT_MEMORY_ALLOW_STORAGE_MIGRATION = "0"
     --output-format stream-json --permission-mode bypassPermissions `
     --append-system-prompt $Instructions $Prompt |
     Out-File -Encoding utf8 $LogFile
-if ($LASTEXITCODE -ne 0) { throw "WorkBuddy maintenance exited with code $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { throw "WorkBuddy Reflection exited with code $LASTEXITCODE" }

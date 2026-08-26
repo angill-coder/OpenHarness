@@ -4,15 +4,15 @@
 
 ## 系统身份
 
-- 本契约中的 Memory 专指 `research-report-memory-v2-0821`：L0 Writing Episode、L1 Atom Memory、L2B Rubrics Memory。
+- 本契约中的 Memory 专指 `report-memory-v2`：L0 Writing Episode、L1 Atom Memory、L2B Rubrics Memory。
 - WorkBuddy 的 `~/.workbuddy/MEMORY.md`、项目 `.workbuddy/memory/**` 和工作日志是宿主原生记忆，不属于本插件，也不能替代本插件 Capture。
 - 用户明确评价报告写法或提出可复用要求时即应 Capture，无需用户额外说“记住”。实时 Capture 只能由宿主通过 Agent/Task 委派 `research-report-memory-curator` 完成。
 
 ## 写作与 Judge
 
 - 写作前不执行 Memory Recall。宿主 Agent只按本轮用户要求和 `research-report-loop` Skill 写初稿。
-- L2B 变化时，Memory Curator 用 Criterion Slot 和 Scope Overlay 升级 Git-backed Rubric Set；不为 Audience×Project 组合保存完整副本。
-- Python Runner 启动时只做确定性 Scope 解析并冻结：`Base → core → audience → project`。相同 Criterion 按高优先级覆盖，不同 Criterion 同时保留。
+- L2B 变化时，Memory Curator 只维护独立的 Git-backed Memory Rubrics，不修改 Base，也不为 Audience×Project 组合保存完整副本。
+- Python Runner 读取 Base 以及 `core / audience / project` Memory Rubric 候选；Provider 不按受众或项目名称做精确匹配。Resolution Judge 根据本轮任务语义判断激活项，必要时读取对应的 `sourceL1`，随后冻结 Resolution Plan 与 compiled rubric，供六维 Judge 共同使用。
 - 同一 Loop 中 Memory 即使更新，也不改变已经冻结的 Rubrics；下一次新建 Loop 才读取新 Revision。
 
 ## 用户反馈后 Capture
@@ -40,5 +40,5 @@
 
 - 本轮用户明确要求决定当前交付目标。
 - Base Rubrics 的红线与硬门槛不能被 Memory 删除或弱化。
-- Memory Scope 内只对相同 `criterionKey` 按 `project > audience > core > Base` 消解冲突；有效 Memory 要求优先于 Skill 的一般风格默认值。
-- 该顺序只用于应用与冲突消解，不用于反推 Memory Scope。
+- Scope 候选从 `core + audience + project` 文档读取；受众/项目名称是否同义、语义重复、适用场景和冲突均由 Resolution Judge 结合任务解释，六维 Judge 不再各自重解释 Memory。
+- 当前任务的 Audience/Project 只作为 Resolution Judge 的判断上下文，不能反推已有记忆或新反馈的 Scope；Scope 仍由 Curator 根据反馈语义判断。

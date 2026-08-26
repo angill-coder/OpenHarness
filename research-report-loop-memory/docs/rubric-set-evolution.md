@@ -1,61 +1,59 @@
-# Rubric Set 演进与 Scope 解析
+# Memory Rubrics 与本轮 Resolution
 
 ## 目标
 
-L2B 不在每轮 Judge 前作为独立 Check 列表临时追加。Memory Curator 在 L2B 证据通过 Gate 后更新 Git-backed Rubric Set，形成新版本；Report Loop 只读取当前版本并做确定性 Scope 解析。
-
-## Rubric Set
-
-一个版本包含四层定义：
+Memory Agent 保持开放判断，只维护独立 Memory Rubrics；Base Rubrics 始终由产品版本管理。Report Loop 启动时，由一个 Judge Model 结合当前任务解释 Base + Memory，一次冻结后再交给六维 Judge，避免六个 Judge 各自理解导致不一致。
 
 ```text
-Base Rubric
-└── Core Overlay
-    └── 当前 Audience Overlay
-        └── 当前 Project Overlay
+Memory Agent：维护独立 Memory Rubrics
+                 ↓
+Python Runner 启动：读取 core + audience + project 候选
+                 ↓
+Resolution Judge：additional / interpret / ignore
+                 ↓
+冻结 Resolution Plan + compiled rubric
+                 ↓
+六维 Judge 并行评测，不再重新解释 Memory
 ```
 
-仓库只保存一个 Base、一个 Core、每个 Audience 一个 Overlay、每个 Project 一个 Overlay，文件数量按 `Audience + Project` 线性增长，不保存 `Audience × Project` 的完整组合。
+## Memory Rubric
 
-## Criterion Slot
+Memory Rubric 不绑定 Base Dimension 或 Check：
 
-每个 Check 使用稳定 `criterionKey` 表示语义槽。Scope 优先级只在相同 Criterion 上生效；不同 Criterion 即使同属一个 Dimension 也同时保留。
-
-Overlay 操作：
-
-- `add`：新增独立 Criterion。
-- `extend`：方向一致，在现有 Criterion 上增加结构化 `requirements`。
-- `override`：方向冲突，用当前 Scope 的完整标准替换低优先级定义。
-- `disable`：当前 Scope 明确不适用；Base 红线不可停用。
-
-解析顺序固定为 `Base → core → audience → project`。运行时不调用模型，不做自然语言语义判断。
-
-## Personal Dimension
-
-只有可观察、可评判且无法归入基础六维的长期要求才进入 `personal`。当前场景没有适用 Personal Check 时不生成该维度，基础六维权重不变；存在时 `personal=0.10`，基础六维按原比例缩放到合计 `0.90`。
-
-## 版本与冻结
-
-每次有效 Overlay 修改在同一个 Git Commit 中：
-
-1. 更新相关 Scope 文档；
-2. 递增 `manifest.json` 的 `vN`；
-3. 更新来源记录；
-4. 生成只读 `views/rubric-set.md`。
-
-Report Loop 启动时记录 Rubric Set Git HEAD、版本、Scope 和 Resolver Hash，并把解析结果写入本轮 `compiled_rubric.json`。同一 Loop 后续版本始终使用该冻结文件。
-
-## 存储约定
-
-```text
-l2b-rubrics/personal/default/
-├── manifest.json
-├── system/rubrics.json
-├── audiences/<canonical-id>/rubrics.json
-├── projects/<canonical-id>/rubrics.json
-├── views/rubric-set.md
-├── .memory/provenance.jsonl
-└── .git/
+```json
+{
+  "id": "MR-SUMMARY-CONCISE",
+  "statement": "报告摘要控制在 2–3 行，只呈现核心观点及关键推导逻辑。",
+  "status": "active",
+  "sourceL1Ids": ["atom-1", "atom-2"]
+}
 ```
 
-JSON 是执行真相；Markdown 是自动生成的人类可读视图，不能反向覆盖 JSON。
+Scope 保存在文档层：`core / audience / project`。仓库只保存一份 core、每个 audience 一份、每个 project 一份，文件数量线性增长，不生成 Audience×Project 组合文件。每次变更形成 Git commit，可审查和回滚。
+
+Memory Agent 只遵守三条原则：
+
+1. 保存未来可从报告直接判断、且会影响质量结论的稳定用户标准。
+2. 优先整合、纠正和精简现有 Memory，保留 Scope 与 L1 来源。
+3. 只维护 Memory Rubrics，不修改、删除或预先映射 Base Rubrics。
+
+## Resolution Plan
+
+只要仓库存在 Memory Rubric 候选，就调用一次 Resolution Judge；真正空仓库不调用模型。Provider 不按 audience/project 字符串预筛选，scope/scopeValue 作为语义线索随候选交给模型。每条候选 Memory 必须得到一个决定：
+
+- `additional`：在一个现有六维中新增本轮检查，不新建维度、不改变权重。
+- `interpret`：细化或替代一条非红线 Base Check 在本场景的适用方式；编译结果明确“本轮以场景解释为准”，但不改写 Base 文件。
+- `ignore`：重复、无关或无法可靠判断，本轮不使用。
+
+硬约束由 Runtime 执行：Base 不可变；红线不可 interpret；每条 Memory 只进入一个六维；计划必须覆盖全部选中 Memory。Resolution 失败时按 Base-only 继续，并保存失败原因，六维 Judge 不临时猜测。
+
+## 每轮冻结文件
+
+每个 run 保存：
+
+- `base_rubric.json`：本轮 Base 快照；
+- `memory_rubrics.json`：全部 Scope 候选的 Memory 快照；
+- `rubric_resolution_plan.json`：一次模型解释的冻结结果；
+- `compiled_rubric.json`：六维 Judge 实际使用的标准。
+
+后续 report rewrite 与再次 Judge 始终使用同一 `compiled_rubric.json`，直到新建下一轮 Report Loop。

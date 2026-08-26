@@ -7,7 +7,6 @@ import { TdaiCore } from "../../node_modules/@tencentdb-agent-memory/memory-tenc
 import type { HostAdapter, LLMRunnerFactory, Logger, RuntimeContext } from "../../node_modules/@tencentdb-agent-memory/memory-tencentdb/src/core/types.ts";
 import { parseConfig } from "../../node_modules/@tencentdb-agent-memory/memory-tencentdb/src/config.ts";
 import { generateMemoryId, writeMemory } from "../../node_modules/@tencentdb-agent-memory/memory-tencentdb/src/core/record/l1-writer.ts";
-import { resolveBaseRubricPath } from "./asset-paths.ts";
 import { normalizeAudience } from "./scope-paths.ts";
 import { RubricRepository, type RubricItem, type RubricPatch } from "./rubric-repository.ts";
 import { classifyWritingFeedback } from "./relevance.ts";
@@ -16,6 +15,16 @@ import { ensureUserShortcut, removeManagedShortcut, resolveLegacyDocumentsShortc
 
 const SESSION_KEY = "research-report-memory-v2-0821";
 const EPISODE_RETENTION_DAYS = 14;
+const DEFAULT_AGENT_CONTEXT = `# Memory Agent Context
+
+以下内容只帮助 Memory Agent 理解报告相关的用户、受众和项目背景，不是写作规范或 Judge Rubrics。
+
+## User
+
+## Audiences
+
+## Projects
+`;
 
 export const WRITING_MEMORY_SCOPES = ["core", "audience", "project"] as const;
 export type WritingMemoryScope = (typeof WRITING_MEMORY_SCOPES)[number];
@@ -34,13 +43,13 @@ function resolveDataDir(): string {
 }
 
 export interface RecallInput {
-  task: string;
+  task?: string;
   query?: string;
   audience?: string;
   project?: string;
   limit?: number;
   includeL1?: boolean;
-  purpose?: "writing" | "judge" | "review" | "maintenance";
+  purpose?: "writing" | "judge" | "review" | "reflection";
 }
 
 export interface ConversationMessage {
@@ -104,11 +113,13 @@ export interface RubricPatchCandidate {
 export interface CaptureInput {
   feedback: string;
   decision: "store" | "pending" | "ignore";
-  mode?: "feedback" | "maintenance" | "manage";
+  mode?: "feedback" | "reflection" | "manage";
   episode?: EpisodeInput;
   atoms?: MemoryCandidate[];
   rubricPatches?: RubricPatchCandidate[];
+  agentContextDocument?: string;
   snapshotRevision?: string;
+  reflectionThrough?: string;
 }
 
 export interface RecoveryInput {
@@ -148,18 +159,10 @@ interface WritingEpisode extends EpisodeInput {
   updatedAt: string;
 }
 
-interface DirtyTarget {
-  scope: WritingMemoryScope;
-  scopeValue?: string;
-  memoryIds?: string[];
-}
-
-interface MaintenanceState {
-  lastSuccessAt: string | null;
-  nextDueAt: string | null;
+interface ReflectionState {
+  lastReflectionAt: string | null;
   checkpoint: string | null;
   repositoryHead: string | null;
-  dirtyTargets: DirtyTarget[];
   lastResult?: Record<string, unknown>;
 }
 
@@ -175,7 +178,6 @@ export class WritingMemoryRuntime {
   private readonly memoryCoreDir: string;
   private readonly l1AtomsDir: string;
   private readonly repository: RubricRepository;
-  private readonly baseRubricPath: string;
   private initialized = false;
 
   constructor(_server: McpServer, dataDir = resolveDataDir()) {
@@ -183,7 +185,6 @@ export class WritingMemoryRuntime {
     this.memoryCoreDir = path.join(dataDir, MEMORYCORE_DIR);
     this.l1AtomsDir = path.join(dataDir, L1_ATOMS_DIR);
     this.repository = new RubricRepository(dataDir);
-    this.baseRubricPath = resolveBaseRubricPath(import.meta.dirname);
     const runtimeContext: RuntimeContext = {
       userId: "default_user",
       sessionId: SESSION_KEY,
@@ -239,7 +240,8 @@ export class WritingMemoryRuntime {
     await this.core.handleBeforeRecall("报告写作记忆初始化", SESSION_KEY);
     await this.purgeLegacyL0Mirror();
     await fs.mkdir(this.episodesDir(), { recursive: true, mode: 0o700 });
-    await fs.mkdir(path.dirname(this.maintenanceStatePath()), { recursive: true, mode: 0o700 });
+    await fs.mkdir(path.dirname(this.reflectionStatePath()), { recursive: true, mode: 0o700 });
+    await this.ensureAgentContext();
     await this.repository.initialize();
     const legacyShortcut = resolveLegacyDocumentsShortcut(this.dataDir);
     if (legacyShortcut) {
@@ -260,8 +262,9 @@ export class WritingMemoryRuntime {
 
   async recall(input: RecallInput) {
     await this.initialize();
-    if (input.purpose === "maintenance") return this.maintenanceSnapshot(input.limit ?? 100);
+    if (input.purpose === "reflection") return this.reflectionSnapshot(input.limit ?? 100);
     if (input.purpose === "review") return this.reviewSnapshot(input, input.limit ?? 100);
+    if (!input.task?.trim()) return { status: "error", reason: "task_required_for_recall" };
 
     const documents = await this.repository.recall({ audience: input.audience, project: input.project });
     const manifest = await this.repository.manifest();
@@ -284,21 +287,25 @@ export class WritingMemoryRuntime {
       purpose: input.purpose ?? "writing",
       recallPlan,
       context: this.renderRecall(recallPlan),
+      memoryRubrics: rubricItems.map((value) => ({ ...value.item, scope: value.scope, scopeValue: value.scopeValue })),
       judgeRubrics: rubricItems.map((value) => ({ ...value.item, scope: value.scope, scopeValue: value.scopeValue })),
       sources: { l2b: rubricItems.map((value) => value.item.id), l1: specificMemories.map((value) => value.id) },
       repositoryHead: await this.repository.head(),
       rubricSetVersion: manifest.version,
-      instruction: "L2B 是 Rubric Set Overlay；Report Loop 按 project > audience > core > base 确定性解析，写作 Agent 不直接 Recall。",
+      instruction: "L2B 是独立 Memory Rubrics；Report Loop 在 start 时选择适用 Scope，并由一次 Resolution Judge 解释为本轮冻结标准。",
     };
   }
 
   async capture(input: CaptureInput) {
     await this.initialize();
     if (input.decision === "ignore") return { status: "ignored", stored: false, reason: "memory_subagent_decision_ignore", records: [] };
-    const maintenance = input.mode === "maintenance";
+    const reflection = input.mode === "reflection";
     const feedbackMode = !input.mode || input.mode === "feedback";
     if (feedbackMode && !input.snapshotRevision) {
       return { status: "error", stored: false, reason: "feedback_review_snapshot_required", records: [] };
+    }
+    if (reflection && (!input.snapshotRevision || !input.reflectionThrough)) {
+      return { status: "error", stored: false, reason: "reflection_snapshot_required", records: [] };
     }
     if (input.snapshotRevision) {
       const snapshotRevision = await this.currentStorageRevision();
@@ -308,11 +315,11 @@ export class WritingMemoryRuntime {
     }
 
     const externalSourceId = input.episode?.externalSourceId?.trim()
-      || (!maintenance && input.episode ? this.feedbackSourceId(input) : undefined);
+      || (!reflection && input.episode ? this.feedbackSourceId(input) : undefined);
     if (input.episode && externalSourceId && !input.episode.externalSourceId) {
       input = { ...input, episode: { ...input.episode, externalSourceId } };
     }
-    const existingEpisode = !maintenance && externalSourceId
+    const existingEpisode = !reflection && externalSourceId
       ? (await this.readEpisodes()).find((item) => item.externalSourceId === externalSourceId)
       : undefined;
     const conversationError = feedbackMode ? this.validateConversationExcerpt(input) : undefined;
@@ -343,16 +350,19 @@ export class WritingMemoryRuntime {
       };
     }
 
-    const relevance = maintenance ? { relevant: true, reason: "maintenance", writingText: input.feedback } : classifyWritingFeedback(input.feedback);
+    const contextUpdateRequested = input.agentContextDocument !== undefined;
+    const relevance = reflection || contextUpdateRequested
+      ? { relevant: true, reason: reflection ? "reflection" : "agent_context", writingText: input.feedback }
+      : classifyWritingFeedback(input.feedback);
     if (!relevance.relevant) return { status: "ignored", stored: false, reason: relevance.reason, records: [] };
-    if (!maintenance && !input.episode?.task.trim()) return {
+    if (!reflection && !input.episode?.task.trim()) return {
       status: "error", stored: false,
       reason: "episode_task_missing_in_payload",
       hint: "feedback capture requires episode: { task, ... }; Runtime creates the Episode in this call",
       records: [],
     };
     if (conversationError) return { status: "error", stored: false, ...conversationError, records: [] };
-    const episode = maintenance ? undefined : existingEpisode ?? await this.saveEpisode({
+    const episode = reflection ? undefined : existingEpisode ?? await this.saveEpisode({
       ...input.episode!, feedback: input.feedback.trim(), status: "pending",
     });
     if (input.decision === "pending") return {
@@ -371,7 +381,15 @@ export class WritingMemoryRuntime {
     const requested = (input.atoms ?? []).map((candidate) =>
       this.withEpisodeScopeValue(candidate, episode));
     const rubricPatchCandidates = input.rubricPatches ?? [];
-    if (requested.length === 0 && rubricPatchCandidates.length === 0) return { status: "error", stored: false, reason: "atoms_or_rubric_patches_required", records: [] };
+    if (requested.length === 0 && rubricPatchCandidates.length === 0 && !contextUpdateRequested) {
+      if (!reflection) return { status: "error", stored: false, reason: "atoms_or_rubric_patches_required", records: [] };
+      const repositoryHead = await this.repository.head();
+      await this.completeReflection(input.reflectionThrough!, repositoryHead, { atomsChanged: 0, rubricsChanged: 0, status: "unchanged" });
+      return {
+        status: "unchanged", stored: true, written: 0, writtenIds: [], rubricsWritten: 0,
+        changedPaths: [], repositoryHead, records: [], reviewedLayers: ["L0", "L1", "L2B"],
+      };
+    }
     const store = this.core.getVectorStore();
     if (!store) return { status: "error", stored: false, reason: "memory_store_unavailable", records: [] };
     const existing = await store.queryL1Records({ sessionKey: SESSION_KEY });
@@ -381,8 +399,8 @@ export class WritingMemoryRuntime {
     const replacedRows = existing.filter((row) => requested.some((candidate) =>
       ["update", "merge"].includes(candidate.action ?? "store") && candidate.targetIds?.includes(row.record_id)));
     const operationIds = new Map<string, string>();
+    const replacementIds = new Map<string, string>();
     const touchedEpisodes = new Set<string>();
-    const dirtyTargets: DirtyTarget[] = [];
     const sessionId = `wb-memory-subagent-${Date.now()}`;
 
     try {
@@ -394,32 +412,40 @@ export class WritingMemoryRuntime {
           writtenIds.push(write.id);
           if (write.created) createdIds.push(write.id);
           if (candidate.operationRef) operationIds.set(candidate.operationRef, write.id);
+          if (["update", "merge"].includes(candidate.action ?? "store")) {
+            for (const targetId of candidate.targetIds ?? []) replacementIds.set(targetId, write.id);
+          }
           for (const sourceId of write.sourceEpisodeIds) touchedEpisodes.add(sourceId);
-          dirtyTargets.push({
-            scope: candidate.scope,
-            ...(candidate.scopeValue ? { scopeValue: candidate.scopeValue.trim() } : {}),
-            memoryIds: [...new Set([write.id, ...(candidate.targetIds ?? [])])],
-          });
         }
       }
       const currentRows = await store.queryL1Records({ sessionKey: SESSION_KEY });
       const activeIds = new Set(currentRows
         .filter((row) => this.parseMetadata(row.metadata_json)?.lifecycle !== "superseded")
         .map((row) => row.record_id));
-      const rubricPatches = this.resolveRubricPatches(rubricPatchCandidates, operationIds, activeIds);
+      const rubricPatches = this.resolveRubricPatches(rubricPatchCandidates, operationIds, replacementIds, activeIds);
       let repositoryResult = { head: await this.repository.head(), changedPaths: [] as string[], rubricSetVersion: (await this.repository.manifest()).version };
-      if (rubricPatches.length > 0) repositoryResult = await this.repository.applyPatches(rubricPatches, `${maintenance ? "maintenance" : "feedback-review"}-${Date.now()}`);
-      const hasEffect = writtenIds.length > 0 || repositoryResult.changedPaths.length > 0;
+      if (rubricPatches.length > 0) repositoryResult = await this.repository.applyPatches(rubricPatches, `${reflection ? "reflection" : "feedback-review"}-${Date.now()}`);
+      const agentContextUpdated = input.agentContextDocument === undefined
+        ? false
+        : await this.writeAgentContext(input.agentContextDocument);
+      const hasEffect = writtenIds.length > 0 || repositoryResult.changedPaths.length > 0 || agentContextUpdated;
       if (!hasEffect) {
         return {
           status: "error", stored: false, reason: "capture_plan_no_effect", retriable: true,
           episodeId: episode?.id, written: 0, writtenIds: [], rubricsWritten: 0,
-          changedPaths: [], repositoryHead: repositoryResult.head, records,
+          changedPaths: [], repositoryHead: repositoryResult.head, agentContextUpdated: false, records,
         };
       }
-      await this.updateDirtyTargets(dirtyTargets, rubricPatches, repositoryResult.head);
       for (const episodeId of touchedEpisodes) await this.markEpisodeProcessed(episodeId, writtenIds);
       if (episode) await this.markEpisodeProcessed(episode.id, writtenIds);
+      if (reflection) {
+        await this.completeReflection(input.reflectionThrough!, repositoryResult.head, {
+          atomsChanged: writtenIds.length,
+          rubricsChanged: repositoryResult.changedPaths.length,
+          agentContextUpdated,
+          status: "updated",
+        });
+      }
       const activeMemory = input.episode ? await this.activeMemoryFor(input.episode) : { activeRubrics: [], memoryContext: "" };
       return {
         status: "stored",
@@ -431,10 +457,10 @@ export class WritingMemoryRuntime {
         changedPaths: repositoryResult.changedPaths,
         repositoryHead: repositoryResult.head,
         rubricSetVersion: repositoryResult.rubricSetVersion,
-        reviewedLayers: ["L0", "L1", "L2B"],
+        agentContextUpdated,
+        reviewedLayers: ["L0", "L1", "L2B", "Agent Context"],
         activeRubrics: activeMemory.activeRubrics,
         memoryContext: activeMemory.memoryContext,
-        dirtyTargets: (await this.readMaintenanceState()).dirtyTargets,
         records,
         sessionId,
       };
@@ -530,7 +556,6 @@ export class WritingMemoryRuntime {
       }, episode, existing, `host-recovery-${Date.now()}`, "host_recovery");
       if (write.id && write.lifecycle === "candidate") candidateL1Ids.push(write.id);
       records.push(write.record);
-      await this.updateDirtyTargets([{ scope: "project", scopeValue: project }], [], await this.repository.head());
     }
     await this.markEpisodeRecoveryPending(episode.id, candidateL1Ids);
     return {
@@ -558,10 +583,6 @@ export class WritingMemoryRuntime {
     if (ids.length > 0) {
       await store.deleteL1Batch(ids);
       await this.purgeJsonl(path.join(this.l1AtomsDir, "records"), (record) => typeof record.id === "string" && ids.includes(record.id));
-      await this.updateDirtyTargets(matches.flatMap((row) => {
-        const metadata = this.parseMetadata(row.metadata_json);
-        return metadata ? [{ scope: metadata.scope, scopeValue: metadata.scopeValue }] : [];
-      }), [], await this.repository.head());
     }
     const highLevel = id ? await this.repository.forgetItem(id, `forget-${Date.now()}`) : { deleted: 0, head: await this.repository.head(), changedPaths: [] };
     let deletedEpisodes = 0;
@@ -646,7 +667,14 @@ export class WritingMemoryRuntime {
       };
     }
     const id = generateMemoryId();
-    const sourceEpisodeIds = [...new Set([...(candidate.sourceEpisodeIds ?? []), ...(episode ? [episode.id] : [])])];
+    const inheritedSourceEpisodeIds = existing
+      .filter((row) => targets.includes(row.record_id))
+      .flatMap((row) => this.parseMetadata(row.metadata_json)?.sourceEpisodeIds ?? []);
+    const sourceEpisodeIds = [...new Set([
+      ...inheritedSourceEpisodeIds,
+      ...(candidate.sourceEpisodeIds ?? []),
+      ...(episode ? [episode.id] : []),
+    ])];
     const metadata: WritingMetadata = {
       domain: "report_writing", scope: candidate.scope,
       ...(scopeValue ? { scopeValue } : {}), sourceEpisodeIds,
@@ -699,36 +727,21 @@ export class WritingMemoryRuntime {
     const existingIds = new Set(existing.map((row) => row.record_id));
     const removedIds = new Set(candidates.flatMap((candidate) =>
       ["update", "merge"].includes(candidate.action ?? "store") ? candidate.targetIds ?? [] : []));
+    const replacementCandidates = new Map<string, MemoryCandidate>();
+    for (const candidate of candidates) {
+      if (!["update", "merge"].includes(candidate.action ?? "store")) continue;
+      for (const targetId of candidate.targetIds ?? []) replacementCandidates.set(targetId, candidate);
+    }
     const operationCandidates = new Map<string, MemoryCandidate>();
     for (const candidate of candidates.filter((value) => (value.action ?? "store") !== "skip")) {
       if (!candidate.operationRef) continue;
       if (operationCandidates.has(candidate.operationRef)) throw new Error(`operation_ref_duplicate:${candidate.operationRef}`);
       operationCandidates.set(candidate.operationRef, candidate);
     }
-    const criterionIndex = new Map<string, { dimension: string; locked: boolean; overlayIds: Set<string> }>();
-    for (const item of await this.baseRubricIndex()) {
-      criterionIndex.set(item.criterionKey, { dimension: item.dimension, locked: item.locked, overlayIds: new Set() });
-    }
-    const repository = await this.repository.snapshot();
-    for (const item of repository.documents.flatMap((document) => document.rubrics)) {
-      if (item.operation === "disable") continue;
-      const current = criterionIndex.get(item.criterionKey);
-      if (current) current.overlayIds.add(item.id);
-      else criterionIndex.set(item.criterionKey, { dimension: item.dimension, locked: false, overlayIds: new Set([item.id]) });
-    }
     for (const document of rubricPatches) {
       const items = document.upsertItems ?? [];
       for (const item of items) {
-        const target = criterionIndex.get(item.criterionKey);
-        if (item.operation === "add" && target && !target.overlayIds.has(item.id)) {
-          throw new Error(`rubric_add_existing_criterion:${item.id}:${item.criterionKey}`);
-        }
-        if (item.operation !== "add" && !target) throw new Error(`rubric_target_not_found:${item.id}:${item.criterionKey}`);
-        if (target && target.dimension !== item.dimension) throw new Error(`rubric_dimension_mismatch:${item.id}:${item.criterionKey}`);
-        if (target?.locked && ["override", "disable"].includes(item.operation)) {
-          throw new Error(`rubric_locked_base_criterion:${item.id}:${item.criterionKey}`);
-        }
-        if (item.operation === "add" && !target) criterionIndex.set(item.criterionKey, { dimension: item.dimension, locked: false, overlayIds: new Set([item.id]) });
+        if (!item.statement?.trim()) throw new Error(`invalid_rubric_item:${item.id}`);
         const refs = item.sourceRefs ?? item.sourceL1Ids ?? [];
         if (refs.length === 0) throw new Error(`document_source_not_found:${item.id}`);
         for (const ref of refs) {
@@ -741,7 +754,15 @@ export class WritingMemoryRuntime {
             continue;
           }
           const id = ref.startsWith("existing:") ? ref.slice(9) : ref;
-          if (!existingIds.has(id) || removedIds.has(id)) throw new Error(`document_source_not_found:${item.id}`);
+          if (!existingIds.has(id)) throw new Error(`document_source_not_found:${item.id}`);
+          const replacement = removedIds.has(id) ? replacementCandidates.get(id) : undefined;
+          if (removedIds.has(id) && !replacement) throw new Error(`document_source_not_found:${item.id}`);
+          if (replacement) {
+            if (!this.documentSourceScopeMatches(document, replacement.scope, replacement.scopeValue)) {
+              throw new Error(`document_source_scope_mismatch:${item.id}:${id}`);
+            }
+            continue;
+          }
           const row = existing.find((value) => value.record_id === id);
           const metadata = row ? this.parseMetadata(row.metadata_json) : undefined;
           if (!metadata || !this.documentSourceScopeMatches(document, metadata.scope, metadata.scopeValue)) {
@@ -757,7 +778,12 @@ export class WritingMemoryRuntime {
       && this.scopeValuesEqual(sourceScope, document.scopeValue, sourceScopeValue);
   }
 
-  private resolveRubricPatches(candidates: RubricPatchCandidate[], operationIds: Map<string, string>, validIds: Set<string>): RubricPatch[] {
+  private resolveRubricPatches(
+    candidates: RubricPatchCandidate[],
+    operationIds: Map<string, string>,
+    replacementIds: Map<string, string>,
+    validIds: Set<string>,
+  ): RubricPatch[] {
     return candidates.map((document) => ({
       scope: document.scope,
       ...(document.scopeValue ? { scopeValue: document.scopeValue } : {}),
@@ -770,7 +796,8 @@ export class WritingMemoryRuntime {
             if (!resolved) throw new Error(`document_source_ref_not_found:${value}`);
             return resolved;
           }
-          return value.startsWith("existing:") ? value.slice(9) : value;
+          const existingId = value.startsWith("existing:") ? value.slice(9) : value;
+          return replacementIds.get(existingId) ?? existingId;
         });
         if (sourceL1Ids.length === 0 || sourceL1Ids.some((value) => !validIds.has(value))) throw new Error(`document_source_not_found:${item.id}`);
         const result = { ...item, sourceL1Ids: [...new Set(sourceL1Ids)] } as Record<string, unknown>;
@@ -780,40 +807,50 @@ export class WritingMemoryRuntime {
     }));
   }
 
-  private async maintenanceSnapshot(limit: number) {
+  private async reflectionSnapshot(limit: number) {
     const expiredEpisodes = await this.cleanupExpiredPendingEpisodes();
     const store = this.core.getVectorStore();
     if (!store) return { status: "error", reason: "memory_store_unavailable" };
     const rows = await store.queryL1Records({ sessionKey: SESSION_KEY });
-    const pendingEpisodes = (await this.readEpisodes())
-      .filter((episode) => episode.status === "pending" || episode.status === "recovery_pending")
+    const allEpisodes = await this.readEpisodes();
+    const repository = await this.repository.snapshot();
+    const agentContext = await this.readAgentContext();
+    const state = await this.readReflectionState();
+    const cutoff = state.lastReflectionAt ? Date.parse(state.lastReflectionAt) : Number.NEGATIVE_INFINITY;
+    const changedEpisodes = allEpisodes
+      .filter((episode) => Date.parse(episode.updatedAt || episode.createdAt) > cutoff)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .slice(0, limit);
-    const repository = await this.repository.snapshot();
-    const state = await this.readMaintenanceState();
     const memories = rows
       .map((row) => ({ row, metadata: this.parseMetadata(row.metadata_json) }))
-      .filter((value) => value.metadata?.domain === "report_writing");
-    const pendingEpisodeIds = new Set(pendingEpisodes.map((episode) => episode.id));
+      .filter((value) => value.metadata?.domain === "report_writing" && value.metadata.lifecycle !== "superseded");
+    const changedEpisodeIds = new Set(changedEpisodes.map((episode) => episode.id));
     const selectedIds = new Set<string>();
-    const conflictGroups: Array<Record<string, unknown>> = [];
-    const targetMatches = (target: DirtyTarget, metadata: WritingMetadata) =>
-      target.scope === metadata.scope && this.scopeValuesEqual(target.scope, target.scopeValue, metadata.scopeValue);
-
     for (const value of memories) {
-      if (value.metadata!.sourceEpisodeIds.some((id) => pendingEpisodeIds.has(id))) selectedIds.add(value.row.record_id);
-      for (const target of state.dirtyTargets) {
-        if (!targetMatches(target, value.metadata!)) continue;
-        if (target.memoryIds?.includes(value.row.record_id)) selectedIds.add(value.row.record_id);
+      const linkedFromEpisode = changedEpisodes.some((episode) =>
+        episode.linkedL1Ids?.includes(value.row.record_id) || episode.candidateL1Ids?.includes(value.row.record_id));
+      const linkedFromMetadata = value.metadata!.sourceEpisodeIds.some((id) => changedEpisodeIds.has(id));
+      if (Date.parse(value.row.updated_time) > cutoff || linkedFromEpisode || linkedFromMetadata) {
+        selectedIds.add(value.row.record_id);
       }
     }
-    for (const target of state.dirtyTargets.filter((value) => !value.memoryIds?.length)) {
+
+    // Replay older atoms from the same Scope when they may duplicate or
+    // conflict with a changed atom. This mirrors Letta Reflection's habit of
+    // revisiting related memory instead of treating each run as append-only.
+    const seedMemories = memories.filter((value) => selectedIds.has(value.row.record_id));
+    const replayIds = new Set<string>();
+    for (const seed of seedMemories) {
       memories
-        .filter((value) => targetMatches(target, value.metadata!))
-        .sort((a, b) => b.row.updated_time.localeCompare(a.row.updated_time))
-        .slice(0, 12)
-        .forEach((value) => selectedIds.add(value.row.record_id));
+        .filter((value) => value.row.record_id !== seed.row.record_id)
+        .filter((value) => value.metadata!.scope === seed.metadata!.scope
+          && this.scopeValuesEqual(value.metadata!.scope, value.metadata!.scopeValue, seed.metadata!.scopeValue))
+        .filter((value) => this.normalize(value.row.content) === this.normalize(seed.row.content)
+          || this.rulesPossiblyOverlap(value.row.content, seed.row.content))
+        .slice(0, 6)
+        .forEach((value) => replayIds.add(value.row.record_id));
     }
+    replayIds.forEach((id) => selectedIds.add(id));
 
     const byScope = new Map<string, typeof memories>();
     for (const value of memories) {
@@ -830,7 +867,6 @@ export class WritingMemoryRuntime {
         if (group.length < 2) continue;
         const ids = group.map((value) => value.row.record_id);
         ids.forEach((id) => selectedIds.add(id));
-        conflictGroups.push({ reason: "exact_duplicate", memoryIds: ids });
       }
 
       const seeds = values.filter((value) => selectedIds.has(value.row.record_id));
@@ -841,16 +877,9 @@ export class WritingMemoryRuntime {
         if (related.length === 0) continue;
         const ids = [seed.row.record_id, ...related.map((value) => value.row.record_id)];
         ids.forEach((id) => selectedIds.add(id));
-        conflictGroups.push({
-          reason: "possible_overlap_or_conflict",
-          scope: seed.metadata!.scope,
-          ...(seed.metadata!.scopeValue ? { scopeValue: seed.metadata!.scopeValue } : {}),
-          memoryIds: ids,
-        });
       }
     }
 
-    const allEpisodes = await this.readEpisodes();
     const l1Memories = memories
       .filter((value) => selectedIds.has(value.row.record_id))
       .sort((a, b) => b.row.updated_time.localeCompare(a.row.updated_time))
@@ -859,38 +888,40 @@ export class WritingMemoryRuntime {
         id: value.row.record_id,
         rule: value.row.content,
         ...value.metadata,
+        reflectionRole: replayIds.has(value.row.record_id) ? "replay" : "changed",
         evidence: this.evidenceForL1(value.row.record_id, value.metadata!, allEpisodes),
       }));
-    const includedIds = new Set(l1Memories.map((memory) => memory.id));
+    const relevantScopeKeys = new Set(l1Memories.map((memory) =>
+      `${memory.scope}:${memory.scopeValue ?? ""}`.toLocaleLowerCase("zh-CN")));
     const rubricDocuments = repository.documents.flatMap((document) => {
-      const rubrics = document.rubrics.filter((item) => item.sourceL1Ids.some((id) => includedIds.has(id)));
-      if (rubrics.length === 0) return [];
-      return [{ ...document, rubrics }];
+      const key = `${document.scope}:${document.scopeValue ?? ""}`.toLocaleLowerCase("zh-CN");
+      return relevantScopeKeys.has(key) ? [document] : [];
     });
-    const noWork = pendingEpisodes.length === 0 && state.dirtyTargets.length === 0 && conflictGroups.length === 0;
+    const noWork = changedEpisodes.length === 0 && seedMemories.length === 0;
+    const reflectionThrough = new Date().toISOString();
     const payload = {
       status: "ok",
-      purpose: "maintenance",
+      purpose: "reflection",
       noWork,
-      pendingEpisodes,
+      changedEpisodes,
       l1Memories,
-      dirtyTargets: state.dirtyTargets,
-      suspectedConflicts: conflictGroups,
       rubricDocuments,
+      agentContext,
       repositoryHead: repository.head,
       rubricSetVersion: repository.manifest.version,
-      baseRubricIndex: await this.baseRubricIndex(),
+      reflectionThrough,
       expiredEpisodes,
       workSummary: {
-        pendingEpisodes: pendingEpisodes.length,
-        dirtyTargets: state.dirtyTargets.length,
-        suspectedConflicts: conflictGroups.length,
+        changedEpisodes: changedEpisodes.length,
+        changedL1: seedMemories.length,
+        replayL1: replayIds.size,
         selectedL1: l1Memories.length,
         selectedRubrics: rubricDocuments.reduce((sum, document) => sum + document.rubrics.length, 0),
+        expiredPendingEpisodes: expiredEpisodes.length,
       },
       instruction: noWork
-        ? "没有待处理或疑似冲突内容；直接返回 MEMORY_MAINTENANCE_COMPLETED status=unchanged，不调用 Capture。"
-        : "只处理返回的 pending/dirty/conflict 工作集；聚合跨 Episode 证据。L2B 变化时用 criterionKey + operation 升级 Rubric Set；证据不足时保持不变。",
+        ? "上次 Reflection 后没有新增或变化的经历；直接返回 MEMORY_REFLECTION_COMPLETED status=unchanged，不调用 Capture。"
+        : "审视 changed 与 replay 证据；优先修正、合并和精简已有记忆。只提交增量，证据不足时保持 L2B 不变。",
     };
     return { ...payload, snapshotRevision: await this.storageRevision(rows, repository.head) };
   }
@@ -900,7 +931,7 @@ export class WritingMemoryRuntime {
     if (!store) return { status: "error", reason: "memory_store_unavailable" };
     const rows = await store.queryL1Records({ sessionKey: SESSION_KEY });
     const episodes = await this.readEpisodes();
-    const query = input.query?.trim() || input.task;
+    const query = input.query?.trim() || input.task?.trim() || "";
     const l1Memories = rows
       .map((row) => ({ row, metadata: this.parseMetadata(row.metadata_json) }))
       .filter((value) => value.metadata?.domain === "report_writing" && this.scopeApplies(value.metadata, input))
@@ -921,6 +952,7 @@ export class WritingMemoryRuntime {
     const rubricDocuments = await this.repository.recall({ audience: input.audience, project: input.project });
     const repositoryHead = await this.repository.head();
     const manifest = await this.repository.manifest();
+    const agentContext = await this.readAgentContext();
     return {
       status: "ok",
       purpose: "review",
@@ -929,30 +961,18 @@ export class WritingMemoryRuntime {
       project: input.project ?? null,
       l1Memories,
       rubricDocuments,
+      agentContext,
       repositoryHead,
       rubricSetVersion: manifest.version,
-      baseRubricIndex: await this.baseRubricIndex(),
       snapshotRevision: await this.storageRevision(rows, repositoryHead),
-      instruction: "结合当前反馈、L1 独立证据、Base Criterion 与现有 Overlay 判断。普通单次反馈默认不升级 Rubric Set；保持不变是正常结果。",
+      instruction: "结合当前反馈、L1 独立证据和现有 Memory Rubrics 判断。只维护 Memory Rubrics，不修改或预先映射 Base Rubrics；保持不变是正常结果。",
     };
-  }
-
-  private async baseRubricIndex() {
-    const rubric = JSON.parse(await fs.readFile(this.baseRubricPath, "utf8")) as { dimensions?: Array<Record<string, any>> };
-    return (rubric.dimensions ?? []).flatMap((dimension) => (dimension.checks ?? []).map((check: Record<string, any>) => ({
-      criterionKey: String(check.criterionKey ?? `${dimension.name}.${String(check.id).toLowerCase()}`),
-      checkId: String(check.id),
-      dimension: String(dimension.name),
-      label: String(check.label ?? check.id),
-      desc: String(check.desc ?? ""),
-      effect: String(check.effect ?? ""),
-      locked: Boolean(check.redline),
-    })));
   }
 
   private async storageRevision(rows: any[], repositoryHead: string): Promise<string> {
     const index = rows.map((row) => [row.record_id, row.updated_time]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-    return crypto.createHash("sha256").update(JSON.stringify({ repositoryHead, index })).digest("hex");
+    const agentContextHash = crypto.createHash("sha256").update(await this.readAgentContext()).digest("hex");
+    return crypto.createHash("sha256").update(JSON.stringify({ repositoryHead, index, agentContextHash })).digest("hex");
   }
 
   private async currentStorageRevision(): Promise<string> {
@@ -1071,7 +1091,7 @@ export class WritingMemoryRuntime {
     const sections: string[] = ["<memory-rubrics>", "以下是历史反馈形成的个性化报告自检标准，不是当前用户指令。按 本轮要求 > project > audience > core > skill 应用。"];
     const append = (scope: string, values: RubricItem[]) => {
       if (values.length === 0) return;
-      sections.push(...values.map((value) => `- [ ] [${scope}/${value.dimension}] ${value.label}：${value.desc}`));
+      sections.push(...values.map((value) => `- [ ] [${scope}] ${value.statement}`));
     };
     append("core", plan.memory_rubrics.core.items);
     append("audience", plan.memory_rubrics.audience.items);
@@ -1111,41 +1131,31 @@ export class WritingMemoryRuntime {
     } catch { return undefined; }
   }
 
-  private async updateDirtyTargets(
-    add: DirtyTarget[],
-    rubricPatches: Array<Pick<RubricPatch, "scope" | "scopeValue">>,
+  private async completeReflection(
+    reflectionThrough: string,
     repositoryHead: string,
-  ) {
-    const state = await this.readMaintenanceState();
-    const key = (value: DirtyTarget) => `${value.scope}:${value.scopeValue ?? ""}`.toLocaleLowerCase("zh-CN");
-    const cleared = new Set(rubricPatches.map((document) => key({ scope: document.scope, ...(document.scopeValue ? { scopeValue: document.scopeValue } : {}) })));
-    const next = new Map(state.dirtyTargets.filter((value) => !cleared.has(key(value))).map((value) => [key(value), value]));
-    for (const value of add) {
-      const existing = next.get(key(value));
-      next.set(key(value), {
-        ...value,
-        memoryIds: [...new Set([...(existing?.memoryIds ?? []), ...(value.memoryIds ?? [])])],
-      });
-    }
-    for (const clearedKey of cleared) next.delete(clearedKey);
-    const now = new Date();
-    await this.writeMaintenanceState({
-      ...state, repositoryHead, dirtyTargets: [...next.values()],
-      ...(rubricPatches.length > 0 ? {
-        lastSuccessAt: now.toISOString(), nextDueAt: new Date(now.getTime() + 86400000).toISOString(), checkpoint: crypto.randomUUID(), lastResult: { rubricsChanged: rubricPatches.length },
-      } : {}),
+    lastResult: Record<string, unknown>,
+  ): Promise<void> {
+    if (!Number.isFinite(Date.parse(reflectionThrough))) throw new Error("invalid_reflection_through");
+    await this.writeReflectionState({
+      lastReflectionAt: reflectionThrough,
+      checkpoint: crypto.randomUUID(),
+      repositoryHead,
+      lastResult,
     });
   }
 
-  private async readMaintenanceState(): Promise<MaintenanceState> {
-    try { return JSON.parse(await fs.readFile(this.maintenanceStatePath(), "utf8")) as MaintenanceState; }
+  private async readReflectionState(): Promise<ReflectionState> {
+    try { return JSON.parse(await fs.readFile(this.reflectionStatePath(), "utf8")) as ReflectionState; }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return { lastSuccessAt: null, nextDueAt: null, checkpoint: null, repositoryHead: await this.repository.head(), dirtyTargets: [] };
+      return { lastReflectionAt: null, checkpoint: null, repositoryHead: await this.repository.head() };
     }
   }
 
-  private async writeMaintenanceState(state: MaintenanceState) { await this.atomicWrite(this.maintenanceStatePath(), `${JSON.stringify(state, null, 2)}\n`); }
+  private async writeReflectionState(state: ReflectionState) {
+    await this.atomicWrite(this.reflectionStatePath(), `${JSON.stringify(state, null, 2)}\n`);
+  }
 
   private async cleanupExpiredPendingEpisodes(): Promise<string[]> {
     const cutoff = Date.now() - EPISODE_RETENTION_DAYS * 86400000;
@@ -1220,7 +1230,32 @@ export class WritingMemoryRuntime {
 
   private episodesDir() { return path.join(this.dataDir, L0_EPISODES_DIR); }
   private episodePath(id: string) { return path.join(this.episodesDir(), `${id}.json`); }
-  private maintenanceStatePath() { return path.join(this.dataDir, "maintenance", "state.json"); }
+  private reflectionStatePath() { return path.join(this.dataDir, "reflection", "state.json"); }
+  private agentContextPath() { return path.join(this.dataDir, "agent-context.md"); }
+
+  private async ensureAgentContext(): Promise<void> {
+    try { await fs.access(this.agentContextPath()); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await this.atomicWrite(this.agentContextPath(), DEFAULT_AGENT_CONTEXT);
+    }
+  }
+
+  private async readAgentContext(): Promise<string> {
+    try { return await fs.readFile(this.agentContextPath(), "utf8"); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return DEFAULT_AGENT_CONTEXT;
+    }
+  }
+
+  private async writeAgentContext(content: string): Promise<boolean> {
+    const normalized = `${content.replace(/\r\n?/gu, "\n").trim()}\n`;
+    if (!normalized.startsWith("# Memory Agent Context\n")) throw new Error("invalid_agent_context_heading");
+    if (normalized === await this.readAgentContext()) return false;
+    await this.atomicWrite(this.agentContextPath(), normalized);
+    return true;
+  }
 
   private async readEpisodes(): Promise<WritingEpisode[]> {
     let files: string[];

@@ -41,6 +41,8 @@ def build_judge_prompt(rubric, report_text, case_context) -> str:
         "开头说明豁免依据；不得仅因用户没有提及某项 Rubric 就使用豁免。",
         "事实准确、素材忠实、冲突口径、证据不足诚实留白等可追溯性要求不得使用"
         " user_override；用户要求与 Rubric 兼容时仍按 Rubric 正常评价。",
+        "本轮 Rubric 已由 Resolution Judge 将 Base 与适用 Memory 解释并冻结。"
+        "只按当前 check 评判，不重新解释 Memory 的范围、归类或优先级。",
     ]
     if len(dimensions) == 1:
         dimension = dimensions[0]
@@ -90,13 +92,22 @@ def build_judge_prompt(rubric, report_text, case_context) -> str:
             check_id = str(check["id"])
             check_ids.append(check_id)
             redline = " [红线]" if check.get("redline") else ""
+            memory_ids = []
+            if check.get("memory"):
+                memory_ids.append(str(check["memory"].get("memoryId") or ""))
+            memory_ids.extend(
+                str(item.get("memoryId") or "")
+                for item in check.get("memoryInterpretations") or []
+            )
+            memory_note = " [Memory: %s]" % ",".join(value for value in memory_ids if value) if memory_ids else ""
             lines.append(
-                "- %s（%s·%s%s）：%s；触发降档：%s"
+                "- %s（%s·%s%s%s）：%s；触发降档：%s"
                 % (
                     check_id,
                     name_zh,
                     check.get("label", check_id),
                     redline,
+                    memory_note,
                     check.get("desc", ""),
                     check.get("effect", ""),
                 )

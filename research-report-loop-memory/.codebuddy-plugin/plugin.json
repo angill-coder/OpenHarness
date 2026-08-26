@@ -1,6 +1,6 @@
 {
   "name": "research-report-loop-memory",
-  "version": "1.0.0-mvp.18",
+  "version": "1.0.0-mvp.27",
   "description": "宿主 Agent 写作、按 Rubric Dimension 并行 Judge，并从用户反馈演进版本化 Rubric Set",
   "author": {
     "name": "Research Report Team"
@@ -15,7 +15,8 @@
   ],
   "skills": "./skills",
   "agents": [
-    "./agents/research-report-memory-curator.md"
+    "./agents/research-report-memory-curator.md",
+    "./agents/research-report-memory-reflection.md"
   ],
   "hooks": "./hooks/hooks.json",
   "mcpServers": "./.mcp.json"

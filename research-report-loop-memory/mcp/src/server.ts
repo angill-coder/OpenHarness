@@ -1,25 +1,26 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { RUBRIC_DIMENSIONS, RUBRIC_OPERATIONS } from "./rubric-repository.ts";
+import { ReportLoopLauncher } from "./report-loop-launcher.ts";
 import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
 
 const server = new McpServer(
-  { name: "research-report-memory-v2-0821", version: "2.1.0-mvp.18" },
+  { name: "report-memory-v2", version: "1.0.0-mvp.27" },
   {
     capabilities: { logging: {} },
     instructions: [
-      "research-report 专用写作记忆 V2-0821。",
-      "Recall/Capture/Forget 由 research-report-memory-curator WB Sub-agent 调用；主写作 Agent 只有在 Hook 授权后才能使用 Recover 暂存待复核记忆。",
-      "L0 Episode 和 L1 Atom 使用 TencentDB MemoryCore；L2B 作为 Git-backed Rubric Set Overlay，通过 Criterion Slot 演进静态 Rubrics 版本。",
+      "report-memory-v2：research-report 专用写作记忆服务。",
+      "实时 Recall/Capture/Forget 由 research-report-memory-curator WB Sub-agent 调用；后台 consolidation 由 research-report-memory-reflection WB Sub-agent 调用。主写作 Agent 只有在 Hook 授权后才能使用 Recover 暂存待复核记忆。",
+      "L0 Episode 和 L1 Atom 使用 TencentDB MemoryCore；L2B 是独立的 Git-backed Memory Rubrics，不改写 Base Rubrics。",
       "Scope 仅使用 core/audience/project；冲突优先级为本轮要求 > project > audience > core > research-report skill。",
       "每次 writing feedback capture 都保存 L0、按需聚合 L1，并保守判断是否更新 L2B；普通单次反馈默认不改变 L2B。",
-      "只有无法归入基础六维的 Judge-ready 长期要求才进入 personal；Personal 为空时不参与评分。",
+      "report_loop_run 是宿主侧薄 Launcher：只在 MCP 宿主边界启动现有 Python Runner，不承载 Report Loop 业务逻辑。",
     ].join(" "),
   },
 );
 
 const runtime = new WritingMemoryRuntime(server);
+const reportLoopLauncher = new ReportLoopLauncher();
 const scopeSchema = z.enum(WRITING_MEMORY_SCOPES);
 
 function result(payload: unknown) {
@@ -30,25 +31,37 @@ function result(payload: unknown) {
 }
 
 server.registerTool(
+  "report_loop_run",
+  {
+    title: "启动报告评测改写循环",
+    description: "宿主侧薄 Launcher。传入绝对 Job JSON 路径，在 Agent 沙箱外运行现有 Python Report Loop Runner，并返回 Runner 的最终 JSON。",
+    inputSchema: {
+      jobPath: z.string().min(1).max(4000).describe("宿主 Agent 已写入的 Job Schema v2 JSON 绝对路径"),
+    },
+  },
+  async ({ jobPath }) => result(await reportLoopLauncher.run(jobPath)),
+);
+
+server.registerTool(
   "writing_memory_recall",
   {
     title: "读取报告写作记忆",
-    description: "WB Memory Sub-agent 用于 review/maintenance；Report Loop 直接读取并解析版本化 Rubric Set。",
+    description: "WB Memory Sub-agent 用于 review/reflection；Report Loop 直接读取并解析版本化 Rubric Set。",
     inputSchema: {
-      task: z.string().min(1).describe("已确认的报告任务"),
+      task: z.string().min(1).optional().describe("已确认的报告任务；reflection 时省略"),
       query: z.string().max(2000).optional().describe("review 时传当前反馈，用于选择相关历史证据"),
       audience: z.string().max(160).optional().describe("报告受众或汇报环境"),
       project: z.string().max(200).optional().describe("当前项目名或稳定项目标识"),
       includeL1: z.boolean().optional().default(false).describe("仅在 Memory Agent 需要原子证据时开启；写作 Recall 默认关闭"),
       limit: z.number().int().min(1).max(100).optional(),
-      purpose: z.enum(["writing", "judge", "review", "maintenance"]).optional().default("writing"),
+      purpose: z.enum(["writing", "judge", "review", "reflection"]).optional().default("writing"),
     },
   },
   async (input) => result(await runtime.recall(input)),
 );
 
 const memorySchema = z.object({
-  operationRef: z.string().min(1).max(80).optional().describe("同一次 maintenance 中供高层文档以 new:<ref> 引用"),
+  operationRef: z.string().min(1).max(80).optional().describe("同一次 capture 中供高层文档以 new:<ref> 引用"),
   rule: z.string().min(3).max(800).describe("一条可复用的原子写作规则"),
   scope: scopeSchema,
   scopeValue: z.string().min(1).max(200).optional().describe("audience/project scope 必填"),
@@ -67,35 +80,10 @@ const sourceFields = {
 
 const rubricItemSchema = z.object({
   id: z.string().min(1).max(120),
-  criterionKey: z.string().min(3).max(200)
-    .describe("稳定语义槽，例如 structure.summary_quality；相同槽才允许 extend/override"),
-  operation: z.enum(RUBRIC_OPERATIONS)
-    .describe("add 新增独立检查；extend 同向扩充；override 冲突替换；disable 在当前 Scope 停用"),
-  dimension: z.enum(RUBRIC_DIMENSIONS),
-  label: z.string().min(3).max(200),
-  desc: z.string().min(3).max(1600),
-  effect: z.string().min(3).max(800),
-  requirements: z.array(z.object({
-    key: z.string().min(3).max(200),
-    text: z.string().min(3).max(800),
-  }).strict()).max(20).optional()
-    .describe("extend 必填；以稳定 key 去重并按 core→audience→project 覆盖"),
-  redline: z.literal(false).default(false),
-  optimizer: z.object({
-    pattern_id: z.string().min(1).max(160),
-    directive_hint: z.string().min(1).max(160),
-    priority: z.number().int().min(1).max(1000),
-  }).optional(),
+  statement: z.string().min(3).max(1600).describe("可独立评判、但不预先绑定 Base 维度或 Check 的用户写作标准"),
   status: z.literal("active").default("active"),
   ...sourceFields,
-}).superRefine((item, context) => {
-  if (item.operation === "extend" && (item.requirements?.length ?? 0) === 0) {
-    context.addIssue({ code: "custom", path: ["requirements"], message: "extend requires requirements" });
-  }
-  if (item.dimension === "personal" && item.operation !== "add") {
-    context.addIssue({ code: "custom", path: ["operation"], message: "personal criterion starts with add; later updates reuse the same item id" });
-  }
-});
+}).strict();
 
 const rubricPatchSchema = z.object({
   scope: scopeSchema,
@@ -146,33 +134,26 @@ const episodeSchema = z.object({
 });
 
 const captureInputSchema = z.object({
-  feedback: z.string().min(1).describe("用户原始反馈，maintenance 时填本次整理说明"),
+  feedback: z.string().min(1).describe("用户原始反馈；reflection 时填本次审视说明"),
   decision: z.enum(["store", "pending", "ignore"]),
-  mode: z.enum(["feedback", "maintenance", "manage"]).optional().default("feedback"),
+  mode: z.enum(["feedback", "reflection", "manage"]).optional().default("feedback"),
   episode: episodeSchema.optional(),
   atoms: z.array(memorySchema).max(30).optional(),
-  rubricPatches: z.array(rubricPatchSchema).max(12).optional()
+  rubricPatches: z.array(rubricPatchSchema).optional()
     .describe("增量升级 Rubric Set Overlay；普通反馈证据不足时省略此字段"),
-  snapshotRevision: z.string().min(1).max(128).optional().describe("feedback 模式必须来自 purpose=review；maintenance 模式来自 purpose=maintenance"),
+  agentContextDocument: z.string().min(25).max(20000).optional()
+    .describe("Memory Agent 自用的完整 Markdown 上下文；仅在用户、受众或项目背景发生明确变化时传入，不属于 Rubrics"),
+  snapshotRevision: z.string().min(1).max(128).optional().describe("feedback 模式来自 purpose=review；reflection 模式来自 purpose=reflection"),
+  reflectionThrough: z.string().datetime().optional().describe("reflection 模式必须原样带回 Snapshot 的增量截止时间"),
 }).strict();
-
-server.registerTool(
-  "writing_memory_capture",
-  {
-    title: "写入与整理报告写作记忆",
-    description: "WB Memory Sub-agent 使用。feedback 模式保存 L0/L1，并只在稳定证据或强烈长期诉求成立时更新 L2B Overlay 与 Rubric Set 版本。",
-    inputSchema: captureInputSchema.shape,
-  },
-  async (input) => result(await runtime.capture(input)),
-);
 
 server.registerTool(
   "writing_memory_capture_payload",
   {
     title: "以 JSON Payload 写入报告写作记忆",
-    description: "WB Memory Sub-agent 专用稳定 Capture 入口。完整请求编码为一个 JSON 字符串，使用 atoms 和可选 rubricPatches。",
+    description: "WB Memory Sub-agent 唯一 Capture 入口。feedback 传完整反馈和 Episode；reflection 只需 mode、snapshotRevision、reflectionThrough 及增量 changes，服务端自动补齐固定字段。",
     inputSchema: {
-      payload: z.string().min(2).max(100000).describe("符合 writing_memory_capture schema 的完整 JSON object 字符串"),
+      payload: z.string().min(2).max(100000).describe("Capture JSON object 字符串。reflection 可省略 feedback 和 decision；服务端按 reflection/store 处理"),
     },
   },
   async ({ payload }) => {
@@ -181,6 +162,16 @@ server.registerTool(
       parsed = JSON.parse(payload);
     } catch (error) {
       return result({ status: "error", reason: `invalid_capture_payload_json: ${error instanceof Error ? error.message : String(error)}` });
+    }
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const value = parsed as Record<string, unknown>;
+      if (value.mode === "reflection") {
+        parsed = {
+          feedback: "Scheduled memory reflection",
+          decision: "store",
+          ...value,
+        };
+      }
     }
     const validated = captureInputSchema.safeParse(parsed);
     if (!validated.success) {
@@ -205,6 +196,7 @@ server.registerTool(
 );
 
 const shutdown = async () => {
+  await reportLoopLauncher.destroy();
   await runtime.destroy();
   process.exit(0);
 };

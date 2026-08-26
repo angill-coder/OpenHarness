@@ -42,10 +42,10 @@ if [ -z "$PRODUCT_CONFIG" ] || [ ! -f "$PRODUCT_CONFIG" ]; then
   exit 1
 fi
 
-mkdir -p "$DATA_DIR/maintenance" "$DATA_DIR/maintenance-logs"
+mkdir -p "$DATA_DIR/reflection" "$DATA_DIR/reflection-logs"
 STAMP=$(date '+%Y%m%d-%H%M%S')
-INSTRUCTIONS=$(sed '/^---$/,/^---$/d' "$PLUGIN_ROOT/agents/research-report-memory-curator.md")
-MCP_CONFIG_FILE="$DATA_DIR/maintenance/integrated-mcp-config.json"
+INSTRUCTIONS=$(sed '/^---$/,/^---$/d' "$PLUGIN_ROOT/agents/research-report-memory-reflection.md")
+MCP_CONFIG_FILE="$DATA_DIR/reflection/integrated-mcp-config.json"
 
 "$NODE_BIN" -e '
 const fs = require("node:fs");
@@ -58,7 +58,7 @@ const args = fs.existsSync(bundledServer)
   : ["--import", "tsx", sourceServer];
 const config = {
   mcpServers: {
-    "research-report-memory-v2-0821": {
+    "report-memory-v2": {
       command: "sh",
       args: [path.join(pluginRoot, "scripts/run-node.sh"), ...args],
       env: { RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir },
@@ -80,5 +80,5 @@ env CODEBUDDY_CONFIG_DIR="$WORKBUDDY_USER_DIR" \
   --output-format stream-json \
   --permission-mode bypassPermissions \
   --append-system-prompt "$INSTRUCTIONS" \
-  "执行 operation=maintenance：只调用 mcp__research-report-memory-v2-0821__writing_memory_recall 和 mcp__research-report-memory-v2-0821__writing_memory_capture_payload。先读取 purpose=maintenance 的 Snapshot，复审待处理 L0/L1 与疑似冲突，只提交增量修改；保守判断是否更新 L2B，普通单次反馈不得自动晋升。没有待办时直接结束。" \
-  > "$DATA_DIR/maintenance-logs/$STAMP.jsonl"
+  "执行 operation=reflection：按 Reflection Prompt 审视上次 checkpoint 后的写作经历。只调用一次 purpose=reflection 的 Recall；有工作时只调用一次 Capture Payload，且只提交增量修改；没有工作时直接结束。" \
+  > "$DATA_DIR/reflection-logs/$STAMP.jsonl"

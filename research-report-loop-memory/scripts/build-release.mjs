@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { buildSync } from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, ".codebuddy-plugin/plugin.json"), "utf8"));
@@ -13,16 +14,9 @@ const curatorPromptExplicit = curatorPromptArgIndex >= 0;
 const curatorPromptVariant = curatorPromptExplicit
   ? process.argv[curatorPromptArgIndex + 1]
   : "v1-gate-first";
-const judgeProviderArgIndex = process.argv.indexOf("--judge-provider");
-const requestedJudgeProvider = judgeProviderArgIndex >= 0
-  ? process.argv[judgeProviderArgIndex + 1]
-  : "workbuddy";
-if (requestedJudgeProvider !== "workbuddy") {
-  throw new Error("Only the WorkBuddy Judge provider is supported");
-}
-const judgeProvider = "workbuddy";
 const judgeDefaults = {
-  workbuddy: { model: "deepseek-v4-pro", effort: "medium" },
+  workbuddy: { model: "deepseek-v4-pro-ioa", effort: "medium" },
+  codex: { model: "gpt-5.6-sol", effort: "medium" },
 };
 const noArchive = process.argv.includes("--no-archive");
 const targetPlatformArgIndex = process.argv.indexOf("--target-platform");
@@ -75,34 +69,33 @@ fs.rmSync(zipPath, { force: true });
 fs.rmSync(`${zipPath}.sha256`, { force: true });
 fs.mkdirSync(path.join(pluginDir, "dist"), { recursive: true });
 
-const esbuildCli = path.join(root, "node_modules/esbuild/bin/esbuild");
-run(process.execPath, [esbuildCli,
-  "mcp/src/server.ts",
-  "--bundle",
-  "--platform=node",
-  "--format=esm",
-  "--target=node22",
-  `--outfile=${path.join(pluginDir, "dist/memory-server.mjs")}`,
-  '--banner:js=import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
-  `--alias:ai=${path.join(root, "scripts/build-stubs/ai.mjs")}`,
-  `--alias:@ai-sdk/openai=${path.join(root, "scripts/build-stubs/openai.mjs")}`,
-  `--alias:undici=${path.join(root, "scripts/build-stubs/undici.mjs")}`,
-  `--alias:@node-rs/jieba=${path.join(root, "scripts/build-stubs/jieba.mjs")}`,
-  `--alias:@node-rs/jieba/dict.js=${path.join(root, "scripts/build-stubs/jieba-dict.mjs")}`,
-  "--external:sqlite-vec",
-  "--external:node-llama-cpp",
-  "--external:openclaw/*",
-  "--legal-comments=none",
-]);
-run(process.execPath, [esbuildCli,
-  "hooks/capture-checkpoint.mjs",
-  "--bundle",
-  "--platform=node",
-  "--format=esm",
-  "--target=node22",
-  `--outfile=${path.join(pluginDir, "dist/capture-checkpoint.mjs")}`,
-  "--legal-comments=none",
-]);
+buildSync({
+  entryPoints: [path.join(root, "mcp/src/server.ts")],
+  outfile: path.join(pluginDir, "dist/memory-server.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
+  alias: {
+    ai: path.join(root, "scripts/build-stubs/ai.mjs"),
+    "@ai-sdk/openai": path.join(root, "scripts/build-stubs/openai.mjs"),
+    undici: path.join(root, "scripts/build-stubs/undici.mjs"),
+    "@node-rs/jieba": path.join(root, "scripts/build-stubs/jieba.mjs"),
+    "@node-rs/jieba/dict.js": path.join(root, "scripts/build-stubs/jieba-dict.mjs"),
+  },
+  external: ["sqlite-vec", "node-llama-cpp", "openclaw/*"],
+  legalComments: "none",
+});
+buildSync({
+  entryPoints: [path.join(root, "hooks/capture-checkpoint.mjs")],
+  outfile: path.join(pluginDir, "dist/capture-checkpoint.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  legalComments: "none",
+});
 for (const item of [
   ".codebuddy-plugin/plugin.json",
   "agents",
@@ -118,11 +111,13 @@ for (const item of [
   "scripts/register-workbuddy-local.mjs",
   "scripts/migrate-rubric-scope-paths.mjs",
   "scripts/verify-mcp-contract.mjs",
-  "scripts/run-memory-maintenance-workbuddy.sh",
-  "scripts/run-memory-maintenance-workbuddy.ps1",
-  "scripts/install-maintenance-macos.sh",
-  "scripts/install-maintenance-windows.ps1",
-  "scripts/maintenance-launchagent.plist.template",
+  "scripts/run-memory-reflection-workbuddy.sh",
+  "scripts/run-memory-reflection-workbuddy.ps1",
+  "scripts/reflection-current.sh",
+  "scripts/reflection-current.ps1",
+  "scripts/install-reflection-macos.sh",
+  "scripts/install-reflection-windows.ps1",
+  "scripts/macos-reflection-schedule.plist.template",
   "README.md",
   "LICENSE.md",
 ]) copyPlugin(item);
@@ -160,7 +155,7 @@ const windowsCommand = (runner, target) =>
   `""${pluginRootToken}\\scripts\\${runner}" "${pluginRootToken}\\${target}""`;
 const releaseMcp = {
   mcpServers: {
-    "research-report-memory-v2-0821": targetPlatform === "win32" ? {
+    "report-memory-v2": targetPlatform === "win32" ? {
       command: "cmd.exe",
       args: ["/d", "/s", "/c", windowsCommand("run-node.cmd", "dist\\memory-server.mjs")],
       env: {
@@ -219,15 +214,20 @@ fs.writeFileSync(path.join(pluginDir, "BUILD-INFO.json"), `${JSON.stringify({
   node: process.version,
   builtAt: new Date().toISOString(),
   curatorPromptVariant,
-  judgeProviders: ["workbuddy"],
+  judgeProviders: ["workbuddy", "codex"],
   defaultJudgeProvider: "workbuddy",
-  judgeModel: judgeDefaults.workbuddy.model,
-  judgeEffort: judgeDefaults.workbuddy.effort,
+  judgeDefaults,
   judgeFallbackProvider: "workbuddy",
-  judgeFallbackModelSource: "hostModel",
+  judgeFallbackModelSource: "workbuddy-trace-requestModelId",
   judgeFallbackTriggers: ["transport_error", "empty_response", "invalid_judge_json"],
   intakeUserEvidenceRequired: true,
   judgePromptTransport: "stdin",
+  reportLoopLaunchBoundary: "workbuddy-host-hook",
+  reportLoopTrigger: "report-loop-job-write",
+  reportLoopWaitTransport: "workbuddy-background-task",
+  reportLoopWaitNotification: "task-notification-then-TaskOutput",
+  reportLoopResultTransport: "job-sibling-json",
+  reportLoopCompatibilityTool: "report_loop_run",
 }, null, 2)}\n`);
 
 const marketplace = {
@@ -252,8 +252,9 @@ fs.copyFileSync(path.join(root, "README.md"), path.join(outputDir, "README.md"))
 for (const executable of [
   "scripts/run-node.sh",
   "scripts/run-python.sh",
-  "scripts/run-memory-maintenance-workbuddy.sh",
-  "scripts/install-maintenance-macos.sh",
+  "scripts/run-memory-reflection-workbuddy.sh",
+  "scripts/reflection-current.sh",
+  "scripts/install-reflection-macos.sh",
 ]) {
   fs.chmodSync(path.join(pluginDir, executable), 0o755);
 }
@@ -278,6 +279,7 @@ if (fs.existsSync(zipPath)) {
 }
 process.stdout.write(
   `Release built: ${outputDir}\nCurator prompt: ${curatorPromptVariant}`
-  + `\nJudge: ${judgeProvider} / ${judgeDefaults[judgeProvider].model}`
-  + ` / ${judgeDefaults[judgeProvider].effort}\n`,
+  + `\nDefault Judge: workbuddy / ${judgeDefaults.workbuddy.model}`
+  + ` / ${judgeDefaults.workbuddy.effort}; optional: codex / ${judgeDefaults.codex.model}`
+  + ` / ${judgeDefaults.codex.effort}\n`,
 );
