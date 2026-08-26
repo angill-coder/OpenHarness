@@ -1,11 +1,33 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+function nodeWithSqlite(): string {
+  const candidates = [process.env.CODEBUDDY_NODE_BIN, process.execPath];
+  const configRoot = process.env.WORKBUDDY_CONFIG_DIR
+    || process.env.CODEBUDDY_CONFIG_DIR
+    || path.join(os.homedir(), ".workbuddy");
+  const versionsRoot = path.join(configRoot, "binaries", "node", "versions");
+  if (fs.existsSync(versionsRoot)) {
+    for (const version of fs.readdirSync(versionsRoot).sort().reverse()) {
+      candidates.push(path.join(versionsRoot, version, process.platform === "win32" ? "node.exe" : "bin/node"));
+    }
+  }
+  for (const candidate of candidates) {
+    if (!candidate || !fs.existsSync(candidate)) continue;
+    const probe = spawnSync(candidate, ["-e", 'require("node:sqlite")']);
+    if (probe.status === 0) return candidate;
+  }
+  throw new Error("Node.js with node:sqlite is required for the Expert MCP package test");
+}
 
 test("WorkBuddy Expert remains a thin wrapper around the existing plugin", () => {
   const agent = fs.readFileSync(path.join(root, "expert/report-expert-v1.md"), "utf8");
@@ -25,7 +47,7 @@ test("WorkBuddy Expert remains a thin wrapper around the existing plugin", () =>
   assert.doesNotMatch(builder, /expertType:\s*"team"/u);
 });
 
-test("packaged Expert Reflection uses the Expert root, MCP name, and launcher", () => {
+test("packaged Expert keeps Report Loop hooks and uses a cross-platform Memory MCP", async () => {
   const completed = spawnSync(
     process.execPath,
     [path.join(root, "scripts/build-expert.mjs"), "--no-archive"],
@@ -61,20 +83,66 @@ test("packaged Expert Reflection uses the Expert root, MCP name, and launcher", 
     if (process.platform === "win32") {
       assert.match(command, /^cmd\.exe \/d \/c call "\$\{CODEBUDDY_PLUGIN_ROOT\}\\bin\\run-node\.cmd" /u);
       assert.match(command, /"\$\{CODEBUDDY_PLUGIN_ROOT\}\\bin\\capture-checkpoint\.mjs"/u);
-      assert.doesNotMatch(command, /\/s|""|\bsh\b|run-node"/u);
+      assert.doesNotMatch(command, /\/s|""|\bsh\b/u);
     } else {
       assert.match(command, /^sh "\$\{CODEBUDDY_PLUGIN_ROOT\}\/bin\/run-node" /u);
       assert.match(command, /"\$\{CODEBUDDY_PLUGIN_ROOT\}\/bin\/capture-checkpoint\.mjs"/u);
       assert.doesNotMatch(command, /cmd\.exe|run-node\.cmd|\\bin\\/u);
     }
   }
-  if (process.platform === "win32") {
-    assert.equal(manifest.mcpServers["report-expert-v2"].command, "cmd.exe");
-    assert.deepEqual(manifest.mcpServers["report-expert-v2"].args, [
-      "/d",
-      "/c",
-      "${CODEBUDDY_PLUGIN_ROOT}\\bin\\run-node.cmd",
-      "${CODEBUDDY_PLUGIN_ROOT}\\dist\\memory-server.mjs",
+  const memoryMcp = manifest.mcpServers["report-expert-v2"];
+  assert.equal(memoryMcp.command, "node");
+  assert.equal(memoryMcp.args[0], "-e");
+  assert.match(memoryMcp.args[1], /WORKBUDDY_CONFIG_DIR/u);
+  assert.match(memoryMcp.args[1], /CODEBUDDY_CONFIG_DIR/u);
+  assert.match(memoryMcp.args[1], /my-experts/u);
+  assert.match(memoryMcp.args[1], /report-loop/u);
+  assert.match(memoryMcp.args[1], /memory-server\.mjs/u);
+  assert.doesNotMatch(JSON.stringify(memoryMcp), /cmd\.exe|run-node\.cmd|"command":"sh"/u);
+  assert.deepEqual(memoryMcp.env, {
+    RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
+  });
+
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "report-expert-mcp-"));
+  const installedExpert = path.join(
+    temporary,
+    "plugins",
+    "marketplaces",
+    "my-experts",
+    "plugins",
+    "report-loop",
+  );
+  fs.mkdirSync(path.dirname(installedExpert), { recursive: true });
+  fs.cpSync(expertDir, installedExpert, { recursive: true });
+  const client = new Client({ name: "report-expert-package-test", version: "1" }, { capabilities: {} });
+  const managedNode = nodeWithSqlite();
+  const transport = new StdioClientTransport({
+    command: memoryMcp.command,
+    args: memoryMcp.args,
+    env: {
+      ...process.env,
+      ...memoryMcp.env,
+      WORKBUDDY_CONFIG_DIR: temporary,
+      CODEBUDDY_CONFIG_DIR: temporary,
+      CODEBUDDY_PLUGIN_ROOT: path.join(temporary, "stale-plugin-root"),
+      CODEBUDDY_NODE_BIN: managedNode,
+      PATH: `${path.dirname(managedNode)}${path.delimiter}${process.env.PATH ?? ""}`,
+      RESEARCH_REPORT_MEMORY_V2_0821_DIR: path.join(temporary, "memory"),
+      RESEARCH_REPORT_MEMORY_SHORTCUT: "0",
+    },
+    stderr: "pipe",
+  });
+  try {
+    await client.connect(transport);
+    const tools = (await client.listTools()).tools.map((tool) => tool.name).sort();
+    assert.deepEqual(tools, [
+      "report_loop_run",
+      "writing_memory_capture_payload",
+      "writing_memory_forget",
+      "writing_memory_recall",
     ]);
+  } finally {
+    await client.close();
+    fs.rmSync(temporary, { recursive: true, force: true });
   }
 });

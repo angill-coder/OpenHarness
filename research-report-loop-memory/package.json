@@ -1,6 +1,6 @@
 {
   "name": "research-report-loop-memory",
-  "version": "1.0.0-mvp.35",
+  "version": "1.0.0-mvp.36",
   "private": true,
   "type": "module",
   "description": "Integrated report writing loop with L0/L1 evidence and Git-backed L2B Rubrics",
