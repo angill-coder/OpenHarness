@@ -87,11 +87,10 @@ $NodeRunner = if ($env:RESEARCH_REPORT_REFLECTION_NODE_RUNNER) {
     Join-Path $PluginRoot "scripts\run-node.cmd"
 }
 $MemoryServer = Join-Path $PluginRoot "dist\memory-server.mjs"
-$CommandLine = '""{0}" "{1}""' -f $NodeRunner, $MemoryServer
 $McpServers = @{}
 $McpServers[$McpName] = @{
     command = "cmd.exe"
-    args = @("/d", "/s", "/c", $CommandLine)
+    args = @("/d", "/c", $NodeRunner, $MemoryServer)
     env = @{ RESEARCH_REPORT_MEMORY_V2_0821_DIR = $DataDir }
 }
 $Config = @{

@@ -68,7 +68,7 @@ const serverEntry = path.join(registeredInstallPath, "dist", "memory-server.mjs"
 const baseRubric = path.join(registeredInstallPath, "rubrics", "v2_rubric_research.json");
 mcp.mcpServers["report-memory-v2"] = process.platform === "win32" ? {
   command: "cmd.exe",
-  args: ["/d", "/s", "/c", `""${nodeLauncher}" "${serverEntry}""`],
+  args: ["/d", "/c", nodeLauncher, serverEntry],
   env: {
     RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
     RESEARCH_REPORT_BASE_RUBRIC_PATH: baseRubric,

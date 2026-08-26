@@ -11,13 +11,20 @@ function payload(result: Awaited<ReturnType<Client["callTool"]>>): Record<string
   return JSON.parse(first.text ?? "{}") as Record<string, any>;
 }
 
+function serverTransport(root: string) {
+  const launcher = path.join(root, "scripts", process.platform === "win32" ? "run-node.cmd" : "run-node.sh");
+  const args = ["--import", "tsx", "mcp/src/server.ts"];
+  return process.platform === "win32"
+    ? { command: "cmd.exe", args: ["/d", "/c", launcher, ...args] }
+    : { command: "sh", args: [launcher, ...args] };
+}
+
 test("Reflection reviews processed episodes once and accepts an unchanged checkpoint", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-reflection-"));
   const root = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "reflection-test", version: "1.0.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
-    command: "sh",
-    args: [path.join(root, "scripts/run-node.sh"), "--import", "tsx", "mcp/src/server.ts"],
+    ...serverTransport(root),
     cwd: root,
     env: { ...process.env, RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir } as Record<string, string>,
     stderr: "pipe",
@@ -96,8 +103,7 @@ test("Reflection uses one compact Capture to merge L1 evidence and update L2B", 
   const root = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "reflection-compact-test", version: "1.0.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
-    command: "sh",
-    args: [path.join(root, "scripts/run-node.sh"), "--import", "tsx", "mcp/src/server.ts"],
+    ...serverTransport(root),
     cwd: root,
     env: { ...process.env, RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir } as Record<string, string>,
     stderr: "pipe",

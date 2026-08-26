@@ -45,8 +45,8 @@ export function runnerCommand(paths: RunnerPaths, platform = process.platform) {
   if (platform === "win32") {
     return {
       command: "cmd.exe",
-      args: ["/d", "/s", "/c", `""${paths.launcher}" "${paths.runner}" --job "%REPORT_LOOP_JOB_PATH%""`],
-      usesJobEnvironment: true,
+      args: ["/d", "/c", paths.launcher, paths.runner, "--job"],
+      usesJobEnvironment: false,
     };
   }
   return {
@@ -92,7 +92,6 @@ export class ReportLoopLauncher {
     const invocation = runnerCommand(paths);
     const env = {
       ...process.env,
-      REPORT_LOOP_JOB_PATH: jobPath,
       RESEARCH_REPORT_LOOP_LAUNCHER: "mcp-host",
     };
     const args = invocation.usesJobEnvironment

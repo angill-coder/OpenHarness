@@ -13,6 +13,7 @@ test("Windows and macOS launchers discover WorkBuddy runtimes", () => {
   const nodeSh = fs.readFileSync(path.join(root, "scripts/run-node.sh"), "utf8");
   const pythonSh = fs.readFileSync(path.join(root, "scripts/run-python.sh"), "utf8");
 
+  const pythonCommandRunner = fs.readFileSync(path.join(root, "scripts/run-python-command.mjs"), "utf8");
   assert.match(nodeCmd, /WORKBUDDY_NODE/u);
   assert.match(nodeCmd, /CODEBUDDY_CODE_NODE_PATH/u);
   assert.match(nodeCmd, /CODEBUDDY_NODE_BIN/u);
@@ -38,6 +39,9 @@ test("Windows and macOS launchers discover WorkBuddy runtimes", () => {
   assert.match(pythonSh, /WORKBUDDY_PYTHON/u);
   assert.match(pythonSh, /WORKBUDDY_EXTRA_PATHS/u);
   assert.match(pythonSh, /WORKBUDDY_CONFIG_DIR/u);
+  assert.match(pythonCommandRunner, /\["\/d", "\/c", runner,/u);
+  assert.doesNotMatch(pythonCommandRunner, /shell:\s*process\.platform/u);
+  assert.match(pythonCommandRunner, /"cmd\.exe"/u);
 });
 
 test("Reflection schedules resolve the currently installed plugin on both platforms", () => {
@@ -61,6 +65,8 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   assert.match(windowsReflection, /WORKBUDDY_EXTRA_PATHS/u);
   assert.match(windowsReflection, /CODEBUDDY_CODE_PATH/u);
   assert.match(windowsReflection, /ProgramFiles\(x86\)/u);
+  assert.match(windowsReflection, /args = @\("\/d", "\/c", \$NodeRunner, \$MemoryServer\)/u);
+  assert.doesNotMatch(windowsReflection, /"\/s"|\$CommandLine/u);
   assert.match(macInstaller, /reflection-current\.sh/u);
   assert.match(macInstaller, /DATA_DIR=/u);
   assert.match(macInstaller, /EnvironmentVariables\.WORKBUDDY_CONFIG_DIR/u);
@@ -89,6 +95,38 @@ test("release builder emits platform-native Memory MCP and Hook configurations",
   assert.match(builder, /judgeDefaults/u);
   assert.doesNotMatch(builder, /--judge-provider/u);
   assert.match(builder, /mcp\/report_loop/u);
+  assert.doesNotMatch(builder, /cmd\.exe \/d \/s|"\/s"/u);
+
+  const completed = spawnSync(
+    process.execPath,
+    [path.join(root, "scripts/build-release.mjs"), "--target-platform", "win32", "--target-arch", "x64-hook-test", "--no-archive"],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(completed.status, 0, completed.stderr);
+  const version = JSON.parse(
+    fs.readFileSync(path.join(root, ".codebuddy-plugin/plugin.json"), "utf8"),
+  ).version;
+  const pluginDir = path.join(
+    root,
+    "release",
+    `research-report-loop-memory-${version}-win32-x64-hook-test`,
+    "plugins/research-report-loop-memory",
+  );
+  const mcp = JSON.parse(fs.readFileSync(path.join(pluginDir, ".mcp.json"), "utf8"));
+  assert.equal(mcp.mcpServers["report-memory-v2"].command, "cmd.exe");
+  assert.deepEqual(mcp.mcpServers["report-memory-v2"].args, [
+    "/d",
+    "/c",
+    "${CODEBUDDY_PLUGIN_ROOT}\\scripts\\run-node.cmd",
+    "${CODEBUDDY_PLUGIN_ROOT}\\dist\\memory-server.mjs",
+  ]);
+  const hooks = JSON.parse(fs.readFileSync(path.join(pluginDir, "hooks/hooks.json"), "utf8"));
+  for (const registrations of Object.values(hooks.hooks) as Array<Array<{ hooks: Array<{ command: string }> }>>) {
+    const command = registrations[0].hooks[0].command;
+    assert.match(command, /^cmd\.exe \/d \/c call "\$\{CODEBUDDY_PLUGIN_ROOT\}\\scripts\\run-node\.cmd" /u);
+    assert.match(command, /"\$\{CODEBUDDY_PLUGIN_ROOT\}\\dist\\capture-checkpoint\.mjs" (?:prompt|post-tool|stop)$/u);
+    assert.doesNotMatch(command, /\/s|""|\bsh\b|run-node\.sh/u);
+  }
 });
 
 test("Report Loop uses one host launcher and keeps Python as the only loop runtime", () => {
@@ -158,7 +196,19 @@ test("local registration replaces legacy Report Loop MCP with the unified host l
       configDir,
       "plugins/cache/test-marketplace/research-report-loop-memory/1.0.0-test",
     );
-    assert.match(JSON.stringify(mcp.mcpServers["report-memory-v2"]), new RegExp(cacheInstallPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    if (process.platform === "win32") {
+      assert.deepEqual(mcp.mcpServers["report-memory-v2"].args, [
+        "/d",
+        "/c",
+        path.join(cacheInstallPath, "scripts/run-node.cmd"),
+        path.join(cacheInstallPath, "dist/memory-server.mjs"),
+      ]);
+    } else {
+      assert.deepEqual(mcp.mcpServers["report-memory-v2"].args, [
+        path.join(cacheInstallPath, "scripts/run-node.sh"),
+        path.join(cacheInstallPath, "dist/memory-server.mjs"),
+      ]);
+    }
     assert.equal(fs.readFileSync(path.join(cacheInstallPath, "dist/memory-server.mjs"), "utf8"), "// test server\n");
     const installed = JSON.parse(fs.readFileSync(path.join(configDir, "plugins/installed_plugins.json"), "utf8"));
     assert.equal(

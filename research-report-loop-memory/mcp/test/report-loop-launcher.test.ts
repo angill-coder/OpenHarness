@@ -14,7 +14,8 @@ test("launcher resolves the unchanged Python Runner from the plugin root", () =>
   assert.equal(unix.usesJobEnvironment, false);
   const windows = runnerCommand(paths, "win32");
   assert.equal(windows.command, "cmd.exe");
-  assert.equal(windows.usesJobEnvironment, true);
+  assert.deepEqual(windows.args, ["/d", "/c", paths.launcher, paths.runner, "--job"]);
+  assert.equal(windows.usesJobEnvironment, false);
 });
 
 test("launcher rejects missing jobs and relays the Runner final JSON", async () => {

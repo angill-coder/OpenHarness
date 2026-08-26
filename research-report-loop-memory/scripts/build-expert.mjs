@@ -129,8 +129,11 @@ fs.copyFileSync(path.join(root, "expert/avatars/expert.png"), path.join(expertDi
 fs.copyFileSync(path.join(root, "expert/README.md"), path.join(expertDir, "README.md"));
 writeExpertReflectionLaunchers();
 
-const hookCommand = '"${CODEBUDDY_PLUGIN_ROOT}/bin/run-node" '
-  + '"${CODEBUDDY_PLUGIN_ROOT}/bin/capture-checkpoint.mjs"';
+const hookCommand = process.platform === "win32"
+  ? 'cmd.exe /d /c call "${CODEBUDDY_PLUGIN_ROOT}\\bin\\run-node.cmd" '
+    + '"${CODEBUDDY_PLUGIN_ROOT}\\bin\\capture-checkpoint.mjs"'
+  : 'sh "${CODEBUDDY_PLUGIN_ROOT}/bin/run-node" '
+    + '"${CODEBUDDY_PLUGIN_ROOT}/bin/capture-checkpoint.mjs"';
 const hooks = {
   description: "Report Loop launcher and writing-feedback capture reminder.",
   hooks: Object.fromEntries(["UserPromptSubmit", "PostToolUse", "Stop"].map((event) => [event, [{
@@ -159,7 +162,19 @@ const expertManifest = {
   skills: ["./skills/research-report-loop"],
   hooks: "./hooks.json",
   mcpServers: {
-    "report-expert-v2": {
+    "report-expert-v2": process.platform === "win32" ? {
+      command: "cmd.exe",
+      args: [
+        "/d",
+        "/c",
+        "${CODEBUDDY_PLUGIN_ROOT}\\bin\\run-node.cmd",
+        "${CODEBUDDY_PLUGIN_ROOT}\\dist\\memory-server.mjs",
+      ],
+      env: {
+        RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
+        RESEARCH_REPORT_BASE_RUBRIC_PATH: "${CODEBUDDY_PLUGIN_ROOT}\\rubrics\\v2_rubric_research.json",
+      },
+    } : {
       command: "${CODEBUDDY_PLUGIN_ROOT}/bin/run-node",
       args: ["${CODEBUDDY_PLUGIN_ROOT}/dist/memory-server.mjs"],
       env: {
