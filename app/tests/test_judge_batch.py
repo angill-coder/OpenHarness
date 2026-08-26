@@ -82,10 +82,10 @@ class JudgeBatchTest(unittest.TestCase):
         self.assertEqual(context["max_chars"], 4000)
         self.assertEqual(context["chars_per_page"], 1000)
 
-    def test_judge_and_optimizer_default_to_workbuddy_opus(self):
-        for purpose in ("judge", "optimizer"):
+    def test_judge_and_optimizer_default_to_api_opus(self):
+        for purpose in ("judge", "optimizer", "rubrics_optimizer"):
             backend, model, effort = _llm_selection({}, purpose)
-            self.assertEqual(backend, "workbuddy")
+            self.assertEqual(backend, "api")
             self.assertEqual(model, "claude-opus-4.8")
             self.assertIsNone(effort)
 

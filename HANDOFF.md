@@ -1,6 +1,6 @@
 # OpenHarness 交接文档（HANDOFF）
 
-> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-08-12（见文末 §13 增量）。
+> 给「完全没有上下文」的下一个 agent。**先完整读这份，再动手。** 最后更新：2026-08-13（见文末 §13–14 增量）。
 > 用户要求：**一律用简体中文交流**（曾误用日语被纠正）。
 
 ---
@@ -271,3 +271,16 @@ python3 server.py --host 127.0.0.1 --port <独立端口>
 - v2.4 沿用六维权重、目标、红线 **T1/T2/T3/T5/E5** 和 Optimizer 映射；判定文案按专家反馈进一步收紧，重点涉及单源结论边界、附录中的证据不足说明、故事线 so what、表图自解释性和终稿工作流标签。
 - 结构与故事线 check ID 连续化：`S1/S4/S5 → S1/S2/S3`，`N2/N4/N5 → N1/N2/N3`。历史 Session 的 Judgment 仍使用创建时冻结的旧 ID，不能与 v2.4 明细直接按 ID 混合聚合。
 - 新建 Session 自动冻结默认 v2.4；旧 Session 不自动迁移。如需复现实验，读取 Session `state.json` 中的 Rubric 快照，不要以当前默认文件反推。
+
+---
+
+## 14. 2026-08-13 增量（Rubrics Loop Feedback AI 验收）
+
+- 验证实验默认运行 **2 轮 Skill 迭代**，每轮仍完整复用现有 Runner → Judge → Skill Optimizer → Gate；`skill_iteration_rounds` 可在 1–5 之间调整，默认 2。
+- 两轮完成后进入 `Feedback Acceptance Evaluator`：逐条读取原始 Feedback、baseline 报告、两轮迭代报告、对应 Rubrics 变更与 Judge 信号，返回 `followed / partially_followed / not_followed / unable_to_judge`、稳定性、失败层级、报告原文证据和下一步建议。它不自动改 Rubrics。
+- 验收证据必须逐字存在于对应 Markdown 报告；模型返回的虚构引文会被过滤。结果落在 `sessions/<sid>/rubrics_loop/acceptance/<experiment_id>.json`，并同步到 Experiment 记录和历史列表。
+- 断点续跑是硬约束：Skill Loop 完成后先落 `loop_completed_at`；AI 验收失败时只重试验收，不重跑 Runner/Judge。每条 Feedback 独立落盘，重试只补未完成条目。服务重启后，旧的 queued/running Experiment 会自动标记为可从断点重试。
+- 同一 Candidate + Rubric SHA 禁止重复创建验证实验，失败必须原地重试原 Experiment Session，避免重复消耗 Runner/Judge/Optimizer token。
+- Rubrics Loop 第三阶段现为“验证与决策”，展示 Skill 迭代进度、Feedback AI 验收证据和三个人工动作：采纳新 Rubrics、继续优化、保留原 Rubrics。
+- 重复验收测试可用 `app/restore_rubrics_loop_fixture.py`：服务停止时先 dry-run 查看将归档的验证 Experiment/Session，再加 `--apply` 恢复已保存的 pre-validation fixture；旧状态会移动到 runtime 的 `_restore_archives`，不会直接删除。
+- 关键文件：`app/feedback_acceptance.py`、`app/rubrics_loop.py`、`app/server.py`、`app/rubrics_loop_ui/`、`app/tests/test_feedback_acceptance.py`。

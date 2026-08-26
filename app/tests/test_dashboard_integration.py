@@ -281,7 +281,8 @@ class DashboardDataContractTest(unittest.TestCase):
             )
     def test_session_summary_uses_generation_skill_versions_and_case_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp) / "install"
+            generation_root = Path(tmp) / "portable-generation-output"
             sessions = root / "app" / "sessions"
             session = sessions / "session-a"
             jobs = session / "generation_jobs"
@@ -293,13 +294,13 @@ class DashboardDataContractTest(unittest.TestCase):
             for version, generation_id, case_id in (
                 ("v10", "gen-10", "case-b"), ("v2", "gen-2", "case-a"),
             ):
-                artifact = root / "generation_runs" / "_session_skills" / "session-a" / version / "hash" / "skill"
+                artifact = generation_root / "_session_skills" / "session-a" / version / "hash" / "skill"
                 (artifact / "references").mkdir(parents=True)
                 (artifact / "SKILL.md").write_text(version, encoding="utf-8")
                 (artifact / "references" / "instructions.md").write_text(version, encoding="utf-8")
-                case_root = root / "generation_runs" / generation_id / "case-run" / "cases" / case_id
+                case_root = generation_root / generation_id / "case-run" / "cases" / case_id
                 case_root.mkdir(parents=True)
-                (root / "generation_runs" / generation_id / "generation_result.json").write_text(json.dumps({
+                (generation_root / generation_id / "generation_result.json").write_text(json.dumps({
                     "generation_id": generation_id, "session_id": "session-a",
                     "skill_version": version, "cases": [{
                         "openharness_case_id": case_id,
@@ -312,7 +313,7 @@ class DashboardDataContractTest(unittest.TestCase):
                     "created_at": 1,
                 }), encoding="utf-8")
             document = dashboard_api.session_summary_document(
-                sessions, "session-a", root
+                sessions, "session-a", root, generation_root
             )
             self.assertEqual(["v2", "v10"], [item["version"] for item in document["state"]["versions"]])
             self.assertEqual(["case-a"], document["state"]["generation_version_cases"]["v2"])
