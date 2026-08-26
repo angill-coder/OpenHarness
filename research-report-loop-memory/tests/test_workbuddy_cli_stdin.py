@@ -51,6 +51,31 @@ class WorkBuddyCliStdinTests(unittest.TestCase):
             root = Path(temporary) / "WorkBuddy"
             executable = root / "WorkBuddy.exe"
             cli = root / "resources/app.asar.unpacked/cli/bin/codebuddy"
+            node = Path(temporary) / "node.exe"
+            cli.parent.mkdir(parents=True)
+            executable.touch()
+            cli.touch()
+            node.touch()
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "ProgramFiles": temporary,
+                        "USERPROFILE": temporary,
+                        "CODEBUDDY_NODE_BIN": str(node),
+                    },
+                    clear=True,
+                ),
+                patch("mcp.report_loop.core.workbuddy_cli.os.name", "nt"),
+                patch("mcp.report_loop.core.workbuddy_cli.Path", NATIVE_PATH),
+            ):
+                self.assertEqual(discover_command(), (str(node), str(cli)))
+
+    def test_windows_desktop_fallback_remains_available_without_node(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "WorkBuddy"
+            executable = root / "WorkBuddy.exe"
+            cli = root / "resources/app.asar.unpacked/cli/bin/codebuddy"
             cli.parent.mkdir(parents=True)
             executable.touch()
             cli.touch()
@@ -62,6 +87,7 @@ class WorkBuddyCliStdinTests(unittest.TestCase):
                 ),
                 patch("mcp.report_loop.core.workbuddy_cli.os.name", "nt"),
                 patch("mcp.report_loop.core.workbuddy_cli.Path", NATIVE_PATH),
+                patch("mcp.report_loop.core.workbuddy_cli.shutil.which", return_value=None),
             ):
                 self.assertEqual(discover_command(), (str(executable), str(cli)))
 
@@ -121,6 +147,17 @@ class WorkBuddyCliStdinTests(unittest.TestCase):
             "WORKBUDDY_FS_PROTECTION_ROLE",
         ):
             self.assertNotIn(key, environment)
+
+    def test_windows_system_root_survives_environment_sanitization(self):
+        source = {
+            "USERPROFILE": r"C:\\Users\\example",
+            "PATH": r"C:\\Windows\\System32",
+            "SYSTEMROOT": r"C:\\Windows",
+        }
+        with patch.dict(os.environ, source, clear=True):
+            environment = build_environment(("node.exe", "codebuddy"))
+
+        self.assertEqual(environment["SYSTEMROOT"], r"C:\\Windows")
 
     def test_long_prompt_is_sent_via_stdin_not_argv(self):
         prompt = "证" * 40000

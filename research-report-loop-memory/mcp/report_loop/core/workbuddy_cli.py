@@ -38,7 +38,7 @@ _SAFE_ENVIRONMENT_KEYS = {
     "LANGUAGE",
     "LC_ALL",
     "LC_CTYPE",
-    "SystemRoot",
+    "SYSTEMROOT",
     "WINDIR",
     "COMSPEC",
     "PATHEXT",
@@ -105,7 +105,10 @@ def _windows_desktop_command(path: Path | None = None) -> tuple[str, ...] | None
         executable = root / "WorkBuddy.exe"
         cli = root / "resources" / "app.asar.unpacked" / "cli" / "bin" / "codebuddy"
         if executable.is_file() and cli.is_file():
-            return (str(executable), str(cli))
+            # Prefer the CLI's Node entrypoint. Launching WorkBuddy.exe as six
+            # concurrent headless Judges initializes the desktop/ACP runtime in
+            # every process and can stall before any model request is submitted.
+            return _windows_node_command(cli) or (str(executable), str(cli))
     if path and path.expanduser().is_file() and path.name.lower().startswith("codebuddy"):
         return _windows_node_command(path.expanduser())
     return None
