@@ -1,10 +1,21 @@
 #!/bin/sh
 set -eu
 
-PYTHON_BIN=${WORKBUDDY_PYTHON:-}
+PYTHON_BIN=${WORKBUDDY_PYTHON:-${CODEBUDDY_CODE_PYTHON_PATH:-}}
 
 if [ -z "$PYTHON_BIN" ]; then
-  for candidate in "$HOME"/.workbuddy/binaries/python/versions/*/bin/python3; do
+  old_ifs=$IFS
+  IFS=:
+  for directory in ${WORKBUDDY_EXTRA_PATHS:-}; do
+    if [ -x "$directory/python3" ]; then PYTHON_BIN=$directory/python3; break; fi
+    if [ -x "$directory/python" ]; then PYTHON_BIN=$directory/python; break; fi
+  done
+  IFS=$old_ifs
+fi
+
+WORKBUDDY_CONFIG_ROOT=${WORKBUDDY_CONFIG_DIR:-${CODEBUDDY_CONFIG_DIR:-$HOME/.workbuddy}}
+if [ -z "$PYTHON_BIN" ]; then
+  for candidate in "$WORKBUDDY_CONFIG_ROOT"/binaries/python/versions/*/bin/python3; do
     if [ -x "$candidate" ]; then PYTHON_BIN=$candidate; fi
   done
 fi

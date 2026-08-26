@@ -1,18 +1,69 @@
 import unittest
 import os
+import tempfile
+from pathlib import Path, PosixPath
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from mcp.report_loop.core.workbuddy_cli import build_environment, call_workbuddy
+from mcp.report_loop.core.workbuddy_cli import (
+    _mac_workbuddy_command,
+    build_environment,
+    call_workbuddy,
+    discover_command,
+)
 
 
 class WorkBuddyCliStdinTests(unittest.TestCase):
+    def test_mac_discovery_accepts_a_non_system_applications_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary) / "Applications/WorkBuddy.app"
+            cli = app / "Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"
+            cli.parent.mkdir(parents=True)
+            cli.touch(mode=0o755)
+            self.assertEqual(_mac_workbuddy_command([app]), (str(cli),))
+
+    def test_discovery_uses_host_provided_codebuddy_and_node_on_windows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "CompanyWorkBuddy"
+            cli = root / "resources/app.asar.unpacked/cli/bin/codebuddy"
+            node = Path(temporary) / "runtime/node.exe"
+            cli.parent.mkdir(parents=True)
+            node.parent.mkdir(parents=True)
+            cli.touch()
+            node.touch()
+            source = {
+                "CODEBUDDY_CODE_PATH": str(cli),
+                "CODEBUDDY_CODE_NODE_PATH": str(node),
+            }
+            with (
+                patch.dict(os.environ, source, clear=True),
+                patch("mcp.report_loop.core.workbuddy_cli.os.name", "nt"),
+                patch("mcp.report_loop.core.workbuddy_cli.Path", PosixPath),
+            ):
+                self.assertEqual(discover_command(), (str(node), str(cli)))
+
+    def test_discovery_checks_program_files_on_windows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "WorkBuddy"
+            executable = root / "WorkBuddy.exe"
+            cli = root / "resources/app.asar.unpacked/cli/bin/codebuddy"
+            cli.parent.mkdir(parents=True)
+            executable.touch()
+            cli.touch()
+            with (
+                patch.dict(os.environ, {"ProgramFiles": temporary}, clear=True),
+                patch("mcp.report_loop.core.workbuddy_cli.os.name", "nt"),
+                patch("mcp.report_loop.core.workbuddy_cli.Path", PosixPath),
+            ):
+                self.assertEqual(discover_command(), (str(executable), str(cli)))
+
     def test_nested_cli_environment_excludes_desktop_internal_context(self):
         source = {
             "HOME": "/Users/example",
             "PATH": "/usr/bin:/bin",
             "LANG": "zh_CN.UTF-8",
             "CODEBUDDY_CONFIG_DIR": "/Users/example/.workbuddy",
+            "WORKBUDDY_CONFIG_DIR": "/Users/example/company-workbuddy",
             "CODEBUDDY_SERVICE_PROXY_URL": "http://127.0.0.1/internal/hooks/services/invoke",
             "CODEBUDDY_GATEWAY_PASSWORD": "desktop-secret",
             "CODEBUDDY_HOST": "workbuddy-desktop",
@@ -20,14 +71,18 @@ class WorkBuddyCliStdinTests(unittest.TestCase):
             "WORKBUDDY_PAC_RPC_SOCKET": "/tmp/workbuddy-pac.sock",
             "WORKBUDDY_FS_PROTECTION_ROLE": "daemon",
             "RESEARCH_REPORT_LOOP_JUDGE_TIMEOUT": "120",
+            "WORKBUDDY_EXTRA_PATHS": "/managed/bin",
+            "CODEBUDDY_CODE_PATH": "/Applications/WorkBuddy/codebuddy",
         }
         with patch.dict(os.environ, source, clear=True):
             environment = build_environment(("codebuddy",))
 
         self.assertEqual(environment["HOME"], "/Users/example")
-        self.assertEqual(environment["CODEBUDDY_CONFIG_DIR"], "/Users/example/.workbuddy")
-        self.assertEqual(environment["WORKBUDDY_CONFIG_DIR"], "/Users/example/.workbuddy")
+        self.assertEqual(environment["CODEBUDDY_CONFIG_DIR"], "/Users/example/company-workbuddy")
+        self.assertEqual(environment["WORKBUDDY_CONFIG_DIR"], "/Users/example/company-workbuddy")
         self.assertEqual(environment["RESEARCH_REPORT_LOOP_JUDGE_TIMEOUT"], "120")
+        self.assertEqual(environment["WORKBUDDY_EXTRA_PATHS"], "/managed/bin")
+        self.assertEqual(environment["CODEBUDDY_CODE_PATH"], "/Applications/WorkBuddy/codebuddy")
         for key in (
             "CODEBUDDY_SERVICE_PROXY_URL",
             "CODEBUDDY_GATEWAY_PASSWORD",

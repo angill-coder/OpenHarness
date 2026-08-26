@@ -14,7 +14,11 @@ test("Windows and macOS launchers discover WorkBuddy runtimes", () => {
   const pythonSh = fs.readFileSync(path.join(root, "scripts/run-python.sh"), "utf8");
 
   assert.match(nodeCmd, /WORKBUDDY_NODE/u);
-  assert.match(nodeCmd, /\.workbuddy\\binaries\\node\\versions/u);
+  assert.match(nodeCmd, /CODEBUDDY_CODE_NODE_PATH/u);
+  assert.match(nodeCmd, /CODEBUDDY_NODE_BIN/u);
+  assert.match(nodeCmd, /WORKBUDDY_EXTRA_PATHS/u);
+  assert.match(nodeCmd, /WORKBUDDY_CONFIG_DIR/u);
+  assert.match(nodeCmd, /CODEBUDDY_CONFIG_DIR/u);
   assert.match(nodeCmd, /node\.exe/u);
   const nodeVersionCheck = nodeCmd
     .split(/\r?\n/u)
@@ -22,12 +26,18 @@ test("Windows and macOS launchers discover WorkBuddy runtimes", () => {
   assert.match(nodeVersionCheck, /a>22\|\|\(a===22&&b>=16\)/u);
   assert.doesNotMatch(nodeVersionCheck, /\^/u);
   assert.match(pythonCmd, /WORKBUDDY_PYTHON/u);
+  assert.match(pythonCmd, /CODEBUDDY_CODE_PYTHON_PATH/u);
+  assert.match(pythonCmd, /WORKBUDDY_EXTRA_PATHS/u);
+  assert.match(pythonCmd, /WORKBUDDY_CONFIG_DIR/u);
+  assert.match(pythonCmd, /CODEBUDDY_CONFIG_DIR/u);
   assert.match(pythonCmd, /PYTHONUTF8=1/u);
   assert.match(pythonCmd, /PYTHONIOENCODING=utf-8/u);
   assert.match(nodeSh, /WORKBUDDY_NODE/u);
-  assert.match(nodeSh, /\.workbuddy\/binaries\/node\/versions/u);
+  assert.match(nodeSh, /WORKBUDDY_EXTRA_PATHS/u);
+  assert.match(nodeSh, /WORKBUDDY_CONFIG_DIR/u);
   assert.match(pythonSh, /WORKBUDDY_PYTHON/u);
-  assert.match(pythonSh, /\.workbuddy\/binaries\/python\/versions/u);
+  assert.match(pythonSh, /WORKBUDDY_EXTRA_PATHS/u);
+  assert.match(pythonSh, /WORKBUDDY_CONFIG_DIR/u);
 });
 
 test("Reflection schedules resolve the currently installed plugin on both platforms", () => {
@@ -36,6 +46,7 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   const windowsReflection = fs.readFileSync(path.join(root, "scripts/run-memory-reflection-workbuddy.ps1"), "utf8");
   const macInstaller = fs.readFileSync(path.join(root, "scripts/install-reflection-macos.sh"), "utf8");
   const macLauncher = fs.readFileSync(path.join(root, "scripts/reflection-current.sh"), "utf8");
+  const macReflection = fs.readFileSync(path.join(root, "scripts/run-memory-reflection-workbuddy.sh"), "utf8");
 
   assert.match(windowsInstaller, /reflection-current\.ps1/u);
   assert.match(windowsInstaller, /RESEARCH_REPORT_MEMORY_V2_0821_DIR/u);
@@ -47,9 +58,20 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   assert.match(windowsLauncher, /research-report-loop-memory@/u);
   assert.match(windowsLauncher, /run-memory-reflection-workbuddy\.ps1/u);
   assert.match(windowsReflection, /Join-Path \$WorkBuddyConfig "binaries\\node\\versions"/u);
+  assert.match(windowsReflection, /WORKBUDDY_EXTRA_PATHS/u);
+  assert.match(windowsReflection, /CODEBUDDY_CODE_PATH/u);
+  assert.match(windowsReflection, /ProgramFiles\(x86\)/u);
   assert.match(macInstaller, /reflection-current\.sh/u);
   assert.match(macInstaller, /DATA_DIR=/u);
+  assert.match(macInstaller, /EnvironmentVariables\.WORKBUDDY_CONFIG_DIR/u);
+  assert.match(macInstaller, /EnvironmentVariables\.WORKBUDDY_CODEBUDDY/u);
+  assert.match(macInstaller, /CODEBUDDY_CODE_PATH/u);
   assert.match(macLauncher, /installed_plugins\.json/u);
+  assert.match(macLauncher, /WORKBUDDY_EXTRA_PATHS/u);
+  assert.match(macLauncher, /WORKBUDDY_CONFIG_DIR:-\$\{CODEBUDDY_CONFIG_DIR/u);
+  assert.match(macReflection, /CODEBUDDY_CODE_PATH/u);
+  assert.match(macReflection, /WORKBUDDY_EXTRA_PATHS/u);
+  assert.match(macReflection, /\/Volumes\/\*\/Applications\/WorkBuddy\.app/u);
 });
 
 test("release builder emits platform-native Memory MCP and Hook configurations", () => {

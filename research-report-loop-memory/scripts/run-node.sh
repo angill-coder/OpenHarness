@@ -1,10 +1,20 @@
 #!/bin/sh
 set -eu
 
-NODE_BIN=${WORKBUDDY_NODE:-}
+NODE_BIN=${WORKBUDDY_NODE:-${CODEBUDDY_CODE_NODE_PATH:-${CODEBUDDY_NODE_BIN:-}}}
 
 if [ -z "$NODE_BIN" ]; then
-  for candidate in "$HOME"/.workbuddy/binaries/node/versions/*/bin/node; do
+  old_ifs=$IFS
+  IFS=:
+  for directory in ${WORKBUDDY_EXTRA_PATHS:-}; do
+    if [ -x "$directory/node" ]; then NODE_BIN=$directory/node; break; fi
+  done
+  IFS=$old_ifs
+fi
+
+WORKBUDDY_CONFIG_ROOT=${WORKBUDDY_CONFIG_DIR:-${CODEBUDDY_CONFIG_DIR:-$HOME/.workbuddy}}
+if [ -z "$NODE_BIN" ]; then
+  for candidate in "$WORKBUDDY_CONFIG_ROOT"/binaries/node/versions/*/bin/node; do
     if [ -x "$candidate" ]; then NODE_BIN=$candidate; fi
   done
 fi
