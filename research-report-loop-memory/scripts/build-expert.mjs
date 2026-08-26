@@ -45,6 +45,40 @@ function prepareExpertSubagent(target) {
   fs.writeFileSync(target, updated);
 }
 
+function writeExpertReflectionLaunchers() {
+  fs.writeFileSync(path.join(expertDir, "scripts/reflection-current.sh"), `#!/bin/sh
+set -eu
+
+WORKBUDDY_DIR=\${CODEBUDDY_CONFIG_DIR:-\${WORKBUDDY_CONFIG_DIR:-$HOME/.workbuddy}}
+PLUGIN_ROOT="$WORKBUDDY_DIR/plugins/marketplaces/my-experts/plugins/${expertPluginName}"
+RUNNER="$PLUGIN_ROOT/scripts/run-memory-reflection-workbuddy.sh"
+if [ ! -f "$RUNNER" ]; then
+  echo "Report Expert Reflection runner not found: $RUNNER" >&2
+  exit 1
+fi
+
+RESEARCH_REPORT_REFLECTION_MCP_NAME=report-expert-v2 \\
+RESEARCH_REPORT_REFLECTION_NODE_RUNNER="$PLUGIN_ROOT/bin/run-node" \\
+exec /bin/sh "$RUNNER"
+`);
+  fs.chmodSync(path.join(expertDir, "scripts/reflection-current.sh"), 0o755);
+
+  fs.writeFileSync(path.join(expertDir, "scripts/reflection-current.ps1"), `$ErrorActionPreference = "Stop"
+$WorkBuddyConfig = if ($env:CODEBUDDY_CONFIG_DIR) {
+    $env:CODEBUDDY_CONFIG_DIR
+} else {
+    Join-Path $HOME ".workbuddy"
+}
+$PluginRoot = Join-Path $WorkBuddyConfig "plugins\\marketplaces\\my-experts\\plugins\\${expertPluginName}"
+$Runner = Join-Path $PluginRoot "scripts\\run-memory-reflection-workbuddy.ps1"
+if (-not (Test-Path $Runner)) { throw "Report Expert Reflection runner not found: $Runner" }
+$env:RESEARCH_REPORT_REFLECTION_MCP_NAME = "report-expert-v2"
+$env:RESEARCH_REPORT_REFLECTION_NODE_RUNNER = Join-Path $PluginRoot "bin\\run-node.cmd"
+& $Runner
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+`);
+}
+
 run(process.execPath, ["scripts/build-release.mjs", "--no-archive"]);
 if (!fs.statSync(stagingDir, { throwIfNoEntry: false })?.isDirectory()) {
   throw new Error(`Expert staging release not found: ${stagingDir}`);
@@ -91,6 +125,7 @@ for (const agent of [
 fs.mkdirSync(path.join(expertDir, "avatars"), { recursive: true });
 fs.copyFileSync(path.join(root, "expert/avatars/expert.png"), path.join(expertDir, "avatars/expert.png"));
 fs.copyFileSync(path.join(root, "expert/README.md"), path.join(expertDir, "README.md"));
+writeExpertReflectionLaunchers();
 
 const hookCommand = '"${CODEBUDDY_PLUGIN_ROOT}/bin/run-node" '
   + '"${CODEBUDDY_PLUGIN_ROOT}/bin/capture-checkpoint.mjs"';

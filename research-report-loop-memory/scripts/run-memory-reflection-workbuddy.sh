@@ -7,6 +7,8 @@ WORKBUDDY_USER_DIR=${CODEBUDDY_CONFIG_DIR:-${WORKBUDDY_CONFIG_DIR:-$HOME/.workbu
 PRODUCT_CONFIG=${WORKBUDDY_PRODUCT_CONFIG:-}
 DATA_DIR=${RESEARCH_REPORT_MEMORY_V2_0821_DIR:-$HOME/.research-report-memory-v2-0821}
 NODE_BIN=${WORKBUDDY_NODE:-}
+MCP_NAME=${RESEARCH_REPORT_REFLECTION_MCP_NAME:-report-memory-v2}
+NODE_RUNNER=${RESEARCH_REPORT_REFLECTION_NODE_RUNNER:-$PLUGIN_ROOT/scripts/run-node.sh}
 
 if [ -z "$NODE_BIN" ]; then
   for candidate in "$HOME"/.workbuddy/binaries/node/versions/*/bin/node; do
@@ -50,7 +52,7 @@ MCP_CONFIG_FILE="$DATA_DIR/reflection/integrated-mcp-config.json"
 "$NODE_BIN" -e '
 const fs = require("node:fs");
 const path = require("node:path");
-const [outputPath, pluginRoot, dataDir] = process.argv.slice(1);
+const [outputPath, pluginRoot, dataDir, nodeRunner, mcpName] = process.argv.slice(1);
 const bundledServer = path.join(pluginRoot, "dist/memory-server.mjs");
 const sourceServer = path.join(pluginRoot, "mcp/src/server.ts");
 const args = fs.existsSync(bundledServer)
@@ -58,9 +60,9 @@ const args = fs.existsSync(bundledServer)
   : ["--import", "tsx", sourceServer];
 const config = {
   mcpServers: {
-    "report-memory-v2": {
+    [mcpName]: {
       command: "sh",
-      args: [path.join(pluginRoot, "scripts/run-node.sh"), ...args],
+      args: [nodeRunner, ...args],
       env: { RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDir },
     },
   },
@@ -68,7 +70,7 @@ const config = {
 const temporary = `${outputPath}.tmp`;
 fs.writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 fs.renameSync(temporary, outputPath);
-' "$MCP_CONFIG_FILE" "$PLUGIN_ROOT" "$DATA_DIR"
+' "$MCP_CONFIG_FILE" "$PLUGIN_ROOT" "$DATA_DIR" "$NODE_RUNNER" "$MCP_NAME"
 
 env CODEBUDDY_CONFIG_DIR="$WORKBUDDY_USER_DIR" \
   ACC_PRODUCT_CONFIG_PATH="$PRODUCT_CONFIG" \
