@@ -5,7 +5,7 @@ import { ReportLoopLauncher } from "./report-loop-launcher.ts";
 import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
 
 const server = new McpServer(
-  { name: "report-memory-v2", version: "1.0.0-mvp.27" },
+  { name: "report-memory-v2", version: "1.0.0-mvp.28" },
   {
     capabilities: { logging: {} },
     instructions: [
