@@ -117,6 +117,8 @@ for (const item of [
   "scripts/reflection-current.ps1",
   "scripts/install-reflection-macos.sh",
   "scripts/install-reflection-windows.ps1",
+  "scripts/disable-reflection-macos.sh",
+  "scripts/disable-reflection-windows.ps1",
   "scripts/macos-reflection-schedule.plist.template",
   "README.md",
   "LICENSE.md",
@@ -258,6 +260,7 @@ for (const executable of [
   "scripts/run-memory-reflection-workbuddy.sh",
   "scripts/reflection-current.sh",
   "scripts/install-reflection-macos.sh",
+  "scripts/disable-reflection-macos.sh",
 ]) {
   fs.chmodSync(path.join(pluginDir, executable), 0o755);
 }

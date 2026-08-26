@@ -44,6 +44,9 @@ test("packaged Expert Reflection uses the Expert root, MCP name, and launcher", 
   );
   const hooks = JSON.parse(fs.readFileSync(path.join(expertDir, "hooks.json"), "utf8"));
 
+  assert.equal(fs.existsSync(path.join(expertDir, "scripts/disable-reflection-macos.sh")), true);
+  assert.equal(fs.existsSync(path.join(expertDir, "scripts/disable-reflection-windows.ps1")), true);
+
   for (const launcher of [macLauncher, windowsLauncher]) {
     assert.match(launcher, /report-expert-v2/u);
     assert.match(launcher, /my-experts/u);

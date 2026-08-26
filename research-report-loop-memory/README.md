@@ -18,7 +18,7 @@
 插件恢复独立 Memory 插件的两条调度链：
 
 - **实时 Capture**：Capture-only Hook 识别已交付报告后的明确写作反馈，提醒宿主先修改报告，再通过 Agent/Task 委派 `research-report-memory-curator` 调用专用 MCP。Stop 最多检查一次是否遗漏 Capture；明确成功或失败后放行。
-- **定时 Reflection**：macOS LaunchAgent 或 Windows Task Scheduler 每天 16:30 启动一次隔离的 WorkBuddy CLI Reflection Agent，复审待处理 L0/L1 和疑似冲突，并只提交 L2B 增量修改。
+- **定时 Reflection**：Memory MCP 首次在 WorkBuddy 插件宿主中成功启动时，默认注册 macOS LaunchAgent 或 Windows Task Scheduler；每天 16:30 启动一次隔离的 WorkBuddy CLI Reflection Agent，复审待处理 L0/L1 和疑似冲突，并只提交 L2B 增量修改。用户关闭后不会被插件升级重新启用。
 
 Hook 不注册 `PreToolUse`，不负责写前 Recall或报告内容校验。它只在 Job 写入后启动 Runner，返回结果文件路径与后台等待命令，并继续承担反馈 Capture checkpoint。Agent 用 `Bash(run_in_background=true)` 启动等待任务，收到 `<task-notification>` 后通过 `TaskOutput` 取得最终结果。Capture 明确失败不会回滚已完成报告。
 
@@ -66,7 +66,7 @@ node scripts/migrate-rubric-scope-paths.mjs
 node scripts/migrate-rubric-scope-paths.mjs --apply
 ```
 
-安装包中的 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1` 用于注册每天 16:30 的 Reflection 任务；任务通过稳定启动器自动解析当前已安装的插件版本，只连接本插件的 Memory MCP，不启动 Report Loop Judge。
+安装包默认在 Memory MCP 首次启动时调用 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1`，注册每天 16:30 的 Reflection 任务；任务通过稳定启动器自动解析当前已安装的插件版本，只连接本插件的 Memory MCP，不启动 Report Loop Judge。需要关闭时运行对应的 `disable-reflection-*` 脚本；关闭状态会持久化，后续升级不会自动恢复。
 
 ## Windows x64 安装包
 
@@ -78,10 +78,16 @@ Windows 包使用 `cmd.exe + run-node.cmd` 启动统一 MCP；宿主 Hook 使用
 scripts\run-node.cmd scripts\verify-mcp-contract.mjs
 ```
 
-如需启用每天 16:30 的 Memory Reflection，可执行：
+Reflection 默认启用；如需重新启用，可执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-reflection-windows.ps1
+```
+
+如需关闭：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\disable-reflection-windows.ps1
 ```
 
 ## macOS 安装包
@@ -90,6 +96,12 @@ macOS 包使用 `sh + run-node.sh` 启动统一 MCP，宿主 Hook 通过 `run-py
 
 ```bash
 npm run build:release:macos
+```
+
+Reflection 默认启用；需要关闭时执行：
+
+```bash
+sh scripts/disable-reflection-macos.sh
 ```
 
 Windows 与 macOS 均可用 `--no-archive` 只生成可检查的发布目录，不创建压缩包：
