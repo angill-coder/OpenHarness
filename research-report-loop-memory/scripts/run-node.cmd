@@ -18,7 +18,7 @@ if not defined NODE_BIN (
 )
 
 :validate
-"%NODE_BIN%" -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a^>22^|^|(a===22^&^&b^>=16)?0:1)"
+"%NODE_BIN%" -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>22||(a===22&&b>=16)?0:1)"
 if errorlevel 1 (
   >&2 echo research-report-memory requires Node.js 22.16 or newer. Set WORKBUDDY_NODE to a compatible node.exe.
   exit /b 1
