@@ -25,6 +25,7 @@ from mcp.report_loop.core.host_model_resolver import (
     resolve_host_model_id,
 )
 from mcp.report_loop.core.persistent_rewriter import PersistentRewriter, RewriterError
+from mcp.report_loop.core.memory_rubric_provider import MemoryRubricProvider
 from mcp.report_loop.core.runtime import ReportLoopError, ReportLoopRuntime
 
 
@@ -140,12 +141,19 @@ def run(
 ) -> dict[str, Any]:
     settings = locked_report_judge_settings(job.get("judgeProvider"))
     model = job["hostModel"]
+    memory_dir = Path(
+        os.environ.get(
+            "RESEARCH_REPORT_MEMORY_V2_0821_DIR",
+            "~/.research-report-memory-v2-0821",
+        )
+    ).expanduser()
     runtime = runtime_factory(
         judge_provider=settings.provider,
         judge_model=settings.model,
         judge_effort=settings.effort,
         judge_fallback_model=model["modelId"],
         judge_fallback_effort=model.get("effort"),
+        memory_provider=MemoryRubricProvider(memory_dir),
     )
     model = job["hostModel"]
     started = runtime.start(

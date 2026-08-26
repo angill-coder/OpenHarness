@@ -1,5 +1,5 @@
 {
-  "description": "Capture-only checkpoint for explicit research-report writing feedback.",
+  "description": "Host-side Report Loop launcher and writing-feedback capture checkpoint.",
   "hooks": {
     "UserPromptSubmit": [
       {

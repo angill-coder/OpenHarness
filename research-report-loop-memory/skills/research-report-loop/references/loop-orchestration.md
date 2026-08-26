@@ -1,6 +1,6 @@
 # Report Loop 执行卡
 
-只在初稿 V1 已保存后读取本文件。Report Loop 是已经验证的黑盒组件：按以下模板构造 Job，然后直接启动一次 Python Runner。不要事前阅读 Runner 源码、运行测试、执行 `--help` 或预检。
+只在初稿 V1 已保存后读取本文件。Report Loop 是已经验证的黑盒组件：按以下模板构造 Job；Job 写入成功后，插件 Hook 会自动在宿主侧启动 Runner。不要搜索或调用 Report Loop MCP，不要事前阅读 Runner 源码、运行测试、执行 `--help` 或预检。
 
 ## 1. 构造 Job
 
@@ -36,14 +36,13 @@
 
 不要猜测或填写宿主模型 ID。Job 写入成功后，插件 Hook 会记录本次 WorkBuddy `sessionId`；Runner 据此从主会话 trace 读取准确的 `requestModelId`。同一 workspace 存在多个活跃会话而 session 标识缺失时，Runner 会明确拒绝，不按“最近会话”猜测。
 
-## 2. 直接执行
+## 2. 等待宿主 Hook
 
-WorkBuddy 加载 Skill 时会返回 Skill Base Directory；插件根目录是该目录的上两级。直接使用插件自带启动脚本，不搜索其他 Report Loop，不调用 MCP。
+Job 写入成功后，PostToolUse Hook 会在 Agent 沙箱外启动 Runner，并返回唯一的结果文件绝对路径和一条后台等待命令。立即使用 `Bash` 工具执行这条命令，设置 `run_in_background=true`，并保存工具返回的 `task_id`。等待任务完成后，WorkBuddy 会注入 `<task-notification>`；收到通知后调用 `TaskOutput(task_id)` 一次，读取完整 JSON 结果。
 
-- macOS / Linux：`<PLUGIN_ROOT>/scripts/run-python.sh <PLUGIN_ROOT>/mcp/report_loop/runner.py --job <ABS_JOB_PATH>`
-- Windows：`<PLUGIN_ROOT>\scripts\run-python.cmd <PLUGIN_ROOT>\mcp\report_loop\runner.py --job <ABS_JOB_PATH>`
+后台等待任务只等待结果文件，不会再次启动 Runner，也不参与 Judge 或 Rewrite。不要反复 Read 结果/状态文件，不要自行编写 shell 轮询。
 
-命令执行期间等待 Runner 完成，不并行启动第二个 Runner，不由宿主接管 Judge 或 Rewrite。
+不要执行 ToolSearch，不要调用 `report_loop_run`，不要检查 MCP 连接状态，也不要并行启动第二个 Loop。Hook 只是宿主侧 Launcher，不参与 Rubric、Judge、Rewrite 或停止条件判断。
 
 ## 3. 处理结果
 

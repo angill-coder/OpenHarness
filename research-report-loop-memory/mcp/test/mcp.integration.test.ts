@@ -51,6 +51,7 @@ test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics"
     await client.connect(transport);
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
+      "report_loop_run",
       "writing_memory_capture_payload", "writing_memory_forget", "writing_memory_recall",
     ]);
 

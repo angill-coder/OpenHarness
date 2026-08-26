@@ -26,7 +26,7 @@ description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究
 
 ### 第 1 步：确认写作输入
 
-素材解析完成后确认以下三项。用户已经明确提供的内容不要重复询问；缺失或含糊时，由 Agent 基于素材主动提出建议并请用户确认。
+素材解析完成后确认以下三项。用户已经明确提供的内容不要重复询问；缺失或含糊时，由 Agent 基于素材主动提出建议，并使用 `AskUserQuestion` 工具向用户确认。
 
 1. **汇报背景**：给谁看、支撑什么决策、用于什么场合？
 2. **摘要观点假设（hypothesis）**：完成素材解析后，提炼 1–3 条可被素材验证、反驳或修正的完整判断，主动请用户确认、修改或补充。每条 hypothesis 应能在验证后直接转化为摘要核心观点，清楚说明判断对象、方向性结论及关键关系、原因或对比；不能只写成主题、关键词或短标题。观点必须来自素材，证据不足时保留不确定性。用户也可以直接提出自己的 hypothesis。不要为了适配多选框而压缩观点；交互控件不适合展示完整判断时，改用编号文本确认。
@@ -44,9 +44,9 @@ V1 保存完成之前，不读取 Report Loop 执行卡，不检查或测试 Pyt
 
 ### 第 3 步：启动 Report Loop
 
-确认 V1 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V1 和素材路径构造 Job，正常流程只启动一次 Python Runner。
+确认 V1 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V1 和素材路径构造 Job。Job 写入成功后，插件 Hook 会在宿主侧自动启动 Runner，并返回后台等待命令。用 `Bash(run_in_background=true)` 启动该命令并保存 `task_id`；收到 `<task-notification>` 后调用 `TaskOutput(task_id)` 读取完整结果。
 
-Python Runner 是已经验证的黑盒组件。宿主不得事前阅读源码、运行测试、执行 `--help` 或预检，也不得自行执行 Judge、Rewrite 或旧 Report Loop MCP 流程。等待 Runner 完成后，只交付返回的 `finalArtifactPath`；写作前不要 Recall Memory。
+Hook 只负责在 Agent 沙箱外启动已经验证的 Python Runner；Report Loop 逻辑仍全部由 Python Runner 负责。宿主不得搜索或调用 Report Loop MCP，不得事前阅读源码、运行测试、执行 `--help` 或预检，也不得自行执行 Judge 或 Rewrite。取得结果后，只交付 `finalArtifactPath`；写作前不要 Recall Memory。
 
 ### 第 4 步：处理用户反馈
 

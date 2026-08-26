@@ -1,6 +1,6 @@
 {
   "name": "research-report-loop-memory",
-  "version": "1.0.0-mvp.19",
+  "version": "1.0.0-mvp.27",
   "private": true,
   "type": "module",
   "description": "Integrated report writing loop with L0/L1 evidence and Git-backed L2B Rubrics",
@@ -16,7 +16,7 @@
     "build:release:prompt-v1": "node scripts/build-release.mjs --curator-prompt v1-gate-first",
     "build:release:prompt-v2": "node scripts/build-release.mjs --curator-prompt v2-letta-first",
     "test": "npm run test:memory && npm run test:loop",
-    "test:memory": "node --import tsx --test mcp/test/mcp.integration.test.ts mcp/test/relevance.test.ts mcp/test/rubric-repository.test.ts mcp/test/storage-layout-v2.test.ts mcp/test/user-shortcut.test.ts mcp/test/integrated-contract.test.ts mcp/test/asset-path.test.ts mcp/test/curator-prompt-variants.test.ts mcp/test/capture-hook.test.ts mcp/test/reflection.test.ts mcp/test/windows-package.test.ts",
+    "test:memory": "node --import tsx --test mcp/test/mcp.integration.test.ts mcp/test/mcp-launcher.integration.test.ts mcp/test/relevance.test.ts mcp/test/rubric-repository.test.ts mcp/test/storage-layout-v2.test.ts mcp/test/user-shortcut.test.ts mcp/test/integrated-contract.test.ts mcp/test/asset-path.test.ts mcp/test/curator-prompt-variants.test.ts mcp/test/capture-hook.test.ts mcp/test/reflection.test.ts mcp/test/windows-package.test.ts mcp/test/report-loop-launcher.test.ts",
     "test:loop": "node scripts/run-python-command.mjs -m unittest discover -s tests -p test_*.py",
     "syntaxcheck": "tsc --noEmit --noCheck && node --check hooks/capture-checkpoint.mjs && node scripts/run-python-command.mjs -m compileall -q mcp/report_loop",
     "build:release:macos": "node scripts/build-release.mjs --target-platform darwin --target-arch arm64"

@@ -114,6 +114,21 @@ class MemoryRubricProvider:
             raise ValueError("invalid rubric set manifest")
         return value
 
+    def _document_paths(self, head: str) -> list[tuple[str, str]]:
+        tracked = self._git(
+            "-c", "core.quotePath=false", "ls-tree", "-r", "--name-only", head,
+            "--", "system", "audiences", "projects",
+        ).splitlines()
+        candidates: list[tuple[str, str]] = []
+        for relative_path in tracked:
+            if relative_path == "system/rubrics.json":
+                candidates.append(("core", relative_path))
+            elif relative_path.startswith("audiences/") and relative_path.endswith("/rubrics.json"):
+                candidates.append(("audience", relative_path))
+            elif relative_path.startswith("projects/") and relative_path.endswith("/rubrics.json"):
+                candidates.append(("project", relative_path))
+        return sorted(candidates, key=lambda value: (_SCOPE_PRIORITY[value[0]], value[1]))
+
     def load_sources(self, source_l1_ids: list[str]) -> list[dict[str, Any]]:
         """Read only the exact L1 atoms referenced by selected L2B rubrics."""
 
@@ -165,36 +180,18 @@ class MemoryRubricProvider:
             }
         try:
             head = self._git("rev-parse", "HEAD").strip()
-            candidates = [
-                ("core", "", "system/rubrics.json"),
-            ]
-            if audience.strip():
-                candidates.append((
-                    "audience",
-                    audience.strip(),
-                    f"audiences/{scope_storage_key(audience)}/rubrics.json",
-                ))
-            if project.strip():
-                candidates.append((
-                    "project",
-                    project.strip(),
-                    f"projects/{scope_storage_key(project)}/rubrics.json",
-                ))
-
             manifest = self._read_manifest(head)
-            documents: list[dict[str, Any]] = []
             selected: list[dict[str, Any]] = []
-            for requested_scope, requested_value, relative_path in candidates:
+            document_metadata: list[dict[str, Any]] = []
+            for expected_scope, relative_path in self._document_paths(head):
                 document = self._read_document(head, relative_path)
                 if document is None:
                     continue
-                if document.get("scope") != requested_scope:
+                if document.get("scope") != expected_scope:
                     raise ValueError(f"memory rubric scope mismatch: {relative_path}")
                 stored_value = str(document.get("scopeValue") or "")
-                if requested_scope != "core" and canonical_scope_value(stored_value) != canonical_scope_value(requested_value):
-                    raise ValueError(f"memory rubric scopeValue mismatch: {relative_path}")
-                scope_value = stored_value or requested_value
-                item_ids: list[str] = []
+                if expected_scope != "core" and not canonical_scope_value(stored_value):
+                    raise ValueError(f"memory rubric scopeValue missing: {relative_path}")
                 for raw_item in document.get("rubrics") or []:
                     if not isinstance(raw_item, dict):
                         continue
@@ -203,41 +200,63 @@ class MemoryRubricProvider:
                         continue
                     item = {
                         **raw_item,
-                        "scope": requested_scope,
-                        "scopeValue": scope_value or None,
+                        "scope": expected_scope,
+                        "scopeValue": stored_value or None,
                         "sourcePath": relative_path,
                     }
                     selected.append(item)
-                    item_ids.append(item_id)
-                documents.append({
+                document_metadata.append({
                     "path": relative_path,
-                    "scope": requested_scope,
-                    "scopeValue": scope_value or None,
-                    "itemIds": item_ids,
+                    "scope": expected_scope,
+                    "scopeValue": stored_value or None,
                 })
-            ordered = sorted(
+
+            id_counts: dict[str, int] = {}
+            for item in selected:
+                item_id = str(item["id"])
+                id_counts[item_id] = id_counts.get(item_id, 0) + 1
+            for item in selected:
+                original_id = str(item["id"])
+                if id_counts[original_id] <= 1:
+                    continue
+                identity = "\0".join([
+                    original_id,
+                    str(item.get("scope") or "core"),
+                    str(item.get("scopeValue") or ""),
+                    str(item.get("sourcePath") or ""),
+                ])
+                item["sourceMemoryId"] = original_id
+                item["id"] = (
+                    f"{original_id}::{item.get('scope')}:"
+                    f"{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:10]}"
+                )
+            items = sorted(
                 selected,
                 key=lambda item: (
                     _SCOPE_PRIORITY[str(item.get("scope") or "core")],
+                    str(item.get("scopeValue") or ""),
                     str(item["id"]),
                 ),
             )
-            # The same stable Memory ID may be refined at a narrower Scope.
-            # Keep only the most specific selected version before model resolution.
-            by_id: dict[str, dict[str, Any]] = {}
-            for item in ordered:
-                by_id[str(item["id"])] = item
-            items = sorted(
-                by_id.values(),
-                key=lambda item: (
-                    _SCOPE_PRIORITY[str(item.get("scope") or "core")],
-                    str(item["id"]),
-                ),
-            )
+            documents = [
+                {
+                    **metadata,
+                    "itemIds": [
+                        str(item["id"])
+                        for item in items
+                        if item.get("sourcePath") == metadata["path"]
+                    ],
+                }
+                for metadata in document_metadata
+            ]
             return {
                 "status": "loaded",
                 "revision": head,
                 "rubricSetVersion": manifest.get("version"),
+                "queryContext": {
+                    "audience": str(audience or "").strip(),
+                    "project": str(project or "").strip(),
+                },
                 "documents": documents,
                 "items": items,
                 "warnings": [],

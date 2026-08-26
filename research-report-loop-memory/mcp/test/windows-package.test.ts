@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -50,7 +52,7 @@ test("release builder emits platform-native Memory MCP and Hook configurations",
   assert.match(builder, /command: "sh"/u);
   assert.match(builder, /run-node\.sh/u);
   assert.match(builder, /capture-checkpoint\.mjs/u);
-  assert.match(builder, /deepseek-v4-pro/u);
+  assert.match(builder, /deepseek-v4-pro-ioa/u);
   assert.match(builder, /reflection-current\.ps1/u);
   assert.match(builder, /defaultJudgeProvider: "workbuddy"/u);
   assert.match(builder, /judgeDefaults/u);
@@ -58,8 +60,9 @@ test("release builder emits platform-native Memory MCP and Hook configurations",
   assert.match(builder, /mcp\/report_loop/u);
 });
 
-test("Report Loop runs only through the Python runner", () => {
+test("Report Loop uses one host launcher and keeps Python as the only loop runtime", () => {
   assert.equal(fs.existsSync(path.join(root, "mcp/report_loop/runner.py")), true);
+  assert.equal(fs.existsSync(path.join(root, "mcp/src/report-loop-launcher.ts")), true);
   assert.equal(fs.existsSync(path.join(root, "mcp/report_loop/server.py")), false);
   assert.equal(fs.existsSync(path.join(root, "mcp/report_loop/core/codex_cli.py")), true);
 
@@ -69,6 +72,57 @@ test("Report Loop runs only through the Python runner", () => {
   const preflight = fs.readFileSync(path.join(root, "scripts/verify-mcp-contract.mjs"), "utf8");
   assert.match(preflight, /writing_memory_recall/u);
   assert.match(preflight, /writing_memory_capture_payload/u);
+  assert.match(preflight, /report_loop_run/u);
   assert.doesNotMatch(preflight, /"writing_memory_capture"/u);
   assert.doesNotMatch(preflight, /report_loop_(?:start|submit|finish|status)/u);
+});
+
+test("local registration replaces legacy Report Loop MCP with the unified host launcher", () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "report-loop-register-"));
+  const configDir = path.join(temporary, "config");
+  const marketplaceRoot = path.join(temporary, "marketplace");
+  const installPath = path.join(marketplaceRoot, "plugins/research-report-loop-memory");
+  fs.mkdirSync(path.join(marketplaceRoot, ".codebuddy-plugin"), { recursive: true });
+  fs.writeFileSync(
+    path.join(marketplaceRoot, ".codebuddy-plugin/marketplace.json"),
+    JSON.stringify({ name: "test-marketplace", plugins: [] }),
+  );
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, "settings.json"),
+    JSON.stringify({ sandbox: { extraAllowWrite: ["/already-allowed"] } }),
+  );
+  fs.writeFileSync(
+    path.join(configDir, ".mcp.json"),
+    JSON.stringify({ mcpServers: {
+      unrelated: { command: "other", args: [] },
+      "research-report-loop": { command: "old", args: [] },
+    } }),
+  );
+
+  try {
+    const completed = spawnSync(
+      process.execPath,
+      [
+        path.join(root, "scripts/register-workbuddy-local.mjs"),
+        configDir,
+        "research-report-loop-memory@test-marketplace",
+        installPath,
+        "1.0.0-test",
+        "test-marketplace",
+        marketplaceRoot,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(completed.status, 0, completed.stderr);
+    const settings = JSON.parse(fs.readFileSync(path.join(configDir, "settings.json"), "utf8"));
+    assert.deepEqual(settings.sandbox.extraAllowWrite, ["/already-allowed"]);
+    const mcp = JSON.parse(fs.readFileSync(path.join(configDir, ".mcp.json"), "utf8"));
+    assert.equal(mcp.mcpServers.unrelated.command, "other");
+    assert.equal(mcp.mcpServers["research-report-loop"], undefined);
+    assert.equal(mcp.mcpServers["report-memory-v2"].command, process.platform === "win32" ? "cmd.exe" : "sh");
+    assert.match(JSON.stringify(mcp.mcpServers["report-memory-v2"]), new RegExp(installPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 });

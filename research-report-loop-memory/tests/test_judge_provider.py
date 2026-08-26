@@ -14,7 +14,7 @@ class JudgeProviderTests(unittest.TestCase):
     def test_default_provider_is_workbuddy(self):
         settings = locked_report_judge_settings()
         self.assertEqual(settings.provider, "workbuddy")
-        self.assertEqual(settings.model, "deepseek-v4-pro")
+        self.assertEqual(settings.model, "deepseek-v4-pro-ioa")
         self.assertEqual(settings.effort, "medium")
 
     def test_codex_provider_is_available_but_not_default(self):
@@ -31,12 +31,12 @@ class JudgeProviderTests(unittest.TestCase):
     @patch("mcp.report_loop.core.judge_provider.call_workbuddy")
     def test_call_judge_always_uses_workbuddy(self, workbuddy_call):
         workbuddy_call.return_value = "ok"
-        settings = JudgeSettings("workbuddy", "deepseek-v4-pro", "medium")
+        settings = JudgeSettings("workbuddy", "deepseek-v4-pro-ioa", "medium")
         result = call_judge("prompt", settings=settings, timeout_seconds=12)
         self.assertEqual(result, "ok")
         workbuddy_call.assert_called_once_with(
             "prompt",
-            model="deepseek-v4-pro",
+            model="deepseek-v4-pro-ioa",
             effort="medium",
             timeout_seconds=12,
         )

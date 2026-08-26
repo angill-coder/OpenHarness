@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { classifyWritingFeedback } from "../mcp/src/relevance.ts";
+import { ReportLoopLauncher } from "../mcp/src/report-loop-launcher.ts";
 
 const MEMORY_AGENT = "research-report-memory-curator";
 const MEMORY_AGENT_MARKER = /\bMEMORY_CAPTURE_COMPLETED\b/iu;
@@ -24,6 +27,9 @@ const NEW_REPORT_PATTERN = /另一份|再写|重新写|新(?:的)?报告|换.{0,
 const CANCEL_REPORT_PATTERN = /(?:不写了|不用写了|取消(?:这次|本次)?(?:报告|任务)?|先暂停|停止(?:写作|任务)?|算了)/iu;
 const WRITE_TOOL_PATTERN = /^(?:write|edit|create_file)$/iu;
 const REPORT_LOOP_SIDECAR_SUFFIX = ".session.json";
+const REPORT_LOOP_LOCK_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const REPORT_LOOP_WAIT_TIMEOUT_MS = 65 * 60 * 1000;
+const REPORT_LOOP_WAIT_INTERVAL_MS = 1000;
 
 function emptyState(sessionId) {
   return {
@@ -147,29 +153,202 @@ async function saveState(state) {
   await fs.rename(temporary, file);
 }
 
-async function writeReportLoopSessionSidecar(toolName, toolInput, sessionId) {
-  if (!WRITE_TOOL_PATTERN.test(toolName)) return;
+async function writeJsonAtomic(file, value) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await fs.rename(temporary, file);
+}
+
+async function readJson(file) {
+  try {
+    return JSON.parse(await fs.readFile(file, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+function reportLoopWaitCommand(resultPath, statusPath) {
+  const scriptPath = fileURLToPath(import.meta.url);
+  return [
+    process.execPath,
+    ...process.execArgv,
+    scriptPath,
+    "wait-loop-result",
+    resultPath,
+    statusPath,
+  ].map(shellQuote).join(" ");
+}
+
+function reportLoopArtifactPaths(jobPath, jobPayload) {
+  const digest = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(jobPayload))
+    .digest("hex")
+    .slice(0, 12);
+  const prefix = `${jobPath}.report-loop.${digest}`;
+  return {
+    digest,
+    lockPath: `${prefix}.lock`,
+    statusPath: `${prefix}.status.json`,
+    resultPath: `${prefix}.result.json`,
+  };
+}
+
+async function acquireLaunchLock(lockPath) {
+  try {
+    const handle = await fs.open(lockPath, "wx", 0o600);
+    await handle.writeFile(`${JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() })}\n`);
+    await handle.close();
+    return true;
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
+  try {
+    const stat = await fs.stat(lockPath);
+    if (Date.now() - stat.mtimeMs <= REPORT_LOOP_LOCK_MAX_AGE_MS) return false;
+    await fs.unlink(lockPath);
+    return acquireLaunchLock(lockPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return acquireLaunchLock(lockPath);
+    throw error;
+  }
+}
+
+async function launchReportLoopHostWorker(jobPath, paths) {
+  const existingResult = await readJson(paths.resultPath);
+  if (existingResult) return { ...paths, state: "completed", launched: false };
+  const locked = await acquireLaunchLock(paths.lockPath);
+  if (!locked) return { ...paths, state: "running", launched: false };
+
+  await writeJsonAtomic(paths.statusPath, {
+    version: 1,
+    state: "queued",
+    jobPath,
+    resultPath: paths.resultPath,
+    updatedAt: new Date().toISOString(),
+  });
+  if (process.env.RESEARCH_REPORT_LOOP_HOOK_NO_SPAWN === "1") {
+    return { ...paths, state: "queued", launched: false };
+  }
+
+  const scriptPath = fileURLToPath(import.meta.url);
+  const child = spawn(
+    process.execPath,
+    [...process.execArgv, scriptPath, "run-loop-worker", jobPath, paths.statusPath, paths.resultPath, paths.lockPath],
+    {
+      cwd: path.dirname(jobPath),
+      env: { ...process.env, RESEARCH_REPORT_LOOP_LAUNCHER: "workbuddy-host-hook" },
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    },
+  );
+  child.unref();
+  return { ...paths, state: "queued", launched: true };
+}
+
+async function handleReportLoopJobWrite(toolName, toolInput, sessionId) {
+  if (!WRITE_TOOL_PATTERN.test(toolName)) return undefined;
   const targetValue = toolInput?.file_path ?? toolInput?.filePath ?? toolInput?.path;
-  if (typeof targetValue !== "string" || !targetValue.trim()) return;
+  if (typeof targetValue !== "string" || !targetValue.trim()) return undefined;
   const target = path.resolve(targetValue.trim());
   let stat;
   try {
     stat = await fs.stat(target);
   } catch {
-    return;
+    return undefined;
   }
-  if (!stat.isFile() || stat.size > 1024 * 1024) return;
+  if (!stat.isFile() || stat.size > 1024 * 1024) return undefined;
   let payload;
   try {
     payload = JSON.parse(await fs.readFile(target, "utf8"));
   } catch {
-    return;
+    return undefined;
   }
-  if (payload?.schemaVersion !== 2 || !payload?.v1ArtifactPath || !payload?.outputPath) return;
+  if (payload?.schemaVersion !== 2 || !payload?.v1ArtifactPath || !payload?.outputPath) return undefined;
   const sidecar = `${target}${REPORT_LOOP_SIDECAR_SUFFIX}`;
-  const temporary = `${sidecar}.${process.pid}.tmp`;
-  await fs.writeFile(temporary, `${JSON.stringify({ version: 1, sessionId }, null, 2)}\n`, { mode: 0o600 });
-  await fs.rename(temporary, sidecar);
+  await writeJsonAtomic(sidecar, { version: 1, sessionId });
+  return launchReportLoopHostWorker(target, reportLoopArtifactPaths(target, payload));
+}
+
+async function runReportLoopWorker() {
+  const [jobPath, statusPath, resultPath, lockPath] = process.argv.slice(3);
+  if (![jobPath, statusPath, resultPath, lockPath].every(Boolean)) {
+    throw new Error("missing report loop worker paths");
+  }
+  const launcher = new ReportLoopLauncher();
+  try {
+    await writeJsonAtomic(statusPath, {
+      version: 1,
+      state: "running",
+      jobPath,
+      resultPath,
+      updatedAt: new Date().toISOString(),
+    });
+    const result = await launcher.run(jobPath);
+    await writeJsonAtomic(resultPath, {
+      ...result,
+      jobPath,
+      finishedAt: new Date().toISOString(),
+    });
+    await writeJsonAtomic(statusPath, {
+      version: 1,
+      state: result?.status === "error" ? "failed" : "completed",
+      jobPath,
+      resultPath,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    const failure = {
+      status: "error",
+      reason: "report_loop_host_worker_failed",
+      detail: error?.message || String(error),
+      jobPath,
+      finishedAt: new Date().toISOString(),
+    };
+    await writeJsonAtomic(resultPath, failure);
+    await writeJsonAtomic(statusPath, {
+      version: 1,
+      state: "failed",
+      jobPath,
+      resultPath,
+      reason: failure.reason,
+      updatedAt: new Date().toISOString(),
+    });
+  } finally {
+    await launcher.destroy();
+    await fs.unlink(lockPath).catch(() => {});
+  }
+}
+
+async function waitForReportLoopResult() {
+  const [resultPath, statusPath] = process.argv.slice(3);
+  if (![resultPath, statusPath].every(Boolean)) {
+    throw new Error("missing report loop wait paths");
+  }
+  const deadline = Date.now() + REPORT_LOOP_WAIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const raw = await fs.readFile(resultPath, "utf8");
+      JSON.parse(raw);
+      process.stdout.write(raw.endsWith("\n") ? raw : `${raw}\n`);
+      return;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    const status = await readJson(statusPath);
+    if (status?.state === "failed" || status?.state === "completed") {
+      throw new Error(`report loop ${status.state} without result file`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, REPORT_LOOP_WAIT_INTERVAL_MS));
+  }
+  throw new Error("report loop result wait timed out");
 }
 
 function printJson(payload) {
@@ -225,7 +404,23 @@ async function onPostTool(input) {
   const successful = successfulToolResult(result);
   let message = "";
 
-  if (successful) await writeReportLoopSessionSidecar(actualToolName, toolInput, state.sessionId);
+  const loopLaunch = successful
+    ? await handleReportLoopJobWrite(actualToolName, toolInput, state.sessionId)
+    : undefined;
+  if (loopLaunch) {
+    state.active = true;
+    state.reportProduced = true;
+    message = [
+      loopLaunch.state === "completed"
+        ? "Report Loop 已有可用结果。"
+        : "Report Loop 已由插件 Hook 在宿主侧启动。",
+      `结果文件：${loopLaunch.resultPath}。`,
+      `后台等待命令：${reportLoopWaitCommand(loopLaunch.resultPath, loopLaunch.statusPath)}。`,
+      "立即用 Bash 工具执行该命令并设置 run_in_background=true，保存返回的 task_id。",
+      "收到 <task-notification> 后调用 TaskOutput(task_id) 读取完整结果；不要自行轮询文件。",
+      "不要搜索或调用 report_loop_run，不要检查 MCP，也不要自行运行或测试 Runner。",
+    ].join(" ");
+  }
 
   if (successful && detectSkillActivation(toolName, toolInput)) state.active = true;
   if (successful && actualToolName.endsWith("report_loop_finish")) {
@@ -287,6 +482,8 @@ async function onStop(input) {
 
 async function main() {
   const mode = process.argv[2];
+  if (mode === "run-loop-worker") return runReportLoopWorker();
+  if (mode === "wait-loop-result") return waitForReportLoopResult();
   const input = await readInput();
   if (mode === "prompt") return onPrompt(input);
   if (mode === "post-tool") return onPostTool(input);

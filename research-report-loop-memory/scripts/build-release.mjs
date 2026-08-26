@@ -15,7 +15,7 @@ const curatorPromptVariant = curatorPromptExplicit
   ? process.argv[curatorPromptArgIndex + 1]
   : "v1-gate-first";
 const judgeDefaults = {
-  workbuddy: { model: "deepseek-v4-pro", effort: "medium" },
+  workbuddy: { model: "deepseek-v4-pro-ioa", effort: "medium" },
   codex: { model: "gpt-5.6-sol", effort: "medium" },
 };
 const noArchive = process.argv.includes("--no-archive");
@@ -222,6 +222,12 @@ fs.writeFileSync(path.join(pluginDir, "BUILD-INFO.json"), `${JSON.stringify({
   judgeFallbackTriggers: ["transport_error", "empty_response", "invalid_judge_json"],
   intakeUserEvidenceRequired: true,
   judgePromptTransport: "stdin",
+  reportLoopLaunchBoundary: "workbuddy-host-hook",
+  reportLoopTrigger: "report-loop-job-write",
+  reportLoopWaitTransport: "workbuddy-background-task",
+  reportLoopWaitNotification: "task-notification-then-TaskOutput",
+  reportLoopResultTransport: "job-sibling-json",
+  reportLoopCompatibilityTool: "report_loop_run",
 }, null, 2)}\n`);
 
 const marketplace = {

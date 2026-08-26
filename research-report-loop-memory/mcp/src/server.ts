@@ -1,10 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { ReportLoopLauncher } from "./report-loop-launcher.ts";
 import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
 
 const server = new McpServer(
-  { name: "report-memory-v2", version: "2.1.0-mvp.19" },
+  { name: "report-memory-v2", version: "2.2.0-mvp.22" },
   {
     capabilities: { logging: {} },
     instructions: [
@@ -13,11 +14,13 @@ const server = new McpServer(
       "L0 Episode 和 L1 Atom 使用 TencentDB MemoryCore；L2B 是独立的 Git-backed Memory Rubrics，不改写 Base Rubrics。",
       "Scope 仅使用 core/audience/project；冲突优先级为本轮要求 > project > audience > core > research-report skill。",
       "每次 writing feedback capture 都保存 L0、按需聚合 L1，并保守判断是否更新 L2B；普通单次反馈默认不改变 L2B。",
+      "report_loop_run 是宿主侧薄 Launcher：只在 MCP 宿主边界启动现有 Python Runner，不承载 Report Loop 业务逻辑。",
     ].join(" "),
   },
 );
 
 const runtime = new WritingMemoryRuntime(server);
+const reportLoopLauncher = new ReportLoopLauncher();
 const scopeSchema = z.enum(WRITING_MEMORY_SCOPES);
 
 function result(payload: unknown) {
@@ -26,6 +29,18 @@ function result(payload: unknown) {
     structuredContent: payload as Record<string, unknown>,
   };
 }
+
+server.registerTool(
+  "report_loop_run",
+  {
+    title: "启动报告评测改写循环",
+    description: "宿主侧薄 Launcher。传入绝对 Job JSON 路径，在 Agent 沙箱外运行现有 Python Report Loop Runner，并返回 Runner 的最终 JSON。",
+    inputSchema: {
+      jobPath: z.string().min(1).max(4000).describe("宿主 Agent 已写入的 Job Schema v2 JSON 绝对路径"),
+    },
+  },
+  async ({ jobPath }) => result(await reportLoopLauncher.run(jobPath)),
+);
 
 server.registerTool(
   "writing_memory_recall",
@@ -181,6 +196,7 @@ server.registerTool(
 );
 
 const shutdown = async () => {
+  await reportLoopLauncher.destroy();
   await runtime.destroy();
   process.exit(0);
 };

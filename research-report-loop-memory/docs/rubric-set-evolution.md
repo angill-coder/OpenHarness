@@ -7,7 +7,7 @@ Memory Agent 保持开放判断，只维护独立 Memory Rubrics；Base Rubrics 
 ```text
 Memory Agent：维护独立 Memory Rubrics
                  ↓
-report_loop_start：选择 core + 当前 audience + 当前 project
+report_loop_start：读取 core + audience + project 候选
                  ↓
 Resolution Judge：additional / interpret / ignore
                  ↓
@@ -39,7 +39,7 @@ Memory Agent 只遵守三条原则：
 
 ## Resolution Plan
 
-只有选中了 Memory 时才调用一次 Resolution Judge；空 Memory 不调用模型。每条 Memory 必须得到一个决定：
+只要仓库存在 Memory Rubric 候选，就调用一次 Resolution Judge；真正空仓库不调用模型。Provider 不按 audience/project 字符串预筛选，scope/scopeValue 作为语义线索随候选交给模型。每条候选 Memory 必须得到一个决定：
 
 - `additional`：在一个现有六维中新增本轮检查，不新建维度、不改变权重。
 - `interpret`：细化或替代一条非红线 Base Check 在本场景的适用方式；编译结果明确“本轮以场景解释为准”，但不改写 Base 文件。
@@ -52,7 +52,7 @@ Memory Agent 只遵守三条原则：
 每个 run 保存：
 
 - `base_rubric.json`：本轮 Base 快照；
-- `memory_rubrics.json`：按 Scope 选中的 Memory 快照；
+- `memory_rubrics.json`：全部 Scope 候选的 Memory 快照；
 - `rubric_resolution_plan.json`：一次模型解释的冻结结果；
 - `compiled_rubric.json`：六维 Judge 实际使用的标准。
 

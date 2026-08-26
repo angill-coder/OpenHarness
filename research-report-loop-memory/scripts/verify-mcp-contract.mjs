@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const expected = [
+  "report_loop_run",
   "writing_memory_capture_payload",
   "writing_memory_forget",
   "writing_memory_recall",

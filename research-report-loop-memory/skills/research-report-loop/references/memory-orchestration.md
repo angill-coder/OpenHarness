@@ -12,7 +12,7 @@
 
 - 写作前不执行 Memory Recall。宿主 Agent只按本轮用户要求和 `research-report-loop` Skill 写初稿。
 - L2B 变化时，Memory Curator 只维护独立的 Git-backed Memory Rubrics，不修改 Base，也不为 Audience×Project 组合保存完整副本。
-- Python Runner 读取 Base 以及当前 `core / audience / project` Memory Rubrics；Resolution Judge 根据本轮任务判断激活项，必要时读取对应的 `sourceL1`，随后冻结 Resolution Plan 与 compiled rubric，供六维 Judge 共同使用。
+- Python Runner 读取 Base 以及 `core / audience / project` Memory Rubric 候选；Provider 不按受众或项目名称做精确匹配。Resolution Judge 根据本轮任务语义判断激活项，必要时读取对应的 `sourceL1`，随后冻结 Resolution Plan 与 compiled rubric，供六维 Judge 共同使用。
 - 同一 Loop 中 Memory 即使更新，也不改变已经冻结的 Rubrics；下一次新建 Loop 才读取新 Revision。
 
 ## 用户反馈后 Capture
@@ -40,5 +40,5 @@
 
 - 本轮用户明确要求决定当前交付目标。
 - Base Rubrics 的红线与硬门槛不能被 Memory 删除或弱化。
-- Scope 候选按当前任务的 `core + audience + project` 读取；语义重复、适用场景和冲突由 Resolution Judge 结合任务解释，六维 Judge 不再各自重解释 Memory。
-- 当前任务命中的 Audience/Project 只用于检索候选 Memory，不能反推已有记忆或新反馈的 Scope；Scope 仍由 Curator 根据反馈语义判断。
+- Scope 候选从 `core + audience + project` 文档读取；受众/项目名称是否同义、语义重复、适用场景和冲突均由 Resolution Judge 结合任务解释，六维 Judge 不再各自重解释 Memory。
+- 当前任务的 Audience/Project 只作为 Resolution Judge 的判断上下文，不能反推已有记忆或新反馈的 Scope；Scope 仍由 Curator 根据反馈语义判断。

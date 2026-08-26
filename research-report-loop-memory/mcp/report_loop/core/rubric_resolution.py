@@ -7,7 +7,7 @@ import json
 from typing import Any, Callable
 
 
-PROMPT_VERSION = "memory-resolution-principles-v2-source-review"
+PROMPT_VERSION = "memory-resolution-principles-v3-scope-resolution"
 _MODES = {"additional", "interpret", "ignore"}
 
 
@@ -60,7 +60,7 @@ def build_resolution_prompt(
 
 只遵守三条原则：
 1. Base Rubrics 永远保留，不删除、不降权、不改写红线。
-2. 结合当前任务理解 Memory：若它提供新的可观察标准，用 additional；若它细化或替代某条非红线 Base Check 在本场景的适用方式，用 interpret；重复、无关或无法可靠判断时用 ignore。不要把相互矛盾的要求并列为 additional。
+2. 结合当前任务理解 Memory：scope/scopeValue 是来源与适用范围线索，不是精确字符串路由规则；根据 task、audience、project 的语义判断是否适用，必要时溯源。若它提供新的可观察标准，用 additional；若它细化或替代某条非红线 Base Check 在本场景的适用方式，用 interpret；重复、无关或无法可靠判断时用 ignore。不要把相互矛盾的要求并列为 additional。
 3. 每条 Memory 只落到一个现有六维维度；保持克制，不创建第七维，不改变维度权重。
 
 {source_instruction}

@@ -5,7 +5,7 @@ import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
 
-test("integrated Skill uses the Python runner and versioned Rubric Set", () => {
+test("integrated Skill uses the host launcher and versioned Rubric Set", () => {
   const skill = fs.readFileSync(path.join(root, "skills/research-report-loop/SKILL.md"), "utf8");
   const loop = fs.readFileSync(
     path.join(root, "skills/research-report-loop/references/loop-orchestration.md"),
@@ -24,16 +24,24 @@ test("integrated Skill uses the Python runner and versioned Rubric Set", () => {
   assert.match(skill, /可被素材验证、反驳或修正的完整判断/u);
   assert.match(skill, /不能只写成主题、关键词或短标题/u);
   assert.match(skill, /不要为了适配多选框而压缩观点/u);
-  assert.match(skill, /只启动一次 Python Runner/u);
+  assert.match(skill, /插件 Hook 会在宿主侧自动启动 Runner/u);
+  assert.match(skill, /AskUserQuestion/u);
+  assert.match(skill, /TaskOutput/u);
+  assert.match(skill, /Bash\(run_in_background=true\)/u);
+  assert.match(skill, /<task-notification>/u);
   assert.match(skill, /finalArtifactPath/u);
   assert.match(skill, /V1 保存完成之前，不读取 Report Loop 执行卡/u);
-  assert.match(skill, /已经验证的黑盒组件/u);
+  assert.match(skill, /已经验证的 Python Runner/u);
   assert.match(skill, /不得事前阅读源码、运行测试、执行 `--help` 或预检/u);
   assert.match(loop, /"schemaVersion": 2/u);
   assert.match(loop, /# Report Loop 执行卡/u);
-  assert.match(loop, /<PLUGIN_ROOT>.*run-python\.sh.*runner\.py.*--job/su);
-  assert.match(loop, /run-python\.cmd.*runner\.py.*--job/su);
-  assert.match(loop, /直接启动一次 Python Runner/u);
+  assert.match(loop, /PostToolUse Hook/u);
+  assert.match(loop, /TaskOutput/u);
+  assert.match(loop, /run_in_background=true/u);
+  assert.match(loop, /<task-notification>/u);
+  assert.match(loop, /结果文件绝对路径/u);
+  assert.match(loop, /宿主侧 Launcher/u);
+  assert.doesNotMatch(loop, /<PLUGIN_ROOT>|run-python\.(?:sh|cmd)/u);
   assert.match(loop, /不要事前阅读 Runner 源码、运行测试、执行 `--help` 或预检/u);
   assert.doesNotMatch(loop, /sourceL1|rubric_compiler|judge_batch|Persistent Rewriter/u);
   assert.match(architecture, /Resolution Judge.*sourceL1/su);
@@ -72,6 +80,7 @@ test("integrated manifests register only Memory MCP plus Curator and Reflection"
     "utf8",
   );
   assert.match(orchestration, /report-memory-v2/u);
-  assert.match(skill, /旧 Report Loop MCP 流程/u);
-  assert.match(loop, /不调用 MCP/u);
+  assert.match(skill, /Hook 只负责在 Agent 沙箱外启动/u);
+  assert.match(loop, /不要执行 ToolSearch/u);
+  assert.match(loop, /不要调用 `report_loop_run`/u);
 });

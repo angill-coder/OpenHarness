@@ -42,6 +42,32 @@ settings.enabledPlugins ??= {};
 settings.enabledPlugins[pluginRef] = true;
 writeJsonAtomic(settingsFile, settings);
 
+const mcpFile = path.join(configDir, ".mcp.json");
+const mcp = readJson(mcpFile, { mcpServers: {} });
+mcp.mcpServers ??= {};
+delete mcp.mcpServers["research-report-loop"];
+delete mcp.mcpServers["openharness-report-loop"];
+delete mcp.mcpServers["local-report-loop"];
+const nodeLauncher = path.join(installPath, "scripts", process.platform === "win32" ? "run-node.cmd" : "run-node.sh");
+const serverEntry = path.join(installPath, "dist", "memory-server.mjs");
+const baseRubric = path.join(installPath, "rubrics", "v2_rubric_research.json");
+mcp.mcpServers["report-memory-v2"] = process.platform === "win32" ? {
+  command: "cmd.exe",
+  args: ["/d", "/s", "/c", `""${nodeLauncher}" "${serverEntry}""`],
+  env: {
+    RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
+    RESEARCH_REPORT_BASE_RUBRIC_PATH: baseRubric,
+  },
+} : {
+  command: "sh",
+  args: [nodeLauncher, serverEntry],
+  env: {
+    RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
+    RESEARCH_REPORT_BASE_RUBRIC_PATH: baseRubric,
+  },
+};
+writeJsonAtomic(mcpFile, mcp);
+
 const marketplaceManifestFile = path.join(marketplaceRoot, ".codebuddy-plugin/marketplace.json");
 const marketplaceManifest = readJson(marketplaceManifestFile, null);
 if (!marketplaceManifest) {
@@ -60,4 +86,10 @@ marketplaces[marketplaceName] = {
 };
 writeJsonAtomic(marketplacesFile, marketplaces);
 
-process.stdout.write(`${JSON.stringify({ status: "registered", pluginRef, installPath, version })}\n`);
+process.stdout.write(`${JSON.stringify({
+  status: "registered",
+  pluginRef,
+  installPath,
+  version,
+  mcpServer: "report-memory-v2",
+})}\n`);

@@ -6,8 +6,8 @@
 
 1. `research-report-loop` Skill 确认需求并由宿主 Agent 写初稿。
 2. L2B 通过 `criterionKey + add/extend/override/disable` 更新 `core / audience / project` Overlay，并形成新的 Rubric Set 版本。
-3. 宿主写入 Job Schema v2，并一次性启动 Python Runner。Runner 按 `Base → core → audience → project` 解析并冻结 Rubric。
-4. Runner 默认并发六个隔离 Judge；存在适用 Personal Rubrics 时增加第七维。Judge Provider 默认是 WorkBuddy `deepseek-v4-pro / medium`，也可选 Codex `gpt-5.6-sol / medium`；调用失败、空响应或 Judge JSON 不合规时，自动切换到 WorkBuddy App 当前主模型。
+3. 宿主写入 Job Schema v2，插件 PostToolUse Hook 自动在 Agent 沙箱外启动 Python Runner；Runner 按 `Base → core → audience → project` 解析并冻结 Rubric。该链路不依赖 Report Loop 工具是否被当前会话索引。
+4. Runner 默认并发六个隔离 Judge；存在适用 Personal Rubrics 时增加第七维。Judge Provider 默认是 WorkBuddy `deepseek-v4-pro-ioa / medium`，也可选 Codex `gpt-5.6-sol / medium`；调用失败、空响应或 Judge JSON 不合规时，自动切换到 WorkBuddy App 当前主模型。
 5. Runner 使用 App 主模型启动一个持久 Rewriter CLI，串行执行 Rewrite → Judge，直到 5 分、连续两轮未采纳或 60 分钟，并返回历史最佳报告。
 6. 用户明确反馈后，Skill 指引宿主先修改当前报告，再委派 `research-report-memory-curator` Capture；Judge 反馈不会进入 Memory。
 
@@ -20,19 +20,21 @@
 - **实时 Capture**：Capture-only Hook 识别已交付报告后的明确写作反馈，提醒宿主先修改报告，再通过 Agent/Task 委派 `research-report-memory-curator` 调用专用 MCP。Stop 最多检查一次是否遗漏 Capture；明确成功或失败后放行。
 - **定时 Reflection**：macOS LaunchAgent 或 Windows Task Scheduler 每天 16:30 启动一次隔离的 WorkBuddy CLI Reflection Agent，复审待处理 L0/L1 和疑似冲突，并只提交 L2B 增量修改。
 
-Hook 不注册 `PreToolUse`，不负责写前 Recall、报告文件校验或 Report Loop 状态管理，也不要求主 Agent 直接调用 MCP。Capture 明确失败不会回滚已完成报告。
+Hook 不注册 `PreToolUse`，不负责写前 Recall或报告内容校验。它只在 Job 写入后启动 Runner，返回结果文件路径与后台等待命令，并继续承担反馈 Capture checkpoint。Agent 用 `Bash(run_in_background=true)` 启动等待任务，收到 `<task-notification>` 后通过 `TaskOutput` 取得最终结果。Capture 明确失败不会回滚已完成报告。
 
 ## Report Loop 模型与隔离
 
 - Writer 与 Rewriter 使用 WorkBuddy App 主对话中用户实际选择的模型；Hook 记录 session，Runner 从主会话 trace 自动读取 `requestModelId`，不再让 Agent 猜写模型 ID。
-- Judge Provider 默认 `workbuddy`，固定为 `deepseek-v4-pro / medium`；也可在 Job 中明确选择 `codex`，固定为 `gpt-5.6-sol / medium`。Judge Prompt 均通过 stdin 传入。只有调用失败、空响应或输出不满足 Judge JSON 合约时，才熔断到 WorkBuddy App 当前主模型，评分低不会触发回退。
+- Judge Provider 默认 `workbuddy`，固定为 `deepseek-v4-pro-ioa / medium`；也可在 Job 中明确选择 `codex`，固定为 `gpt-5.6-sol / medium`。Judge Prompt 均通过 stdin 传入。只有调用失败、空响应或输出不满足 Judge JSON 合约时，才熔断到 WorkBuddy App 当前主模型，评分低不会触发回退。
 - 三项开场输入必须附带用户消息原文；系统/App 注入的路径和附件清单只算候选素材，不能确认重点素材或替代用户回答。
 - 每个 Rubric Dimension 和每轮 Judge 使用独立 CLI 进程与上下文；query 和三项 intake 会传给每个 Judge。
 - Rewriter 与 Judge 隔离，整个 Run 只保留一个 Rewriter stream-json 进程；它只接收净化后的 revision brief，不接收 Judge 原始输出。
-## MCP 与 Runner 边界
+## Hook、MCP 与 Runner 边界
 
-- Report Loop 不注册 MCP Server；`mcp/report_loop/runner.py` 是唯一循环入口，负责 Rubric 编译、Judge、Rewrite、版本采纳与停止。
-- 仅 `report-memory-v2` 注册为 MCP Server，用于 L0/L1/L2B Capture、Review、Manage 与 Forget。
+- 只维护一个 `report-memory-v2` MCP Server，负责 L0/L1/L2B；其中保留 `report_loop_run` 作为兼容入口，但正常写作链路不依赖当前对话暴露该工具。
+- Job 写入后，宿主 Hook 启动 `mcp/report_loop/runner.py`，并把状态与最终结果写在 Job 同目录。路径由插件根目录和 Job 动态解析，不写死用户名、安装目录或操作系统路径。
+- Python Runner 仍是唯一循环入口，负责 Rubric 编译、Judge、Rewrite、版本采纳与停止；Hook 不复制任何 Loop 逻辑。
+- Agent 不直接运行 Python，也不需要申请访问 WorkBuddy 的认证或日志目录。
 
 ## Curator Prompt 双版本
 
@@ -68,9 +70,9 @@ node scripts/migrate-rubric-scope-paths.mjs --apply
 
 ## Windows x64 安装包
 
-Windows 包使用 `cmd.exe + run-node.cmd` 启动 Memory MCP，并使用 `run-python.cmd` 启动 Report Loop Runner；不依赖 Git Bash、WSL 或系统 `sh`。它优先复用 WorkBuddy 自带的 Node/Python，并强制 Python 以 UTF-8 运行。
+Windows 包使用 `cmd.exe + run-node.cmd` 启动统一 MCP；宿主 Hook 使用 `run-python.cmd` 启动 Report Loop Runner，不依赖 Git Bash、WSL 或系统 `sh`。它优先复用 WorkBuddy 自带的 Node/Python，并强制 Python 以 UTF-8 运行。
 
-安装前应卸载或禁用旧的独立 `openharness-report-loop` / `local-report-loop`。安装完成后，插件不应出现 `report_loop_start / submit / finish / status` 工具，只应自动注册 Memory MCP。可执行以下预检：
+安装前应卸载或禁用旧的独立 `openharness-report-loop` / `local-report-loop`。安装完成后，插件不应出现 `report_loop_start / submit / finish / status` 工具；`report_loop_run` 仅作兼容入口。可执行以下预检：
 
 ```bat
 scripts\run-node.cmd scripts\verify-mcp-contract.mjs
@@ -84,7 +86,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-reflection-w
 
 ## macOS 安装包
 
-macOS 包使用 `sh + run-node.sh / run-python.sh` 启动 Memory MCP 和 Report Loop Runner；优先复用 `~/.workbuddy/binaries` 下的运行时，也可使用 PATH 中满足版本要求的 Node/Python。默认提供 Apple Silicon 构建命令：
+macOS 包使用 `sh + run-node.sh` 启动统一 MCP，宿主 Hook 通过 `run-python.sh` 启动 Report Loop Runner；优先复用 `~/.workbuddy/binaries` 下的运行时，也可使用 PATH 中满足版本要求的 Node/Python。默认提供 Apple Silicon 构建命令：
 
 ```bash
 npm run build:release:macos
@@ -105,4 +107,4 @@ npm run syntaxcheck
 npm run build:release
 ```
 
-开发态使用 `--plugin-dir` 时，WorkBuddy 可能只加载 Skill/Agent 而不自动注册 Memory MCP；真实 E2E 可额外通过 `--mcp-config` 显式加载本目录 `.mcp.json`，或安装构建后的本地 marketplace 包。Report Loop 始终由 Skill 一次性启动 Python Runner。
+开发态使用 `--plugin-dir` 时，WorkBuddy 可能只加载 Skill/Agent 而不自动注册 MCP；Memory 工具的真实 E2E 可额外通过 `--mcp-config` 显式加载本目录 `.mcp.json`，或安装构建后的本地 marketplace 包。Report Loop 则在 Job 写入后由宿主 Hook 自动启动，不依赖会话 MCP 工具索引。
