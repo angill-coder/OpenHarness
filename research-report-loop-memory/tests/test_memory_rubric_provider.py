@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from mcp.report_loop.core.memory_rubric_provider import MemoryRubricProvider
+from mcp.report_loop.core.runtime import ReportLoopError
 from mcp.report_loop.runner import run
 
 
@@ -143,6 +144,43 @@ class RunnerMemoryProviderTests(unittest.TestCase):
                 provider.memory_data_dir,
                 (Path.home() / ".research-report-memory-v2-0821").resolve(),
             )
+
+    def test_runner_delivers_v1_when_first_judge_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = root / "report-v1.md"
+            output = root / "report-final.md"
+            report.write_text("# 可交付的 V1\n", encoding="utf-8")
+
+            class FailingRuntime:
+                def __init__(self, **kwargs):
+                    pass
+
+                def start(self, **kwargs):
+                    return {"runId": "run-failed-judge"}
+
+                def deadline_at(self, run_id):
+                    return 9_999_999_999.0
+
+                def submit(self, **kwargs):
+                    raise ReportLoopError("Judge transport unavailable")
+
+            job = {
+                "originalUserQuery": "写报告",
+                "intakeContext": {},
+                "hostModel": {"modelId": "deepseek-v4-pro-ioa"},
+                "judgeProvider": "workbuddy",
+                "audience": "",
+                "project": "",
+                "v1ArtifactPath": str(report),
+                "outputPath": str(output),
+            }
+            result = run(job, runtime_factory=FailingRuntime)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["stopCode"], "judge_unavailable")
+            self.assertEqual(result["judgedVersions"], 0)
+            self.assertEqual(Path(result["finalArtifactPath"]), output.resolve())
+            self.assertEqual(output.read_text(encoding="utf-8"), "# 可交付的 V1\n")
 
 
 if __name__ == "__main__":

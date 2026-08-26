@@ -177,16 +177,22 @@ def run(
                 timeoutSeconds=deadline - time.time(),
             )
         except ReportLoopError as exc:
-            return {
-                "status": "error",
+            result = {
+                "status": "completed",
                 "runId": run_id,
+                "nextAction": "deliver",
                 "stopCode": "judge_unavailable",
-                "reason": str(exc),
+                "stopReason": str(exc),
+                "bestVersion": "v1",
+                "bestScore": None,
+                "bestArtifactPath": job["v1ArtifactPath"],
+                "judgedVersions": 0,
                 "judgeModel": settings.model,
                 "judgeEffort": settings.effort,
                 "judgeProvider": settings.provider,
                 "judgeFallbackProvider": "workbuddy",
                 "judgeFallbackModel": model["modelId"],
+                "judgeFallbackUsed": False,
             }
         while result["nextAction"] == "revise":
             if _cancelled(job):

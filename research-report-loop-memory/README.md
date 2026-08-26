@@ -5,9 +5,9 @@
 ## 核心链路
 
 1. `research-report-loop` Skill 确认需求并由宿主 Agent 写初稿。
-2. L2B 通过 `criterionKey + add/extend/override/disable` 更新 `core / audience / project` Overlay，并形成新的 Rubric Set 版本。
-3. 宿主写入 Job Schema v2，插件 PostToolUse Hook 自动在 Agent 沙箱外启动 Python Runner；Runner 按 `Base → core → audience → project` 解析并冻结 Rubric。该链路不依赖 Report Loop 工具是否被当前会话索引。
-4. Runner 默认并发六个隔离 Judge；存在适用 Personal Rubrics 时增加第七维。Judge Provider 默认是 WorkBuddy `deepseek-v4-pro-ioa / medium`，也可选 Codex `gpt-5.6-sol / medium`；调用失败、空响应或 Judge JSON 不合规时，自动切换到 WorkBuddy App 当前主模型。
+2. Memory Curator 将稳定反馈维护为 `core / audience / project` 下的独立 L2B Memory Rubrics，不修改或预先映射 Base Rubrics。
+3. 宿主写入 Job Schema v2，插件 PostToolUse Hook 自动在 Agent 沙箱外启动 Python Runner；Runner 读取 Base 与全部 L2B 候选，由 Resolution Judge 按当前任务决定 `additional / interpret / ignore`，再冻结本轮 Rubric。该链路不依赖 Report Loop 工具是否被当前会话索引。
+4. Runner 默认并发六个隔离 Judge，不创建第七维。Judge Provider 默认是 WorkBuddy `deepseek-v4-pro-ioa / medium`，也可选 Codex `gpt-5.6-sol / medium`；调用失败、空响应或 Judge JSON 不合规时，自动切换到 WorkBuddy App 当前主模型。
 5. Runner 使用 App 主模型启动一个持久 Rewriter CLI，串行执行 Rewrite → Judge，直到 5 分、连续两轮未采纳或 60 分钟，并返回历史最佳报告。
 6. 用户明确反馈后，Skill 指引宿主先修改当前报告，再委派 `research-report-memory-curator` Capture；Judge 反馈不会进入 Memory。
 

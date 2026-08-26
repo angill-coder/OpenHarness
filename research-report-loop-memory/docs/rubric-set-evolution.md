@@ -7,7 +7,7 @@ Memory Agent 保持开放判断，只维护独立 Memory Rubrics；Base Rubrics 
 ```text
 Memory Agent：维护独立 Memory Rubrics
                  ↓
-report_loop_start：读取 core + audience + project 候选
+Python Runner 启动：读取 core + audience + project 候选
                  ↓
 Resolution Judge：additional / interpret / ignore
                  ↓
