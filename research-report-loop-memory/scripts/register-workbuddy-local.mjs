@@ -22,6 +22,21 @@ function writeJsonAtomic(file, value) {
 }
 
 const now = new Date().toISOString();
+const pluginName = pluginRef.split("@", 1)[0];
+const cacheInstallPath = path.join(
+  configDir,
+  "plugins/cache",
+  marketplaceName,
+  pluginName,
+  version,
+);
+const sourcePath = path.resolve(installPath);
+const registeredInstallPath = path.resolve(cacheInstallPath);
+if (sourcePath !== registeredInstallPath) {
+  fs.mkdirSync(registeredInstallPath, { recursive: true });
+  fs.cpSync(sourcePath, registeredInstallPath, { recursive: true, force: true });
+}
+
 const installedFile = path.join(configDir, "plugins/installed_plugins.json");
 const installed = readJson(installedFile, { version: 2, plugins: {} });
 installed.version ??= 2;
@@ -29,7 +44,7 @@ installed.plugins ??= {};
 const prior = Array.isArray(installed.plugins[pluginRef]) ? installed.plugins[pluginRef][0] : undefined;
 installed.plugins[pluginRef] = [{
   scope: "user",
-  installPath,
+  installPath: registeredInstallPath,
   version,
   installedAt: prior?.installedAt ?? now,
   lastUpdated: now,
@@ -48,9 +63,9 @@ mcp.mcpServers ??= {};
 delete mcp.mcpServers["research-report-loop"];
 delete mcp.mcpServers["openharness-report-loop"];
 delete mcp.mcpServers["local-report-loop"];
-const nodeLauncher = path.join(installPath, "scripts", process.platform === "win32" ? "run-node.cmd" : "run-node.sh");
-const serverEntry = path.join(installPath, "dist", "memory-server.mjs");
-const baseRubric = path.join(installPath, "rubrics", "v2_rubric_research.json");
+const nodeLauncher = path.join(registeredInstallPath, "scripts", process.platform === "win32" ? "run-node.cmd" : "run-node.sh");
+const serverEntry = path.join(registeredInstallPath, "dist", "memory-server.mjs");
+const baseRubric = path.join(registeredInstallPath, "rubrics", "v2_rubric_research.json");
 mcp.mcpServers["report-memory-v2"] = process.platform === "win32" ? {
   command: "cmd.exe",
   args: ["/d", "/s", "/c", `""${nodeLauncher}" "${serverEntry}""`],
@@ -89,7 +104,8 @@ writeJsonAtomic(marketplacesFile, marketplaces);
 process.stdout.write(`${JSON.stringify({
   status: "registered",
   pluginRef,
-  installPath,
+  installPath: registeredInstallPath,
+  sourcePath,
   version,
   mcpServer: "report-memory-v2",
 })}\n`);

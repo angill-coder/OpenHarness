@@ -93,6 +93,8 @@ test("local registration replaces legacy Report Loop MCP with the unified host l
     JSON.stringify({ name: "test-marketplace", plugins: [] }),
   );
   fs.mkdirSync(configDir, { recursive: true });
+  fs.mkdirSync(path.join(installPath, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(installPath, "dist/memory-server.mjs"), "// test server\n");
   fs.writeFileSync(
     path.join(configDir, "settings.json"),
     JSON.stringify({ sandbox: { extraAllowWrite: ["/already-allowed"] } }),
@@ -126,7 +128,17 @@ test("local registration replaces legacy Report Loop MCP with the unified host l
     assert.equal(mcp.mcpServers.unrelated.command, "other");
     assert.equal(mcp.mcpServers["research-report-loop"], undefined);
     assert.equal(mcp.mcpServers["report-memory-v2"].command, process.platform === "win32" ? "cmd.exe" : "sh");
-    assert.match(JSON.stringify(mcp.mcpServers["report-memory-v2"]), new RegExp(installPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    const cacheInstallPath = path.join(
+      configDir,
+      "plugins/cache/test-marketplace/research-report-loop-memory/1.0.0-test",
+    );
+    assert.match(JSON.stringify(mcp.mcpServers["report-memory-v2"]), new RegExp(cacheInstallPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.equal(fs.readFileSync(path.join(cacheInstallPath, "dist/memory-server.mjs"), "utf8"), "// test server\n");
+    const installed = JSON.parse(fs.readFileSync(path.join(configDir, "plugins/installed_plugins.json"), "utf8"));
+    assert.equal(
+      installed.plugins["research-report-loop-memory@test-marketplace"][0].installPath,
+      cacheInstallPath,
+    );
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

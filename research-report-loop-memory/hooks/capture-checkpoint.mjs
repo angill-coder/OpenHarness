@@ -104,6 +104,12 @@ function isMemoryAgentInvocation(toolName, toolInput) {
   return AGENT_TOOL_PATTERN.test(toolName) && safeStringify(toolInput).includes(MEMORY_AGENT);
 }
 
+function clearCapture(state) {
+  state.capturePending = false;
+  state.pendingFeedback = "";
+  state.pendingKind = "writing";
+}
+
 function detectSkillActivation(toolName, toolInput) {
   if (!SKILL_TOOL_PATTERN.test(toolName)) return false;
   const fields = [toolInput?.skill, toolInput?.command, toolInput?.name];
@@ -434,15 +440,14 @@ async function onPostTool(input) {
   if (isMemoryAgentInvocation(toolName, toolInput) && state.capturePending) {
     const serialized = safeStringify(result);
     if (MEMORY_AGENT_MARKER.test(serialized)) {
-      state.capturePending = false;
-      state.pendingFeedback = "";
-      state.pendingKind = "writing";
+      clearCapture(state);
       message = "Report Memory Capture 已完成。";
     } else if (MEMORY_AGENT_FAILURE_MARKER.test(serialized) || !successful) {
-      state.capturePending = false;
-      state.pendingFeedback = "";
-      state.pendingKind = "writing";
+      clearCapture(state);
       message = "Report Memory Capture 明确失败；允许结束，但必须如实说明未写入专用记忆。";
+    } else {
+      clearCapture(state);
+      message = "Memory Curator 未返回 Capture 完成标记；本轮按失败放行，必须如实说明未确认写入专用记忆，不要重复委派。";
     }
   }
 
@@ -457,10 +462,11 @@ async function onStop(input) {
     return;
   }
   if (input.stop_hook_active === true) {
+    clearCapture(state);
+    await saveState(state);
     printJson({
-      continue: true,
-      suppressOutput: true,
-      systemMessage: "Capture checkpoint 已避免重复阻断；pending 状态保留到下一轮。",
+      hookSpecificOutput: { hookEventName: "Stop", permissionDecision: "allow" },
+      systemMessage: "Capture checkpoint 本轮只检查一次；未确认写入时按失败放行，不再重复阻断。",
     });
     return;
   }

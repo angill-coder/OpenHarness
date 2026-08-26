@@ -98,6 +98,55 @@ test("explicit Curator failure releases the checkpoint", (t) => {
   );
 });
 
+test("markerless Curator result fails open instead of retrying forever", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-markerless-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  const session_id = "capture-markerless";
+  invoke("post-tool", {
+    session_id,
+    tool_name: "Skill",
+    tool_input: { skill: "research-report-loop" },
+    tool_response: { status: "ok" },
+  }, stateDir);
+  invoke("prompt", {
+    session_id,
+    prompt: "以后所有正式报告的摘要都控制在两到三行。",
+  }, stateDir);
+  const result = invoke("post-tool", {
+    session_id,
+    tool_name: "Agent",
+    tool_input: { name: "research-report-memory-curator", operation: "capture" },
+    tool_response: "当前会话搜索不到 report-memory-v2 MCP 工具。",
+  }, stateDir);
+  assert.match(result.systemMessage, /按失败放行/u);
+  assert.match(result.systemMessage, /不要重复委派/u);
+  assert.equal(
+    invoke("stop", { session_id }, stateDir).hookSpecificOutput.permissionDecision,
+    "allow",
+  );
+});
+
+test("recursive Stop invocation releases an unavailable capture checkpoint", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-stop-once-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  const session_id = "capture-stop-once";
+  invoke("post-tool", {
+    session_id,
+    tool_name: "Skill",
+    tool_input: { skill: "research-report-loop" },
+    tool_response: { status: "ok" },
+  }, stateDir);
+  invoke("prompt", {
+    session_id,
+    prompt: "以后所有正式报告的摘要都控制在两到三行。",
+  }, stateDir);
+  assert.equal(invoke("stop", { session_id }, stateDir).hookSpecificOutput.permissionDecision, "deny");
+  const released = invoke("stop", { session_id, stop_hook_active: true }, stateDir);
+  assert.equal(released.hookSpecificOutput.permissionDecision, "allow");
+  assert.match(released.systemMessage, /只检查一次/u);
+  assert.equal(invoke("stop", { session_id }, stateDir).hookSpecificOutput.permissionDecision, "allow");
+});
+
 test("report context corrections trigger Curator without forcing a rewrite", (t) => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-context-"));
   t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
