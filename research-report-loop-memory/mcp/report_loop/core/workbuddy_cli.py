@@ -6,7 +6,9 @@ import json
 import os
 import re
 import shutil
+import string
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -15,10 +17,7 @@ from typing import Any
 
 DEFAULT_MODEL = "deepseek-v4-pro-ioa"
 DEFAULT_EFFORT = "medium"
-MAC_WORKBUDDY_CLI = Path(
-    "/Applications/WorkBuddy.app/Contents/Resources/"
-    "app.asar.unpacked/cli/bin/codebuddy"
-)
+MAC_CLI_SUFFIX = Path("Contents/Resources/app.asar.unpacked/cli/bin/codebuddy")
 
 
 class WorkBuddyError(RuntimeError):
@@ -45,6 +44,12 @@ _SAFE_ENVIRONMENT_KEYS = {
     "PATHEXT",
     "APPDATA",
     "LOCALAPPDATA",
+    "WORKBUDDY_EXTRA_PATHS",
+    "WORKBUDDY_CONFIG_DIR",
+    "CODEBUDDY_CONFIG_DIR",
+    "CODEBUDDY_CODE_PATH",
+    "CODEBUDDY_CODE_NODE_PATH",
+    "CODEBUDDY_NODE_BIN",
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "NO_PROXY",
@@ -58,6 +63,19 @@ _SAFE_ENVIRONMENT_KEYS = {
 }
 
 
+def _windows_node_command(cli: Path) -> tuple[str, ...] | None:
+    for key in ("CODEBUDDY_CODE_NODE_PATH", "CODEBUDDY_NODE_BIN", "WORKBUDDY_NODE"):
+        value = os.environ.get(key)
+        if value and Path(value).expanduser().is_file():
+            return (str(Path(value).expanduser()), str(cli))
+    for directory in os.environ.get("WORKBUDDY_EXTRA_PATHS", "").split(os.pathsep):
+        candidate = Path(directory) / "node.exe" if directory else None
+        if candidate and candidate.is_file():
+            return (str(candidate), str(cli))
+    node = shutil.which("node.exe") or shutil.which("node")
+    return (node, str(cli)) if node else None
+
+
 def _windows_desktop_command(path: Path | None = None) -> tuple[str, ...] | None:
     if os.name != "nt":
         return None
@@ -66,7 +84,7 @@ def _windows_desktop_command(path: Path | None = None) -> tuple[str, ...] | None
         expanded = path.expanduser()
         if expanded.name.lower() == "workbuddy.exe":
             candidates.append(expanded.parent)
-        elif expanded.name.lower() == "codebuddy":
+        elif expanded.name.lower() in {"codebuddy", "codebuddy.cmd", "codebuddy.exe"}:
             try:
                 candidates.append(expanded.parents[4])
             except IndexError:
@@ -75,33 +93,69 @@ def _windows_desktop_command(path: Path | None = None) -> tuple[str, ...] | None
     candidates.append(Path.home() / "WorkBuddy")
     if local_app_data:
         candidates.append(Path(local_app_data) / "Programs" / "WorkBuddy")
+    for key in ("ProgramFiles", "ProgramFiles(x86)"):
+        value = os.environ.get(key)
+        if value:
+            candidates.append(Path(value) / "WorkBuddy")
+    # Enterprise installs commonly keep the standard Program Files layout on a
+    # non-system drive. This is a bounded 26-path probe, not a filesystem scan.
+    for drive in string.ascii_uppercase:
+        candidates.append(Path(f"{drive}:\\Program Files\\WorkBuddy"))
     for root in candidates:
         executable = root / "WorkBuddy.exe"
         cli = root / "resources" / "app.asar.unpacked" / "cli" / "bin" / "codebuddy"
         if executable.is_file() and cli.is_file():
             return (str(executable), str(cli))
+    if path and path.expanduser().is_file() and path.name.lower().startswith("codebuddy"):
+        return _windows_node_command(path.expanduser())
+    return None
+
+
+def _mac_workbuddy_command(app_roots: list[Path] | None = None) -> tuple[str, ...] | None:
+    if app_roots is None:
+        if sys.platform != "darwin":
+            return None
+        app_roots = [Path("/Applications/WorkBuddy.app"), Path.home() / "Applications/WorkBuddy.app"]
+        volumes = Path("/Volumes")
+        if volumes.is_dir():
+            app_roots.extend(volumes.glob("*/Applications/WorkBuddy.app"))
+    for app_root in app_roots:
+        cli = app_root / MAC_CLI_SUFFIX
+        if cli.is_file() and os.access(cli, os.X_OK):
+            return (str(cli),)
     return None
 
 
 def discover_command(explicit: str | None = None) -> tuple[str, ...]:
-    value = explicit or os.environ.get("RESEARCH_REPORT_LOOP_WB_CLI_PATH") or os.environ.get("WORKBUDDY_CLI")
-    if value:
-        path = Path(value).expanduser()
-        return _windows_desktop_command(path) or (str(path),)
+    values = [
+        explicit,
+        os.environ.get("RESEARCH_REPORT_LOOP_WB_CLI_PATH"),
+        os.environ.get("WORKBUDDY_CLI"),
+        os.environ.get("WORKBUDDY_CODEBUDDY"),
+        os.environ.get("CODEBUDDY_CODE_PATH"),
+        os.environ.get("WORKBUDDY_DESKTOP_EXE") if os.name == "nt" else None,
+    ]
+    for value in values:
+        if value:
+            path = Path(value).expanduser()
+            return _windows_desktop_command(path) or (str(path),)
     workbuddy = shutil.which("workbuddy")
     if workbuddy:
         return (workbuddy,)
-    if MAC_WORKBUDDY_CLI.exists():
-        return (str(MAC_WORKBUDDY_CLI),)
     windows = _windows_desktop_command()
     if windows:
         return windows
+    mac = _mac_workbuddy_command()
+    if mac:
+        return mac
     for name in ("codebuddy", "cbc"):
         candidate = shutil.which(name)
         if candidate:
             return (candidate,)
     raise WorkBuddyError(
-        "找不到 WorkBuddy CLI；请设置 RESEARCH_REPORT_LOOP_WB_CLI_PATH 或 WORKBUDDY_CLI"
+        "已启动 Report Loop，但未能定位 WorkBuddy 模型调用入口；"
+        "请检查宿主是否提供 CODEBUDDY_CODE_PATH，或设置 "
+        "RESEARCH_REPORT_LOOP_WB_CLI_PATH"
     )
 
 
@@ -118,8 +172,8 @@ def build_environment(command: tuple[str, ...]) -> dict[str, str]:
     config_dir = str(
         Path(
             os.environ.get("RESEARCH_REPORT_LOOP_WB_HOME")
-            or os.environ.get("CODEBUDDY_CONFIG_DIR")
             or os.environ.get("WORKBUDDY_CONFIG_DIR")
+            or os.environ.get("CODEBUDDY_CONFIG_DIR")
             or (Path.home() / ".workbuddy")
         ).expanduser()
     )
@@ -140,6 +194,11 @@ def build_environment(command: tuple[str, ...]) -> dict[str, str]:
     ):
         environment["ELECTRON_RUN_AS_NODE"] = "1"
     configured_product = os.environ.get("RESEARCH_REPORT_LOOP_WB_PRODUCT_CONFIG")
+    if not configured_product and command:
+        cli = Path(command[-1])
+        candidate = cli.parent.parent / "product.json"
+        if cli.name.lower().startswith("codebuddy") and candidate.is_file():
+            configured_product = str(candidate)
     if configured_product:
         environment["ACC_PRODUCT_CONFIG_PATH"] = str(Path(configured_product).expanduser())
     return environment

@@ -5,7 +5,9 @@ $DataDir = if ($env:RESEARCH_REPORT_MEMORY_V2_0821_DIR) {
 } else {
     Join-Path $HOME ".research-report-memory-v2-0821"
 }
-$WorkBuddyConfig = if ($env:CODEBUDDY_CONFIG_DIR) {
+$WorkBuddyConfig = if ($env:WORKBUDDY_CONFIG_DIR) {
+    $env:WORKBUDDY_CONFIG_DIR
+} elseif ($env:CODEBUDDY_CONFIG_DIR) {
     $env:CODEBUDDY_CONFIG_DIR
 } else {
     Join-Path $HOME ".workbuddy"
@@ -16,7 +18,19 @@ $McpName = if ($env:RESEARCH_REPORT_REFLECTION_MCP_NAME) {
     "report-memory-v2"
 }
 
-$NodeBin = $env:WORKBUDDY_NODE
+$NodeBin = if ($env:WORKBUDDY_NODE) {
+    $env:WORKBUDDY_NODE
+} elseif ($env:CODEBUDDY_CODE_NODE_PATH) {
+    $env:CODEBUDDY_CODE_NODE_PATH
+} else {
+    $env:CODEBUDDY_NODE_BIN
+}
+if (-not $NodeBin -and $env:WORKBUDDY_EXTRA_PATHS) {
+    foreach ($directory in ($env:WORKBUDDY_EXTRA_PATHS -split ";")) {
+        $candidate = Join-Path $directory "node.exe"
+        if (Test-Path $candidate) { $NodeBin = $candidate; break }
+    }
+}
 if (-not $NodeBin) {
     $NodeBin = Get-ChildItem (Join-Path $WorkBuddyConfig "binaries\node\versions") -Filter node.exe -Recurse -ErrorAction SilentlyContinue |
         Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
@@ -27,11 +41,23 @@ if (-not $NodeBin) {
 if (-not $NodeBin) { throw "Node.js 22.16+ not found; set WORKBUDDY_NODE." }
 
 $WorkBuddyExe = $env:WORKBUDDY_DESKTOP_EXE
-$CodeBuddyCli = $env:WORKBUDDY_CODEBUDDY
+$CodeBuddyCli = if ($env:WORKBUDDY_CODEBUDDY) {
+    $env:WORKBUDDY_CODEBUDDY
+} else {
+    $env:CODEBUDDY_CODE_PATH
+}
 if (-not $WorkBuddyExe) {
-    if ($env:LOCALAPPDATA) {
-        $candidate = Join-Path $env:LOCALAPPDATA "Programs\WorkBuddy\WorkBuddy.exe"
+    $InstallRoots = @()
+    if ($env:LOCALAPPDATA) { $InstallRoots += (Join-Path $env:LOCALAPPDATA "Programs\WorkBuddy") }
+    if ($env:ProgramFiles) { $InstallRoots += (Join-Path $env:ProgramFiles "WorkBuddy") }
+    if (${env:ProgramFiles(x86)}) { $InstallRoots += (Join-Path ${env:ProgramFiles(x86)} "WorkBuddy") }
+    foreach ($drive in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+        $InstallRoots += (Join-Path $drive.Root "Program Files\WorkBuddy")
+    }
+    foreach ($root in $InstallRoots) {
+        $candidate = Join-Path $root "WorkBuddy.exe"
         if (Test-Path $candidate) { $WorkBuddyExe = $candidate }
+        if ($WorkBuddyExe) { break }
     }
 }
 if (-not $CodeBuddyCli -and $WorkBuddyExe) {
@@ -39,14 +65,14 @@ if (-not $CodeBuddyCli -and $WorkBuddyExe) {
     $candidate = Join-Path $root "resources\app.asar.unpacked\cli\bin\codebuddy"
     if (Test-Path $candidate) { $CodeBuddyCli = $candidate }
 }
-if (-not $WorkBuddyExe -or -not $CodeBuddyCli) {
-    throw "WorkBuddy CLI not found; set WORKBUDDY_DESKTOP_EXE and WORKBUDDY_CODEBUDDY."
+if (-not $CodeBuddyCli) {
+    throw "WorkBuddy is installed, but its model CLI entry could not be located. Check CODEBUDDY_CODE_PATH or set WORKBUDDY_CODEBUDDY."
 }
 
 $ProductConfig = $env:WORKBUDDY_PRODUCT_CONFIG
-if (-not $ProductConfig) {
-    $root = Split-Path -Parent $WorkBuddyExe
-    $candidate = Join-Path $root "resources\app.asar.unpacked\cli\product.json"
+if (-not $ProductConfig -and $CodeBuddyCli) {
+    $cliRoot = Split-Path -Parent (Split-Path -Parent $CodeBuddyCli)
+    $candidate = Join-Path $cliRoot "product.json"
     if (Test-Path $candidate) { $ProductConfig = $candidate }
 }
 if (-not $ProductConfig) { throw "WorkBuddy product.json not found; set WORKBUDDY_PRODUCT_CONFIG." }
@@ -79,13 +105,15 @@ $Prompt = "执行 operation=reflection：按 Reflection Prompt 审视上次 chec
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $LogFile = Join-Path $LogDir "$Stamp.jsonl"
 
-$env:ELECTRON_RUN_AS_NODE = "1"
 $env:CODEBUDDY_CONFIG_DIR = $WorkBuddyConfig
+$env:WORKBUDDY_CONFIG_DIR = $WorkBuddyConfig
 $env:ACC_PRODUCT_CONFIG_PATH = $ProductConfig
 $env:RESEARCH_REPORT_MEMORY_V2_0821_DIR = $DataDir
 $env:RESEARCH_REPORT_MEMORY_ALLOW_STORAGE_MIGRATION = "0"
 
-& $WorkBuddyExe $CodeBuddyCli --plugin-dir $PluginRoot -p `
+$CliHost = if ($WorkBuddyExe) { $WorkBuddyExe } else { $NodeBin }
+if ($WorkBuddyExe) { $env:ELECTRON_RUN_AS_NODE = "1" }
+& $CliHost $CodeBuddyCli --plugin-dir $PluginRoot -p `
     --mcp-config $McpConfig --strict-mcp-config `
     --output-format stream-json --permission-mode bypassPermissions `
     --append-system-prompt $Instructions $Prompt |

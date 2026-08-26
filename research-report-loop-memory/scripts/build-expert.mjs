@@ -49,7 +49,7 @@ function writeExpertReflectionLaunchers() {
   fs.writeFileSync(path.join(expertDir, "scripts/reflection-current.sh"), `#!/bin/sh
 set -eu
 
-WORKBUDDY_DIR=\${CODEBUDDY_CONFIG_DIR:-\${WORKBUDDY_CONFIG_DIR:-$HOME/.workbuddy}}
+WORKBUDDY_DIR=\${WORKBUDDY_CONFIG_DIR:-\${CODEBUDDY_CONFIG_DIR:-$HOME/.workbuddy}}
 PLUGIN_ROOT="$WORKBUDDY_DIR/plugins/marketplaces/my-experts/plugins/${expertPluginName}"
 RUNNER="$PLUGIN_ROOT/scripts/run-memory-reflection-workbuddy.sh"
 if [ ! -f "$RUNNER" ]; then
@@ -64,7 +64,9 @@ exec /bin/sh "$RUNNER"
   fs.chmodSync(path.join(expertDir, "scripts/reflection-current.sh"), 0o755);
 
   fs.writeFileSync(path.join(expertDir, "scripts/reflection-current.ps1"), `$ErrorActionPreference = "Stop"
-$WorkBuddyConfig = if ($env:CODEBUDDY_CONFIG_DIR) {
+$WorkBuddyConfig = if ($env:WORKBUDDY_CONFIG_DIR) {
+    $env:WORKBUDDY_CONFIG_DIR
+} elseif ($env:CODEBUDDY_CONFIG_DIR) {
     $env:CODEBUDDY_CONFIG_DIR
 } else {
     Join-Path $HOME ".workbuddy"

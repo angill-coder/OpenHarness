@@ -2,16 +2,24 @@
 set -eu
 
 PLUGIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-CODEBUDDY_BIN=${WORKBUDDY_CODEBUDDY:-}
-WORKBUDDY_USER_DIR=${CODEBUDDY_CONFIG_DIR:-${WORKBUDDY_CONFIG_DIR:-$HOME/.workbuddy}}
+CODEBUDDY_BIN=${RESEARCH_REPORT_LOOP_WB_CLI_PATH:-${WORKBUDDY_CLI:-${WORKBUDDY_CODEBUDDY:-${CODEBUDDY_CODE_PATH:-}}}}
+WORKBUDDY_USER_DIR=${WORKBUDDY_CONFIG_DIR:-${CODEBUDDY_CONFIG_DIR:-$HOME/.workbuddy}}
 PRODUCT_CONFIG=${WORKBUDDY_PRODUCT_CONFIG:-}
 DATA_DIR=${RESEARCH_REPORT_MEMORY_V2_0821_DIR:-$HOME/.research-report-memory-v2-0821}
-NODE_BIN=${WORKBUDDY_NODE:-}
+NODE_BIN=${WORKBUDDY_NODE:-${CODEBUDDY_CODE_NODE_PATH:-${CODEBUDDY_NODE_BIN:-}}}
 MCP_NAME=${RESEARCH_REPORT_REFLECTION_MCP_NAME:-report-memory-v2}
 NODE_RUNNER=${RESEARCH_REPORT_REFLECTION_NODE_RUNNER:-$PLUGIN_ROOT/scripts/run-node.sh}
 
 if [ -z "$NODE_BIN" ]; then
-  for candidate in "$HOME"/.workbuddy/binaries/node/versions/*/bin/node; do
+  old_ifs=$IFS
+  IFS=:
+  for directory in ${WORKBUDDY_EXTRA_PATHS:-}; do
+    if [ -x "$directory/node" ]; then NODE_BIN=$directory/node; break; fi
+  done
+  IFS=$old_ifs
+fi
+if [ -z "$NODE_BIN" ]; then
+  for candidate in "$WORKBUDDY_USER_DIR"/binaries/node/versions/*/bin/node; do
     if [ -x "$candidate" ]; then NODE_BIN=$candidate; fi
   done
 fi
@@ -25,11 +33,18 @@ fi
 PATH=$(dirname "$NODE_BIN"):$PATH
 export PATH
 
-if [ -z "$CODEBUDDY_BIN" ] && command -v codebuddy >/dev/null 2>&1; then
-  CODEBUDDY_BIN=$(command -v codebuddy)
+if [ -z "$CODEBUDDY_BIN" ]; then
+  for name in workbuddy codebuddy cbc; do
+    if command -v "$name" >/dev/null 2>&1; then CODEBUDDY_BIN=$(command -v "$name"); break; fi
+  done
 fi
-if [ -z "$CODEBUDDY_BIN" ] && [ -x /Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy ]; then
-  CODEBUDDY_BIN=/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy
+if [ -z "$CODEBUDDY_BIN" ]; then
+  for candidate in \
+    /Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy \
+    "$HOME"/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy \
+    /Volumes/*/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy; do
+    if [ -x "$candidate" ]; then CODEBUDDY_BIN=$candidate; break; fi
+  done
 fi
 if [ -z "$CODEBUDDY_BIN" ] || [ ! -x "$CODEBUDDY_BIN" ]; then
   echo "未找到 WorkBuddy CLI；请设置 WORKBUDDY_CODEBUDDY。" >&2
@@ -72,7 +87,8 @@ fs.writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o60
 fs.renameSync(temporary, outputPath);
 ' "$MCP_CONFIG_FILE" "$PLUGIN_ROOT" "$DATA_DIR" "$NODE_RUNNER" "$MCP_NAME"
 
-env CODEBUDDY_CONFIG_DIR="$WORKBUDDY_USER_DIR" \
+env WORKBUDDY_CONFIG_DIR="$WORKBUDDY_USER_DIR" \
+  CODEBUDDY_CONFIG_DIR="$WORKBUDDY_USER_DIR" \
   ACC_PRODUCT_CONFIG_PATH="$PRODUCT_CONFIG" \
   RESEARCH_REPORT_MEMORY_V2_0821_DIR="$DATA_DIR" \
   RESEARCH_REPORT_MEMORY_ALLOW_STORAGE_MIGRATION=0 \
