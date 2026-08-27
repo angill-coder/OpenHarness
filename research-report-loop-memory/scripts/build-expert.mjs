@@ -148,8 +148,8 @@ const hooks = {
 writeJson(path.join(expertDir, "hooks.json"), hooks);
 
 const initPrompt = {
-  zh: "请根据我提供的材料，写一份经过自动评测和改写的研究报告。",
-  en: "Create a research report from my materials and improve it through the automated report loop.",
+  zh: "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页",
+  en: "Based on the materials in the XX folder, write an X-page research report on “XX”.",
 };
 const expertMemoryMcpBootstrap = [
   'const path=require("node:path")',

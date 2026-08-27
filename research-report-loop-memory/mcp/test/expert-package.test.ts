@@ -66,6 +66,12 @@ test("packaged Expert keeps Report Loop hooks and uses a cross-platform Memory M
   );
   const hooks = JSON.parse(fs.readFileSync(path.join(expertDir, "hooks.json"), "utf8"));
 
+  assert.deepEqual(manifest.defaultInitPrompt, {
+    zh: "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页",
+    en: "Based on the materials in the XX folder, write an X-page research report on “XX”.",
+  });
+  assert.deepEqual(manifest.quickPrompts[0], manifest.defaultInitPrompt);
+
   assert.equal(fs.existsSync(path.join(expertDir, "scripts/disable-reflection-macos.sh")), true);
   assert.equal(fs.existsSync(path.join(expertDir, "scripts/disable-reflection-windows.ps1")), true);
 
