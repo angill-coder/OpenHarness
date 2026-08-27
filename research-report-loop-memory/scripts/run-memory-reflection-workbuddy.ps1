@@ -9,6 +9,21 @@ $DataDir = if ($env:RESEARCH_REPORT_MEMORY_V2_0821_DIR) {
 } else {
     Join-Path $HOME ".research-report-memory-v2-0821"
 }
+$SettingsFile = Join-Path $DataDir "settings.json"
+if (-not (Test-Path $SettingsFile)) {
+    Write-Output "Report Memory is disabled; Reflection skipped."
+    exit 0
+}
+try {
+    $MemorySettings = Get-Content -Raw -Encoding utf8 $SettingsFile | ConvertFrom-Json
+} catch {
+    Write-Output "Report Memory settings are invalid; Reflection skipped."
+    exit 0
+}
+if ($MemorySettings.schemaVersion -ne 1 -or $MemorySettings.memoryEnabled -ne $true) {
+    Write-Output "Report Memory is disabled; Reflection skipped."
+    exit 0
+}
 $WorkBuddyConfig = if ($env:WORKBUDDY_CONFIG_DIR) {
     $env:WORKBUDDY_CONFIG_DIR
 } elseif ($env:CODEBUDDY_CONFIG_DIR) {

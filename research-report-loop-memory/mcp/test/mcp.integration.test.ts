@@ -56,8 +56,23 @@ test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics"
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
       "report_loop_run",
-      "writing_memory_capture_payload", "writing_memory_forget", "writing_memory_recall",
+      "writing_memory_capture_payload", "writing_memory_forget", "writing_memory_recall", "writing_memory_settings",
     ]);
+
+    const defaultStatus = payload(await client.callTool({
+      name: "writing_memory_settings", arguments: { action: "status" },
+    }));
+    assert.equal(defaultStatus.memoryEnabled, false);
+    const disabledRecall = payload(await client.callTool({
+      name: "writing_memory_recall",
+      arguments: { task: "用户研究报告", purpose: "writing" },
+    }));
+    assert.equal(disabledRecall.reason, "memory_disabled");
+    assert.equal(fs.existsSync(path.join(dataDir, "l2b-rubrics")), false);
+    const enabled = payload(await client.callTool({
+      name: "writing_memory_settings", arguments: { action: "enable" },
+    }));
+    assert.equal(enabled.memoryEnabled, true);
 
     const empty = payload(await client.callTool({
       name: "writing_memory_recall",
@@ -207,6 +222,7 @@ async function currentRevision(client: Client): Promise<string> {
 
 test("Memory Agent Context stores report background without creating L1 or L2B", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-agent-context-"));
+  fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ schemaVersion: 1, memoryEnabled: true }));
   const projectRoot = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "research-report-memory-agent-context-test", version: "2.1.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
@@ -273,6 +289,7 @@ test("Memory Agent Context stores report background without creating L1 or L2B",
 
 test("project Atom inherits a missing scopeValue only from its Episode", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-scope-fallback-"));
+  fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ schemaVersion: 1, memoryEnabled: true }));
   const projectRoot = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "research-report-memory-scope-fallback-test", version: "2.1.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({

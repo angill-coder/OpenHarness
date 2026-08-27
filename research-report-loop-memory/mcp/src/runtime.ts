@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { TdaiCore } from "../../node_modules/@tencentdb-agent-memory/memory-tencentdb/src/core/index.ts";
 import type { HostAdapter, LLMRunnerFactory, Logger, RuntimeContext } from "../../node_modules/@tencentdb-agent-memory/memory-tencentdb/src/core/types.ts";
 import { parseConfig } from "../../node_modules/@tencentdb-agent-memory/memory-tencentdb/src/config.ts";
 import { generateMemoryId, writeMemory } from "../../node_modules/@tencentdb-agent-memory/memory-tencentdb/src/core/record/l1-writer.ts";
+import { isMemoryEnabled, resolveMemoryDataDir } from "./memory-settings.ts";
 import { normalizeAudience } from "./scope-paths.ts";
 import { RubricRepository, type RubricItem, type RubricPatch } from "./rubric-repository.ts";
 import { classifyWritingFeedback } from "./relevance.ts";
@@ -36,12 +36,6 @@ const logger: Logger = {
   error: (message) => process.stderr.write(`${message}\n`),
 };
 
-function resolveDataDir(): string {
-  const configured = process.env.RESEARCH_REPORT_MEMORY_V2_0821_DIR?.trim();
-  if (configured) return configured.replace(/^~(?=$|\/)/u, os.homedir());
-  return path.join(os.homedir(), ".research-report-memory-v2-0821");
-}
-
 export interface RecallInput {
   task?: string;
   query?: string;
@@ -49,7 +43,7 @@ export interface RecallInput {
   project?: string;
   limit?: number;
   includeL1?: boolean;
-  purpose?: "writing" | "judge" | "review" | "reflection";
+  purpose?: "writing" | "judge" | "review" | "reflection" | "manage";
 }
 
 export interface ConversationMessage {
@@ -180,7 +174,7 @@ export class WritingMemoryRuntime {
   private readonly repository: RubricRepository;
   private initialized = false;
 
-  constructor(_server: McpServer, dataDir = resolveDataDir()) {
+  constructor(_server: McpServer, dataDir = resolveMemoryDataDir()) {
     this.dataDir = dataDir;
     this.memoryCoreDir = path.join(dataDir, MEMORYCORE_DIR);
     this.l1AtomsDir = path.join(dataDir, L1_ATOMS_DIR);
@@ -261,7 +255,13 @@ export class WritingMemoryRuntime {
   }
 
   async recall(input: RecallInput) {
+    if (!isMemoryEnabled(this.dataDir) && input.purpose !== "manage") {
+      return { status: "disabled", reason: "memory_disabled", memoryEnabled: false };
+    }
     await this.initialize();
+    if (input.purpose === "manage") {
+      return { ...await this.reviewSnapshot(input, input.limit ?? 100), purpose: "manage" };
+    }
     if (input.purpose === "reflection") return this.reflectionSnapshot(input.limit ?? 100);
     if (input.purpose === "review") return this.reviewSnapshot(input, input.limit ?? 100);
     if (!input.task?.trim()) return { status: "error", reason: "task_required_for_recall" };
@@ -297,6 +297,9 @@ export class WritingMemoryRuntime {
   }
 
   async capture(input: CaptureInput) {
+    if (!isMemoryEnabled(this.dataDir) && input.mode !== "manage") {
+      return { status: "disabled", stored: false, reason: "memory_disabled", records: [] };
+    }
     await this.initialize();
     if (input.decision === "ignore") return { status: "ignored", stored: false, reason: "memory_subagent_decision_ignore", records: [] };
     const reflection = input.mode === "reflection";
@@ -595,7 +598,9 @@ export class WritingMemoryRuntime {
     return { status: "ok", deleted: ids.length + highLevel.deleted, deletedL1: ids.length, deletedHighLevel: highLevel.deleted, deletedEpisodes, deletedIds: ids, changedPaths: highLevel.changedPaths, repositoryHead: highLevel.head };
   }
 
-  async destroy(): Promise<void> { await this.core.destroy(); }
+  async destroy(): Promise<void> {
+    if (this.initialized) await this.core.destroy();
+  }
 
   private async purgeLegacyL0Mirror(): Promise<void> {
     const store = this.core.getVectorStore();

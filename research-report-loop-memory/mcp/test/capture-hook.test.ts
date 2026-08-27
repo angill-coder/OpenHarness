@@ -14,6 +14,7 @@ function invoke(mode: string, payload: Record<string, unknown>, stateDir: string
     env: {
       ...process.env,
       RESEARCH_REPORT_CAPTURE_HOOK_DIR: stateDir,
+      RESEARCH_REPORT_MEMORY_V2_0821_DIR: path.join(stateDir, "memory"),
       RESEARCH_REPORT_LOOP_HOOK_NO_SPAWN: "1",
     },
     input: JSON.stringify(payload),
@@ -23,9 +24,19 @@ function invoke(mode: string, payload: Record<string, unknown>, stateDir: string
   return JSON.parse(result.stdout);
 }
 
+function enableMemory(stateDir: string) {
+  const dataDir = path.join(stateDir, "memory");
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dataDir, "settings.json"),
+    JSON.stringify({ schemaVersion: 1, memoryEnabled: true }),
+  );
+}
+
 test("hook only checks feedback capture and delegates to the dedicated Curator", (t) => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-"));
   t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  enableMemory(stateDir);
   const session_id = "capture-flow";
 
   const initial = invoke("prompt", { session_id, prompt: "请根据材料写一份研究报告" }, stateDir);
@@ -75,6 +86,7 @@ test("hook only checks feedback capture and delegates to the dedicated Curator",
 test("explicit Curator failure releases the checkpoint", (t) => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-failure-"));
   t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  enableMemory(stateDir);
   const session_id = "capture-failure";
   invoke("post-tool", {
     session_id,
@@ -101,6 +113,7 @@ test("explicit Curator failure releases the checkpoint", (t) => {
 test("markerless Curator result fails open instead of retrying forever", (t) => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-markerless-"));
   t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  enableMemory(stateDir);
   const session_id = "capture-markerless";
   invoke("post-tool", {
     session_id,
@@ -129,6 +142,7 @@ test("markerless Curator result fails open instead of retrying forever", (t) => 
 test("recursive Stop invocation releases an unavailable capture checkpoint", (t) => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-stop-once-"));
   t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  enableMemory(stateDir);
   const session_id = "capture-stop-once";
   invoke("post-tool", {
     session_id,
@@ -150,6 +164,7 @@ test("recursive Stop invocation releases an unavailable capture checkpoint", (t)
 test("report context corrections trigger Curator without forcing a rewrite", (t) => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-context-"));
   t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  enableMemory(stateDir);
   const session_id = "capture-context";
   invoke("post-tool", {
     session_id,
@@ -164,6 +179,26 @@ test("report context corrections trigger Curator without forcing a rewrite", (t)
   assert.match(correction.systemMessage, /报告相关背景或实体纠正/u);
   assert.match(correction.systemMessage, /无需为纯背景纠正改写报告/u);
   assert.match(correction.systemMessage, /research-report-memory-curator/u);
+});
+
+test("memory capture stays inactive by default", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-disabled-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  const session_id = "capture-disabled";
+
+  invoke("post-tool", {
+    session_id,
+    tool_name: "Skill",
+    tool_input: { skill: "research-report-loop" },
+    tool_response: { status: "ok" },
+  }, stateDir);
+  const feedback = invoke("prompt", {
+    session_id,
+    prompt: "以后所有正式报告的摘要都控制在两到三行。",
+  }, stateDir);
+
+  assert.equal(feedback.systemMessage, undefined);
+  assert.equal(invoke("stop", { session_id }, stateDir).hookSpecificOutput.permissionDecision, "allow");
 });
 
 test("hook manifest contains no PreToolUse or report-loop/file gate", () => {

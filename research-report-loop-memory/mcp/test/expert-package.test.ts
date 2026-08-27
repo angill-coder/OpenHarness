@@ -146,6 +146,7 @@ test("packaged Expert keeps Report Loop hooks and uses a cross-platform Memory M
       "writing_memory_capture_payload",
       "writing_memory_forget",
       "writing_memory_recall",
+      "writing_memory_settings",
     ]);
   } finally {
     await client.close();

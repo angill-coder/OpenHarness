@@ -66,7 +66,7 @@ node scripts/migrate-rubric-scope-paths.mjs
 node scripts/migrate-rubric-scope-paths.mjs --apply
 ```
 
-安装包默认在 Memory MCP 首次启动时调用 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1`，注册每天 16:30 的 Reflection 任务；任务通过稳定启动器自动解析当前已安装的插件版本，只连接本插件的 Memory MCP，不启动 Report Loop Judge。需要关闭时运行对应的 `disable-reflection-*` 脚本；关闭状态会持久化，后续升级不会自动恢复。
+Report Memory 默认关闭。用户明确要求主 Agent 开启记忆后，Memory MCP 才会读写长期记忆，并调用 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1` 注册每天 16:30 的 Reflection 任务。关闭 Memory 不会删除已有数据；已有定时任务即使仍被系统唤起，也会立即退出，不调用模型。
 
 ## Windows x64 安装包
 
@@ -78,7 +78,7 @@ Windows 包使用 `cmd.exe + run-node.cmd` 启动统一 MCP；宿主 Hook 使用
 scripts\run-node.cmd scripts\verify-mcp-contract.mjs
 ```
 
-Reflection 默认启用；如需重新启用，可执行：
+Memory 开启后会自动注册 Reflection；也可手动执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-reflection-windows.ps1
@@ -98,7 +98,7 @@ macOS 包使用 `sh + run-node.sh` 启动统一 MCP，宿主 Hook 通过 `run-py
 npm run build:release:macos
 ```
 
-Reflection 默认启用；需要关闭时执行：
+Memory 开启后会自动注册 Reflection；需要单独关闭 Reflection 时执行：
 
 ```bash
 sh scripts/disable-reflection-macos.sh

@@ -11,6 +11,7 @@ const expected = [
   "writing_memory_capture_payload",
   "writing_memory_forget",
   "writing_memory_recall",
+  "writing_memory_settings",
 ];
 
 async function listTools(command, args, env) {

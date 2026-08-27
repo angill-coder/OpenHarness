@@ -53,6 +53,9 @@ test("integrated Skill uses the host launcher and versioned Rubric Set", () => {
   assert.match(architecture, /Persistent Rewriter/u);
   assert.match(skill, /operation=capture/u);
   assert.match(skill, /Memory MCP/u);
+  assert.match(skill, /默认关闭/u);
+  assert.match(skill, /writing_memory_settings\(action=enable\)/u);
+  assert.match(skill, /关闭时只使用 Base Rubrics/u);
   assert.match(skill, /不得因用户反馈修改 Skill、Base Rubrics、插件代码/u);
   assert.doesNotMatch(skill, /report_loop_(?:start|submit|finish|status)/u);
   assert.match(orchestration, /Memory Recall/u);
@@ -84,6 +87,7 @@ test("integrated manifests register only Memory MCP plus Curator and Reflection"
     "utf8",
   );
   assert.match(orchestration, /report-memory-v2/u);
+  assert.match(orchestration, /writing_memory_settings/u);
   assert.match(skill, /Hook 只负责在 Agent 沙箱外启动/u);
   assert.match(loop, /不要执行 ToolSearch/u);
   assert.match(loop, /不要调用 `report_loop_run`/u);

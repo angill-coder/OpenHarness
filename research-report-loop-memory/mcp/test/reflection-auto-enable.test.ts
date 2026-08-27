@@ -6,7 +6,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { reflectionAutoEnablePlan } from "../src/reflection-auto-enable.ts";
 
-test("Reflection auto-enable only runs for a packaged WorkBuddy plugin", () => {
+test("Reflection is installed only after memory is enabled for a packaged plugin", () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "reflection-auto-enable-"));
   const pluginRoot = path.join(temporary, "plugin");
   const dataDirectory = path.join(temporary, "memory");
@@ -16,6 +16,16 @@ test("Reflection auto-enable only runs for a packaged WorkBuddy plugin", () => {
   const moduleUrl = pathToFileURL(path.join(pluginRoot, "dist/memory-server.mjs")).href;
 
   try {
+    const disabledPlan = reflectionAutoEnablePlan(moduleUrl, {
+      RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDirectory,
+    }, "darwin");
+    assert.deepEqual(disabledPlan, { action: "skip", reason: "memory_disabled" });
+
+    fs.mkdirSync(dataDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataDirectory, "settings.json"),
+      JSON.stringify({ schemaVersion: 1, memoryEnabled: true }),
+    );
     const plan = reflectionAutoEnablePlan(moduleUrl, {
       RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDirectory,
     }, "darwin");
@@ -44,6 +54,10 @@ test("A persisted user opt-out prevents Reflection from being re-enabled", () =>
   fs.mkdirSync(path.join(pluginRoot, "scripts"), { recursive: true });
   fs.mkdirSync(path.join(dataDirectory, "reflection"), { recursive: true });
   fs.writeFileSync(path.join(pluginRoot, "scripts/install-reflection-windows.ps1"), "# installer\n");
+  fs.writeFileSync(
+    path.join(dataDirectory, "settings.json"),
+    JSON.stringify({ schemaVersion: 1, memoryEnabled: true }),
+  );
   fs.writeFileSync(
     path.join(dataDirectory, "reflection/schedule-settings.json"),
     JSON.stringify({ enabled: false }),

@@ -23,6 +23,11 @@ class MemoryRubricProviderTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.memory_dir = self.root / "memory"
+        (self.memory_dir / "settings.json").parent.mkdir(parents=True, exist_ok=True)
+        (self.memory_dir / "settings.json").write_text(
+            json.dumps({"schemaVersion": 1, "memoryEnabled": True}),
+            encoding="utf-8",
+        )
         self.repository = self.memory_dir / "l2b-rubrics" / "personal" / "default"
         self.repository.mkdir(parents=True)
         subprocess.run(["git", "init", "-q"], cwd=self.repository, check=True)
@@ -97,6 +102,16 @@ class MemoryRubricProviderTests(unittest.TestCase):
         shared = [item for item in items if item.get("sourceMemoryId") == "MR-SHARED"]
         self.assertEqual(len(shared), 2)
         self.assertEqual(len({item["id"] for item in shared}), 2)
+
+    def test_default_disabled_hides_existing_memory_rubrics(self) -> None:
+        (self.memory_dir / "settings.json").unlink()
+        snapshot = MemoryRubricProvider(self.memory_dir).load(
+            audience="总办M（总裁/最高管理层）",
+            project="DS 用户时长",
+        )
+        self.assertEqual(snapshot["status"], "disabled")
+        self.assertEqual(snapshot["items"], [])
+        self.assertEqual(snapshot["documents"], [])
 
 
 class RunnerMemoryProviderTests(unittest.TestCase):

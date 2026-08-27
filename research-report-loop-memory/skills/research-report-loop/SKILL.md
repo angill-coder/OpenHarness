@@ -1,6 +1,6 @@
 ---
 name: research-report-loop
-description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究报告、复盘报告或高管汇报，并从用户反馈中学习长期写作要求。当用户要求根据访谈、问卷、PDF、Word、Excel、CSV、structured_data 或公开信息生成研究报告、调研洞察、战略分析或管理层汇报时使用。
+description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究报告、复盘报告或高管汇报，并提供默认关闭、由用户明确启用的长期写作记忆；启用后才从用户反馈中学习写作要求并用于后续评测。当用户要求根据访谈、问卷、PDF、Word、Excel、CSV、structured_data 或公开信息生成研究报告、调研洞察、战略分析或管理层汇报，或要求开启、关闭报告记忆时使用。
 ---
 
 # 调研洞察汇报报告生成 · Report Loop
@@ -12,7 +12,7 @@ description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究
 本 Skill 包含两套配套机制：
 
 - **Report Loop**：宿主 Agent 完成初稿后，Python Runner 使用冻结的 Rubrics 调度隔离 Judge 和持久 Rewriter，最终交付历史最佳版本。
-- **Report Memory**：用户反馈后，宿主先修改当前报告，再委派 Memory Curator 提炼长期写作要求。Memory Rubrics 不进入写作上下文，而在后续 Report Loop 中参与 Judge。
+- **Report Memory**：可选的长期写作记忆，默认关闭。只有用户明确要求开启时，主 Agent 才调用 Memory MCP 的 `writing_memory_settings(action=enable)`；开启后，用户反馈会在当前报告修改完成后交给 Memory Curator，形成的 Memory Rubrics 在后续 Report Loop 中参与 Judge。关闭时只使用 Base Rubrics，已有记忆保留但不读、不写、不整理。
 
 ## 执行步骤
 
@@ -50,12 +50,12 @@ Hook 只负责在 Agent 沙箱外启动已经验证的 Python Runner；Report Lo
 
 ### 第 4 步：处理用户反馈
 
-用户对已交付报告提出修改意见时，先直接修改当前报告，不重新运行 Report Loop；只有用户明确要求重新评测时才再运行。修改成功后，按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `research-report-memory-curator` 执行 `operation=capture`，再交付修改结果。
+用户对已交付报告提出修改意见时，先直接修改当前报告，不重新运行 Report Loop；只有用户明确要求重新评测时才再运行。Memory 已开启时，修改成功后按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `research-report-memory-curator` 执行 `operation=capture`，再交付修改结果；Memory 关闭时直接交付，不 Capture，也不反复询问用户是否开启。
 
-Judge 反馈和自动改写不得进入 Memory。主 Agent 不直接调用 Memory MCP，也不得因用户反馈修改 Skill、Base Rubrics、插件代码或 WorkBuddy 原生 Memory。
+Judge 反馈和自动改写不得进入 Memory。除处理用户明确提出的记忆开关要求外，主 Agent 不直接调用 Memory MCP；也不得因用户反馈修改 Skill、Base Rubrics、插件代码或 WorkBuddy 原生 Memory。
 
 ## 故障与交付边界
 
 - Runner 失败时，按 `loop-orchestration.md` 保留可用的历史最佳版本；宿主不得接管中间 Judge 或 Rewrite。
-- Capture 失败不回滚已完成的报告修改，也不得通过热改插件或写入 `~/.workbuddy/MEMORY.md` 补偿。
+- Memory 已开启但 Capture 失败时，不回滚已完成的报告修改，也不得通过热改插件或写入 `~/.workbuddy/MEMORY.md` 补偿。
 - 只交付最终可编辑报告；除非用户主动询问，不展开内部评分、版本试错和工具调用过程。

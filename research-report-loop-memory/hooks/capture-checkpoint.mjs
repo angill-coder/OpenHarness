@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isMemoryEnabled, resolveMemoryDataDir } from "../mcp/src/memory-settings.ts";
 import { classifyWritingFeedback } from "../mcp/src/relevance.ts";
 import { ReportLoopLauncher } from "../mcp/src/report-loop-launcher.ts";
 
@@ -375,9 +376,11 @@ async function onPrompt(input) {
   const longTermPreference = classified.relevant && LONG_TERM_PREFERENCE_PATTERN.test(prompt);
   const reportContext = state.active && REPORT_CONTEXT_PATTERN.test(prompt);
   const memoryManagement = MEMORY_MANAGEMENT_PATTERN.test(prompt) && !revisionFeedback;
+  const memoryEnabled = isMemoryEnabled(resolveMemoryDataDir());
 
   if (reportTask) state.active = true;
-  if (!reportTask && !memoryManagement && (classified.relevant || reportContext)
+  if (!memoryEnabled) clearCapture(state);
+  if (memoryEnabled && !reportTask && !memoryManagement && (classified.relevant || reportContext)
     && (state.reportProduced || revisionFeedback || reportContext || (state.active && longTermPreference))) {
     state.active = true;
     state.capturePending = true;
@@ -457,6 +460,14 @@ async function onPostTool(input) {
 
 async function onStop(input) {
   const state = await loadState(requireSessionId(input));
+  if (!isMemoryEnabled(resolveMemoryDataDir())) {
+    if (state.capturePending) {
+      clearCapture(state);
+      await saveState(state);
+    }
+    printJson({ hookSpecificOutput: { hookEventName: "Stop", permissionDecision: "allow" } });
+    return;
+  }
   if (!state.capturePending) {
     printJson({ hookSpecificOutput: { hookEventName: "Stop", permissionDecision: "allow" } });
     return;

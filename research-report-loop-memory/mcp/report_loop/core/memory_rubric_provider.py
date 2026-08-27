@@ -67,6 +67,18 @@ class MemoryRubricProvider:
             raise RuntimeError(detail or "git command failed")
         return completed.stdout
 
+    def _memory_enabled(self) -> bool:
+        settings_path = self.memory_data_dir / "settings.json"
+        try:
+            value = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        return (
+            isinstance(value, dict)
+            and value.get("schemaVersion") == 1
+            and value.get("memoryEnabled") is True
+        )
+
     def _read_document(self, head: str, relative_path: str) -> dict[str, Any] | None:
         completed = subprocess.run(
             ["git", "show", f"{head}:{relative_path}"],
@@ -132,6 +144,9 @@ class MemoryRubricProvider:
     def load_sources(self, source_l1_ids: list[str]) -> list[dict[str, Any]]:
         """Read only the exact L1 atoms referenced by selected L2B rubrics."""
 
+        if not self._memory_enabled():
+            return []
+
         requested = list(dict.fromkeys(
             str(value or "").strip() for value in source_l1_ids if str(value or "").strip()
         ))
@@ -169,6 +184,15 @@ class MemoryRubricProvider:
         return [by_id[value] for value in requested if value in by_id]
 
     def load(self, *, audience: str = "", project: str = "") -> dict[str, Any]:
+        if not self._memory_enabled():
+            return {
+                "status": "disabled",
+                "revision": None,
+                "rubricSetVersion": None,
+                "documents": [],
+                "items": [],
+                "warnings": [],
+            }
         if not self.repository.exists():
             return {
                 "status": "empty",
