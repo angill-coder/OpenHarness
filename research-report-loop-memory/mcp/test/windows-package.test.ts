@@ -68,6 +68,12 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   assert.match(windowsReflection, /CODEBUDDY_CODE_PATH/u);
   assert.match(windowsReflection, /ProgramFiles\(x86\)/u);
   assert.match(windowsReflection, /args = @\("\/d", "\/c", \$NodeRunner, \$MemoryServer\)/u);
+  assert.match(windowsReflection, /\[Console\]::InputEncoding = \$Utf8NoBom/u);
+  assert.match(windowsReflection, /\[Console\]::OutputEncoding = \$Utf8NoBom/u);
+  assert.match(windowsReflection, /\$OutputEncoding = \$Utf8NoBom/u);
+  assert.match(windowsReflection, /Get-Content -Raw -Encoding utf8/u);
+  assert.match(windowsReflection, /Execute operation=reflection/u);
+  assert.doesNotMatch(windowsReflection, /[^\x00-\x7F]/u);
   assert.doesNotMatch(windowsReflection, /"\/s"|\$CommandLine/u);
   assert.match(macInstaller, /reflection-current\.sh/u);
   assert.match(macInstaller, /DATA_DIR=/u);
