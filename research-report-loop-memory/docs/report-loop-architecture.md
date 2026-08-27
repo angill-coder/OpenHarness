@@ -4,7 +4,7 @@
 
 ## Ownership
 
-- `hooks/capture-checkpoint.mjs`：识别已写入的 Job，在宿主侧异步启动薄 Launcher，并返回可注册为 WorkBuddy 后台任务的等待命令；最终结果仍通过 Job 同目录文件回传。
+- `hooks/capture-checkpoint.mjs`：识别已写入的 Job，在宿主侧异步启动薄 Launcher，并返回可注册为 WorkBuddy 后台任务的等待命令；在 TaskOutput 读取完成或失败结果前阻止会话提前结束。
 - `mcp/src/report-loop-launcher.ts`：薄 Launcher，只校验 Job 路径并启动 Python Runner；同时供 MCP 兼容入口复用。
 - `mcp/report_loop/runner.py`：校验 Job、创建运行、串联 Judge 与 Rewrite、处理超时和最终交付。
 - `core/memory_rubric_provider.py`：读取 Base Rubrics 对应的 core、audience、project Memory Rubrics，并按需读取引用的 L1 来源。
@@ -26,4 +26,4 @@ Runner 启动后读取 Base Rubrics 以及 `core`、`audience`、`project` 下�
 
 Rewrite 与 Judge 串行。插件 Hook 为 Job 记录准确的 WorkBuddy `sessionId`，Runner 再从该主会话 trace 读取 `requestModelId`；Persistent Rewriter 使用这个实际宿主模型和可选 effort。首轮获得 V1 与用户上下文，之后保留已清洗的修改反馈和失败尝试；原始 Judge 输出不会直接传入 Rewriter。
 
-Runner 在最佳版本达到 5 分、连续两个候选版本被拒绝或达到 60 分钟时停止。基础设施故障返回已经完成 Judge 的历史最佳版本，并以 `judge_unavailable` 或 `rewrite_unavailable` 标记。最终文件通过原子替换写入 Job 的 `outputPath`。
+Runner 在最佳版本达到 5 分、连续两个候选版本被拒绝或达到 60 分钟时停止。基础设施故障返回已经完成 Judge 的历史最佳版本，并以 `judge_unavailable` 或 `rewrite_unavailable` 标记。最终文件通过原子替换写入 Job 的 `outputPath`，各轮已评测报告集中导出到一个版本记录目录；内部 JSON 与日志保留在隐藏运行目录中。

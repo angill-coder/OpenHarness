@@ -245,6 +245,34 @@ test("successful Report Loop Job write stamps the session and queues the host la
   assert.equal(status.state, "queued");
   assert.equal(status.jobPath, jobPath);
   assert.equal(path.isAbsolute(status.resultPath), true);
+
+  const blocked = invoke("stop", { session_id: "session-sidecar-0001" }, stateDir);
+  assert.equal(blocked.hookSpecificOutput.permissionDecision, "deny");
+  assert.match(blocked.hookSpecificOutput.permissionDecisionReason, /仍在后台运行/u);
+
+  const completed = invoke("post-tool", {
+    session_id: "session-sidecar-0001",
+    tool_name: "TaskOutput",
+    tool_input: { task_id: "task-1" },
+    tool_response: {
+      status: "completed",
+      output: JSON.stringify({
+        status: "completed",
+        finalArtifactPath: path.join(jobDir, "report-final.md"),
+        versionsDirectory: path.join(jobDir, "report-final-versions"),
+        judgedVersions: 3,
+        rewriteRounds: 2,
+        bestVersion: "v3",
+        bestScore: 5,
+      }),
+    },
+  }, stateDir);
+  assert.match(completed.systemMessage, /Report Loop 已完成/u);
+  assert.match(completed.systemMessage, /不要展示原始 JSON/u);
+  assert.equal(
+    invoke("stop", { session_id: "session-sidecar-0001" }, stateDir).hookSpecificOutput.permissionDecision,
+    "allow",
+  );
 });
 
 test("background waiter returns a completed Report Loop result", (t) => {

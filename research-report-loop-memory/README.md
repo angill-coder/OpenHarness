@@ -32,7 +32,8 @@ Hook 不注册 `PreToolUse`，不负责写前 Recall或报告内容校验。它�
 ## Hook、MCP 与 Runner 边界
 
 - 只维护一个 `report-memory-v2` MCP Server，负责 L0/L1/L2B；其中保留 `report_loop_run` 作为兼容入口，但正常写作链路不依赖当前对话暴露该工具。
-- Job 写入后，宿主 Hook 启动 `mcp/report_loop/runner.py`，并把状态与最终结果写在 Job 同目录。路径由插件根目录和 Job 动态解析，不写死用户名、安装目录或操作系统路径。
+- Job、状态和内部结果统一放在报告目录的 `.report-loop/` 中。宿主 Hook 启动 `mcp/report_loop/runner.py` 后会阻止会话提前结束，直至宿主读取完成或失败结果。路径由插件根目录和 Job 动态解析，不写死用户名、安装目录或操作系统路径。
+- Runner 对用户只交付最终报告和一个版本记录目录；评测 JSON、状态文件与工具日志不进入用户交付区。
 - Python Runner 仍是唯一循环入口，负责 Rubric 编译、Judge、Rewrite、版本采纳与停止；Hook 不复制任何 Loop 逻辑。
 - Agent 不直接运行 Python，也不需要申请访问 WorkBuddy 的认证或日志目录。
 

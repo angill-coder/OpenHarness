@@ -38,15 +38,15 @@ description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究
 
 产出前完整阅读 [writing-instructions.md](references/writing-instructions.md)，按其中的证据边界、三段结构、洞察和表达要求写作。
 
-在当前工作目录保存可编辑的 Markdown 初稿 V1。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
+在当前报告目录的 `.report-loop/v1.md` 保存可编辑的 Markdown 初稿 V1，避免把过程稿散落在用户交付目录。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
 
 V1 保存完成之前，不读取 Report Loop 执行卡，不检查或测试 Python Runner。
 
 ### 第 3 步：启动 Report Loop
 
-确认 V1 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V1 和素材路径构造 Job。Job 写入成功后，插件 Hook 会在宿主侧自动启动 Runner，并返回后台等待命令。用 `Bash(run_in_background=true)` 启动该命令并保存 `task_id`；收到 `<task-notification>` 后调用 `TaskOutput(task_id)` 读取完整结果。
+确认 V1 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V1 和素材路径构造 Job。启动后必须等待并读取 Report Loop 最终结果，不得提前结束任务，也不得把 Job、状态或结果 JSON 当作交付物。
 
-Hook 只负责在 Agent 沙箱外启动已经验证的 Python Runner；Report Loop 逻辑仍全部由 Python Runner 负责。宿主不得搜索或调用 Report Loop MCP，不得事前阅读源码、运行测试、执行 `--help` 或预检，也不得自行执行 Judge 或 Rewrite。取得结果后，只交付 `finalArtifactPath`；写作前不要 Recall Memory。
+宿主不得搜索或调用 Report Loop MCP，不得事前阅读源码、运行测试、执行 `--help` 或预检，也不得自行执行 Judge 或 Rewrite。完成后交付 `finalArtifactPath` 和 `versionsDirectory`，并简要说明评测版本数、改写次数、最佳版本和最终得分；不要展示内部 JSON、详细 Judge 过程或工具日志。写作前不要 Recall Memory。
 
 ### 第 4 步：处理用户反馈
 
@@ -58,4 +58,4 @@ Judge 反馈和自动改写不得进入 Memory。除处理用户明确提出的�
 
 - Runner 失败时，按 `loop-orchestration.md` 保留可用的历史最佳版本；宿主不得接管中间 Judge 或 Rewrite。
 - Memory 已开启但 Capture 失败时，不回滚已完成的报告修改，也不得通过热改插件或写入 `~/.workbuddy/MEMORY.md` 补偿。
-- 只交付最终可编辑报告；除非用户主动询问，不展开内部评分、版本试错和工具调用过程。
+- 交付最终可编辑报告和版本记录目录，并明确说明 Report Loop 的评测版本数、改写次数、最佳版本和最终得分；不展开内部 JSON、详细评分过程或工具调用日志。

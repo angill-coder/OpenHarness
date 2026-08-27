@@ -4,7 +4,7 @@
 
 ## 1. 构造 Job
 
-将 Job 保存为当前报告目录下的 JSON 文件。所有文件路径使用绝对路径。Job 文件名不是触发条件，Hook 会识别任意合法 Job JSON；每轮 Report Loop 只创建并写入一个 Job 文件，写入成功后不得为了匹配固定文件名而复制、改名或再次写入同一 Job。
+将 Job 保存为当前报告目录的 `.report-loop/job.json`。V1 使用同目录下的 `.report-loop/v1.md`；最终报告仍输出到用户指定位置。所有文件路径使用绝对路径。Job 文件名不是触发条件，Hook 会识别任意合法 Job JSON；每轮 Report Loop 只创建并写入一个 Job 文件，写入成功后不得为了匹配固定文件名而复制、改名或再次写入同一 Job。
 
 ```json
 {
@@ -24,7 +24,7 @@
   },
   "audience": "已确认的受众；没有则为空字符串",
   "project": "当前项目名称；没有则为空字符串",
-  "v1ArtifactPath": "/absolute/path/to/report-v1.md",
+  "v1ArtifactPath": "/absolute/path/to/.report-loop/v1.md",
   "structuredDataPath": "/absolute/path/to/structured_data.json",
   "judgeProvider": "workbuddy",
   "hostModel": {"effort": "当前 effort，可省略；整个字段也可省略"},
@@ -48,9 +48,9 @@ Job 写入成功后，PostToolUse Hook 会在 Agent 沙箱外启动 Runner，并
 
 ## 3. 处理结果
 
-Runner 最终输出一个 JSON 对象：
+Runner 最终输出一个 JSON 对象。它是内部控制结果，不直接展示给用户：
 
-- 成功：交付 `finalArtifactPath` 指向的文件。
+- 成功：交付 `finalArtifactPath` 指向的文件和 `versionsDirectory` 目录；明确说明 `judgedVersions`（评测版本数）、`rewriteRounds`（改写次数）、`bestVersion`（最佳版本）和 `bestScore`（最终得分）。
 - `judge_unavailable` 或 `rewrite_unavailable`：交付返回的历史最佳文件并简要说明自动评测或改写未完成。
 - 明确指出 Job 字段缺失或格式错误：只修正该字段并重试一次。
 - 其他错误：保留 V1 和已有历史最佳版本，如实报告错误；不要通过阅读源码、运行测试或手工执行 Judge/Rewrite 来接管流程。

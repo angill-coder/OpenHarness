@@ -26,14 +26,12 @@ test("integrated Skill uses the host launcher and versioned Rubric Set", () => {
   assert.match(skill, /可被素材验证、反驳或修正的完整判断/u);
   assert.match(skill, /不能只写成主题、关键词或短标题/u);
   assert.match(skill, /不要为了适配多选框而压缩观点/u);
-  assert.match(skill, /插件 Hook 会在宿主侧自动启动 Runner/u);
   assert.match(skill, /AskUserQuestion/u);
-  assert.match(skill, /TaskOutput/u);
-  assert.match(skill, /Bash\(run_in_background=true\)/u);
-  assert.match(skill, /<task-notification>/u);
   assert.match(skill, /finalArtifactPath/u);
+  assert.match(skill, /versionsDirectory/u);
+  assert.match(skill, /不得提前结束任务/u);
+  assert.match(skill, /不得把 Job、状态或结果 JSON 当作交付物/u);
   assert.match(skill, /V1 保存完成之前，不读取 Report Loop 执行卡/u);
-  assert.match(skill, /已经验证的 Python Runner/u);
   assert.match(skill, /不得事前阅读源码、运行测试、执行 `--help` 或预检/u);
   assert.match(loop, /"schemaVersion": 2/u);
   assert.match(loop, /# Report Loop 执行卡/u);
@@ -43,6 +41,8 @@ test("integrated Skill uses the host launcher and versioned Rubric Set", () => {
   assert.match(loop, /<task-notification>/u);
   assert.match(loop, /结果文件绝对路径/u);
   assert.match(loop, /宿主侧 Launcher/u);
+  assert.match(loop, /插件 Hook 会自动在宿主侧启动 Runner/u);
+  assert.match(loop, /内部控制结果，不直接展示给用户/u);
   assert.match(loop, /Job 文件名不是触发条件/u);
   assert.match(loop, /每轮 Report Loop 只创建并写入一个 Job 文件/u);
   assert.doesNotMatch(loop, /<PLUGIN_ROOT>|run-python\.(?:sh|cmd)/u);
@@ -88,7 +88,7 @@ test("integrated manifests register only Memory MCP plus Curator and Reflection"
   );
   assert.match(orchestration, /report-memory-v2/u);
   assert.match(orchestration, /writing_memory_settings/u);
-  assert.match(skill, /Hook 只负责在 Agent 沙箱外启动/u);
+  assert.match(loop, /Hook 只是宿主侧 Launcher/u);
   assert.match(loop, /不要执行 ToolSearch/u);
   assert.match(loop, /不要调用 `report_loop_run`/u);
 });
