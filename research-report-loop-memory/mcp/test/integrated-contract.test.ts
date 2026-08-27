@@ -25,7 +25,10 @@ test("integrated Skill uses the host launcher and versioned Rubric Set", () => {
   assert.doesNotMatch(skill, /汇报背景.*支撑什么决策/u);
   assert.match(skill, /可被素材验证、反驳或修正的完整判断/u);
   assert.match(skill, /不能只写成主题、关键词或短标题/u);
-  assert.match(skill, /不要为了适配多选框而压缩观点/u);
+  assert.match(skill, /先在普通回复中按编号完整展示 1–3 条观点/u);
+  assert.match(skill, /工具问题只写“是否采用以上 hypothesis？”/u);
+  assert.match(skill, /不得把 hypothesis 正文重复塞进问题、选项或描述字段/u);
+  assert.match(skill, /不得为了适配交互控件而压缩观点/u);
   assert.match(skill, /AskUserQuestion/u);
   assert.match(skill, /finalArtifactPath/u);
   assert.match(skill, /versionsDirectory/u);
