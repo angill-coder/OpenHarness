@@ -255,6 +255,41 @@ test("the same Job write is idempotent and reuses one result path", (t) => {
   assert.equal(fs.readdirSync(jobDir).filter((name) => name.endsWith(".lock")).length, 1);
 });
 
+test("identical Jobs with different filenames share one launch and result path", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-content-idempotent-"));
+  const jobDir = fs.mkdtempSync(path.join(os.tmpdir(), "report-loop-content-idempotent-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(jobDir, { recursive: true, force: true }));
+  const job = {
+    schemaVersion: 2,
+    v1ArtifactPath: path.join(jobDir, "report-v1.md"),
+    outputPath: path.join(jobDir, "report-final.md"),
+  };
+  const firstJobPath = path.join(jobDir, "report-loop-job-ds-duration.json");
+  const secondJobPath = path.join(jobDir, "report-loop-job.json");
+  fs.writeFileSync(firstJobPath, JSON.stringify(job));
+  fs.writeFileSync(secondJobPath, JSON.stringify(job));
+
+  const first = invoke("post-tool", {
+    session_id: "session-content-idempotent",
+    tool_name: "Write",
+    tool_input: { file_path: firstJobPath },
+    tool_response: { status: "completed" },
+  }, stateDir);
+  const second = invoke("post-tool", {
+    session_id: "session-content-idempotent",
+    tool_name: "Write",
+    tool_input: { file_path: secondJobPath },
+    tool_response: { status: "completed" },
+  }, stateDir);
+
+  const firstResult = first.systemMessage.match(/结果文件：(.+?)。/u)?.[1];
+  const secondResult = second.systemMessage.match(/结果文件：(.+?)。/u)?.[1];
+  assert.equal(firstResult, secondResult);
+  assert.equal(fs.readdirSync(jobDir).filter((name) => name.endsWith(".lock")).length, 1);
+  assert.equal(fs.readdirSync(jobDir).filter((name) => name.endsWith(".status.json")).length, 1);
+});
+
 test("host worker relays the Python Runner result without an MCP tool call", (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "report-loop-host-worker-"));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));

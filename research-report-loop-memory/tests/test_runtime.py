@@ -151,7 +151,7 @@ class RuntimeTests(unittest.TestCase):
             artifactPath=str(self.report),
         )
         self.assertEqual(result["judgeProvider"], "workbuddy")
-        self.assertEqual(result["judgeModel"], "deepseek-v4-pro-ioa")
+        self.assertEqual(result["judgeModel"], "gpt-5.6-sol")
         self.assertEqual(result["judgeEffort"], "medium")
         self.assertEqual(result["judgeStrategy"], "per_dimension")
         self.assertEqual(result["judgeParallelism"], 6)
@@ -300,7 +300,7 @@ class WorkBuddyCliTests(unittest.TestCase):
         args = run.call_args.args[0]
         self.assertEqual(
             args[args.index("--model") + 1],
-            "deepseek-v4-pro-ioa",
+            "gpt-5.6-sol",
         )
         self.assertEqual(args[args.index("--effort") + 1], "medium")
         self.assertEqual(args[args.index("--max-turns") + 1], "1")

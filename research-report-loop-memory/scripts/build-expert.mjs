@@ -40,7 +40,7 @@ function prepareExpertSubagent(target) {
     .replace(/^tools:.*\n/mu, "")
     .replace(
       /^(# Research Report Memory (?:Curator|Reflection))$/mu,
-      "$1\n\n在本 Expert 中只调用 `mcp__report-expert-v2__*` 工具；即使同时发现原插件的 `report-memory-v2`，也不使用后者。",
+      "$1\n\n在本 Expert 中只调用 `mcp__report-expert-v1__*` 工具；即使同时发现原插件的 `report-memory-v2`，也不使用后者。",
     );
   fs.writeFileSync(target, updated);
 }
@@ -57,7 +57,7 @@ if [ ! -f "$RUNNER" ]; then
   exit 1
 fi
 
-RESEARCH_REPORT_REFLECTION_MCP_NAME=report-expert-v2 \\
+RESEARCH_REPORT_REFLECTION_MCP_NAME=report-expert-v1 \\
 RESEARCH_REPORT_REFLECTION_NODE_RUNNER="$PLUGIN_ROOT/bin/run-node" \\
 exec /bin/sh "$RUNNER"
 `);
@@ -74,7 +74,7 @@ $WorkBuddyConfig = if ($env:WORKBUDDY_CONFIG_DIR) {
 $PluginRoot = Join-Path $WorkBuddyConfig "plugins\\marketplaces\\my-experts\\plugins\\${expertPluginName}"
 $Runner = Join-Path $PluginRoot "scripts\\run-memory-reflection-workbuddy.ps1"
 if (-not (Test-Path $Runner)) { throw "Report Expert Reflection runner not found: $Runner" }
-$env:RESEARCH_REPORT_REFLECTION_MCP_NAME = "report-expert-v2"
+$env:RESEARCH_REPORT_REFLECTION_MCP_NAME = "report-expert-v1"
 $env:RESEARCH_REPORT_REFLECTION_NODE_RUNNER = Join-Path $PluginRoot "bin\\run-node.cmd"
 & $Runner
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -148,9 +148,20 @@ const hooks = {
 writeJson(path.join(expertDir, "hooks.json"), hooks);
 
 const initPrompt = {
-  zh: "请根据我提供的材料，写一份经过自动评测和改写的研究报告。",
-  en: "Create a research report from my materials and improve it through the automated report loop.",
+  zh: "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页",
+  en: "Based on the materials in the XX folder, write an X-page research report on “XX”.",
 };
+const expertMemoryMcpBootstrap = [
+  'const path=require("node:path")',
+  'const fs=require("node:fs")',
+  'const os=require("node:os")',
+  'const {pathToFileURL}=require("node:url")',
+  'const injected=process.env.CODEBUDDY_PLUGIN_ROOT',
+  'const usable=injected&&!injected.startsWith("$"+"{")&&!injected.startsWith("%")&&fs.existsSync(path.join(injected,"dist","memory-server.mjs"))',
+  'const config=process.env.WORKBUDDY_CONFIG_DIR||process.env.CODEBUDDY_CONFIG_DIR||path.join(os.homedir(),".workbuddy")',
+  'const root=usable?injected:path.join(config,"plugins","marketplaces","my-experts","plugins","report-loop")',
+  'import(pathToFileURL(path.join(root,"dist","memory-server.mjs")).href).catch(error=>{console.error(error);process.exit(1)})',
+].join(";");
 const expertManifest = {
   ...sourceManifest,
   name: expertPluginName,
@@ -162,24 +173,11 @@ const expertManifest = {
   skills: ["./skills/research-report-loop"],
   hooks: "./hooks.json",
   mcpServers: {
-    "report-expert-v2": process.platform === "win32" ? {
-      command: "cmd.exe",
-      args: [
-        "/d",
-        "/c",
-        "${CODEBUDDY_PLUGIN_ROOT}\\bin\\run-node.cmd",
-        "${CODEBUDDY_PLUGIN_ROOT}\\dist\\memory-server.mjs",
-      ],
+    "report-expert-v1": {
+      command: "node",
+      args: ["-e", expertMemoryMcpBootstrap],
       env: {
         RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
-        RESEARCH_REPORT_BASE_RUBRIC_PATH: "${CODEBUDDY_PLUGIN_ROOT}\\rubrics\\v2_rubric_research.json",
-      },
-    } : {
-      command: "${CODEBUDDY_PLUGIN_ROOT}/bin/run-node",
-      args: ["${CODEBUDDY_PLUGIN_ROOT}/dist/memory-server.mjs"],
-      env: {
-        RESEARCH_REPORT_MEMORY_V2_0821_DIR: "~/.research-report-memory-v2-0821",
-        RESEARCH_REPORT_BASE_RUBRIC_PATH: "${CODEBUDDY_PLUGIN_ROOT}/rubrics/v2_rubric_research.json",
       },
     },
   },

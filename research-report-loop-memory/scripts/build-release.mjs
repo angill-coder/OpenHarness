@@ -15,7 +15,7 @@ const curatorPromptVariant = curatorPromptExplicit
   ? process.argv[curatorPromptArgIndex + 1]
   : "v1-gate-first";
 const judgeDefaults = {
-  workbuddy: { model: "deepseek-v4-pro-ioa", effort: "medium" },
+  workbuddy: { model: "gpt-5.6-sol", effort: "medium" },
   codex: { model: "gpt-5.6-sol", effort: "medium" },
 };
 const noArchive = process.argv.includes("--no-archive");
@@ -117,6 +117,8 @@ for (const item of [
   "scripts/reflection-current.ps1",
   "scripts/install-reflection-macos.sh",
   "scripts/install-reflection-windows.ps1",
+  "scripts/disable-reflection-macos.sh",
+  "scripts/disable-reflection-windows.ps1",
   "scripts/macos-reflection-schedule.plist.template",
   "README.md",
   "LICENSE.md",
@@ -258,6 +260,7 @@ for (const executable of [
   "scripts/run-memory-reflection-workbuddy.sh",
   "scripts/reflection-current.sh",
   "scripts/install-reflection-macos.sh",
+  "scripts/disable-reflection-macos.sh",
 ]) {
   fs.chmodSync(path.join(pluginDir, executable), 0o755);
 }

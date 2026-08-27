@@ -1,4 +1,8 @@
 $ErrorActionPreference = "Stop"
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[Console]::InputEncoding = $Utf8NoBom
+[Console]::OutputEncoding = $Utf8NoBom
+$OutputEncoding = $Utf8NoBom
 $PluginRoot = Split-Path -Parent $PSScriptRoot
 $DataDir = if ($env:RESEARCH_REPORT_MEMORY_V2_0821_DIR) {
     $env:RESEARCH_REPORT_MEMORY_V2_0821_DIR
@@ -100,7 +104,7 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($McpConfig, ($Config | ConvertTo-Json -Depth 8), $Utf8NoBom)
 
 $Instructions = Get-Content -Raw -Encoding utf8 (Join-Path $PluginRoot "agents\research-report-memory-reflection.md")
-$Prompt = "执行 operation=reflection：按 Reflection Prompt 审视上次 checkpoint 后的写作经历。只调用一次 purpose=reflection 的 Recall；有工作时只调用一次 Capture Payload，且只提交增量修改；没有工作时直接结束。"
+$Prompt = "Execute operation=reflection. Review writing activity since the last checkpoint according to the Reflection Prompt. Call Recall exactly once with purpose=reflection. If there is work, call Capture Payload exactly once and submit only incremental changes; otherwise finish without Capture."
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $LogFile = Join-Path $LogDir "$Stamp.jsonl"
 

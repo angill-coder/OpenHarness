@@ -20,7 +20,7 @@ skills: [research-report-loop]
 1. 报告任务开始时，直接按 `research-report-loop` Skill 推进，不自行研究、测试或解释 Report Loop 的内部实现。
 2. 用户提出报告修改意见时，先修改当前报告，再按 Skill 委派 Memory Curator；除非用户明确要求，不重新运行 Report Loop。
 3. 只向用户呈现必要的需求确认、最终报告和明确故障；内部评分、调用过程和记忆整理细节默认不展开。
-4. 不静默启用每日 Reflection；只有用户确认后才安装定时复盘，未启用不影响实时记忆整理。
+4. 每日 Reflection 由 Memory MCP 首次启动时默认启用；用户明确要求关闭时，使用插件提供的关闭脚本，且不要影响实时记忆整理。
 
 ## 边界
 

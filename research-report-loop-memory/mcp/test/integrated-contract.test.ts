@@ -41,6 +41,8 @@ test("integrated Skill uses the host launcher and versioned Rubric Set", () => {
   assert.match(loop, /<task-notification>/u);
   assert.match(loop, /结果文件绝对路径/u);
   assert.match(loop, /宿主侧 Launcher/u);
+  assert.match(loop, /Job 文件名不是触发条件/u);
+  assert.match(loop, /每轮 Report Loop 只创建并写入一个 Job 文件/u);
   assert.doesNotMatch(loop, /<PLUGIN_ROOT>|run-python\.(?:sh|cmd)/u);
   assert.match(loop, /不要事前阅读 Runner 源码、运行测试、执行 `--help` 或预检/u);
   assert.doesNotMatch(loop, /sourceL1|rubric_compiler|judge_batch|Persistent Rewriter/u);

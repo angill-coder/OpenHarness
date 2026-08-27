@@ -9,6 +9,7 @@ DATA_DIR="${RESEARCH_REPORT_MEMORY_V2_0821_DIR:-$HOME/.research-report-memory-v2
 LOG_DIR="$DATA_DIR/reflection-logs"
 REFLECTION_DIR="$DATA_DIR/reflection"
 STABLE_RUNNER="$REFLECTION_DIR/reflection-current.sh"
+SETTINGS_FILE="$REFLECTION_DIR/schedule-settings.json"
 WORKBUDDY_USER_DIR=${WORKBUDDY_CONFIG_DIR:-${CODEBUDDY_CONFIG_DIR:-$HOME/.workbuddy}}
 CODEBUDDY_BIN=${RESEARCH_REPORT_LOOP_WB_CLI_PATH:-${WORKBUDDY_CLI:-${WORKBUDDY_CODEBUDDY:-${CODEBUDDY_CODE_PATH:-}}}}
 NODE_BIN=${WORKBUDDY_NODE:-${CODEBUDDY_CODE_NODE_PATH:-${CODEBUDDY_NODE_BIN:-}}}
@@ -64,4 +65,7 @@ fi
 
 launchctl bootout "gui/$(id -u)" "$SCHEDULE_FILE" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$(id -u)" "$SCHEDULE_FILE"
+UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf '{"enabled":true,"updatedAt":"%s"}\n' "$UPDATED_AT" > "$SETTINGS_FILE.tmp"
+mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
 echo "已启用每天 16:30 的 Report Memory Reflection 定时任务：$SCHEDULE_FILE"

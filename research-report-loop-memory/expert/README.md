@@ -5,9 +5,9 @@
 ## 内置能力
 
 - `research-report-loop` Skill：报告写作与交付流程
-- `report-expert-v2` MCP：Report Loop Launcher 与写作记忆服务
+- `report-expert-v1` MCP：Report Loop Launcher 与写作记忆服务
 - Python Report Loop：Resolution、Judge、Rewrite 和停止条件
 - Memory Curator：反馈后的实时记忆整理
-- Memory Reflection：可选的定时复盘
+- Memory Reflection：首次启动 Memory MCP 时默认启用的每日定时复盘，可由用户关闭
 
 Expert 与完整插件使用同一套运行代码和用户数据目录；更新 Expert 不会清空已有 Memory 或报告运行记录。

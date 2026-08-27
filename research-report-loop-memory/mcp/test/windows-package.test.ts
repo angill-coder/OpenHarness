@@ -51,6 +51,8 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   const macInstaller = fs.readFileSync(path.join(root, "scripts/install-reflection-macos.sh"), "utf8");
   const macLauncher = fs.readFileSync(path.join(root, "scripts/reflection-current.sh"), "utf8");
   const macReflection = fs.readFileSync(path.join(root, "scripts/run-memory-reflection-workbuddy.sh"), "utf8");
+  const windowsDisable = fs.readFileSync(path.join(root, "scripts/disable-reflection-windows.ps1"), "utf8");
+  const macDisable = fs.readFileSync(path.join(root, "scripts/disable-reflection-macos.sh"), "utf8");
 
   assert.match(windowsInstaller, /reflection-current\.ps1/u);
   assert.match(windowsInstaller, /RESEARCH_REPORT_MEMORY_V2_0821_DIR/u);
@@ -66,6 +68,12 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   assert.match(windowsReflection, /CODEBUDDY_CODE_PATH/u);
   assert.match(windowsReflection, /ProgramFiles\(x86\)/u);
   assert.match(windowsReflection, /args = @\("\/d", "\/c", \$NodeRunner, \$MemoryServer\)/u);
+  assert.match(windowsReflection, /\[Console\]::InputEncoding = \$Utf8NoBom/u);
+  assert.match(windowsReflection, /\[Console\]::OutputEncoding = \$Utf8NoBom/u);
+  assert.match(windowsReflection, /\$OutputEncoding = \$Utf8NoBom/u);
+  assert.match(windowsReflection, /Get-Content -Raw -Encoding utf8/u);
+  assert.match(windowsReflection, /Execute operation=reflection/u);
+  assert.doesNotMatch(windowsReflection, /[^\x00-\x7F]/u);
   assert.doesNotMatch(windowsReflection, /"\/s"|\$CommandLine/u);
   assert.match(macInstaller, /reflection-current\.sh/u);
   assert.match(macInstaller, /DATA_DIR=/u);
@@ -78,6 +86,10 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   assert.match(macReflection, /CODEBUDDY_CODE_PATH/u);
   assert.match(macReflection, /WORKBUDDY_EXTRA_PATHS/u);
   assert.match(macReflection, /\/Volumes\/\*\/Applications\/WorkBuddy\.app/u);
+  assert.match(windowsInstaller, /schedule-settings\.json/u);
+  assert.match(windowsDisable, /enabled = \$false/u);
+  assert.match(macInstaller, /schedule-settings\.json/u);
+  assert.match(macDisable, /"enabled":false/u);
 });
 
 test("release builder emits platform-native Memory MCP and Hook configurations", () => {
@@ -89,7 +101,7 @@ test("release builder emits platform-native Memory MCP and Hook configurations",
   assert.match(builder, /command: "sh"/u);
   assert.match(builder, /run-node\.sh/u);
   assert.match(builder, /capture-checkpoint\.mjs/u);
-  assert.match(builder, /deepseek-v4-pro-ioa/u);
+  assert.match(builder, /gpt-5\.6-sol/u);
   assert.match(builder, /reflection-current\.ps1/u);
   assert.match(builder, /defaultJudgeProvider: "workbuddy"/u);
   assert.match(builder, /judgeDefaults/u);

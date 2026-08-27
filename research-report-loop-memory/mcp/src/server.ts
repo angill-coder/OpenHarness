@@ -1,11 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { autoEnableReflection } from "./reflection-auto-enable.ts";
 import { ReportLoopLauncher } from "./report-loop-launcher.ts";
 import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
 
 const server = new McpServer(
-  { name: "report-memory-v2", version: "1.0.0-mvp.33" },
+  { name: "report-memory-v2", version: "1.0.0-mvp.40" },
   {
     capabilities: { logging: {} },
     instructions: [
@@ -205,3 +206,4 @@ process.once("SIGTERM", shutdown);
 
 await runtime.initialize();
 await server.connect(new StdioServerTransport());
+autoEnableReflection(import.meta.url);
