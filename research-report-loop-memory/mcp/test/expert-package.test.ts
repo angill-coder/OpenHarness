@@ -38,9 +38,9 @@ test("WorkBuddy Expert remains a thin wrapper around the existing plugin", () =>
   assert.match(frontmatter, /^skills: \[research-report-loop\]$/mu);
   assert.doesNotMatch(frontmatter, /^tools:/mu);
   assert.match(builder, /scripts\/build-release\.mjs/u);
-  assert.match(builder, /report-expert-v2/u);
+  assert.match(builder, /report-expert-v1/u);
   assert.match(builder, /expertPluginName = "report-loop"/u);
-  assert.match(builder, /mcp__report-expert-v2__/u);
+  assert.match(builder, /mcp__report-expert-v1__/u);
   assert.match(builder, /bin\/run-node/u);
   assert.match(builder, /bin\/run-node\.cmd/u);
   assert.match(builder, /hooks\.json/u);
@@ -70,7 +70,7 @@ test("packaged Expert keeps Report Loop hooks and uses a cross-platform Memory M
   assert.equal(fs.existsSync(path.join(expertDir, "scripts/disable-reflection-windows.ps1")), true);
 
   for (const launcher of [macLauncher, windowsLauncher]) {
-    assert.match(launcher, /report-expert-v2/u);
+    assert.match(launcher, /report-expert-v1/u);
     assert.match(launcher, /my-experts/u);
     assert.match(launcher, /report-loop/u);
     assert.match(launcher, /bin[\\/]run-node/u);
@@ -90,7 +90,7 @@ test("packaged Expert keeps Report Loop hooks and uses a cross-platform Memory M
       assert.doesNotMatch(command, /cmd\.exe|run-node\.cmd|\\bin\\/u);
     }
   }
-  const memoryMcp = manifest.mcpServers["report-expert-v2"];
+  const memoryMcp = manifest.mcpServers["report-expert-v1"];
   assert.equal(memoryMcp.command, "node");
   assert.equal(memoryMcp.args[0], "-e");
   assert.match(memoryMcp.args[1], /WORKBUDDY_CONFIG_DIR/u);

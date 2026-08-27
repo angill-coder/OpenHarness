@@ -40,7 +40,7 @@ function prepareExpertSubagent(target) {
     .replace(/^tools:.*\n/mu, "")
     .replace(
       /^(# Research Report Memory (?:Curator|Reflection))$/mu,
-      "$1\n\n在本 Expert 中只调用 `mcp__report-expert-v2__*` 工具；即使同时发现原插件的 `report-memory-v2`，也不使用后者。",
+      "$1\n\n在本 Expert 中只调用 `mcp__report-expert-v1__*` 工具；即使同时发现原插件的 `report-memory-v2`，也不使用后者。",
     );
   fs.writeFileSync(target, updated);
 }
@@ -57,7 +57,7 @@ if [ ! -f "$RUNNER" ]; then
   exit 1
 fi
 
-RESEARCH_REPORT_REFLECTION_MCP_NAME=report-expert-v2 \\
+RESEARCH_REPORT_REFLECTION_MCP_NAME=report-expert-v1 \\
 RESEARCH_REPORT_REFLECTION_NODE_RUNNER="$PLUGIN_ROOT/bin/run-node" \\
 exec /bin/sh "$RUNNER"
 `);
@@ -74,7 +74,7 @@ $WorkBuddyConfig = if ($env:WORKBUDDY_CONFIG_DIR) {
 $PluginRoot = Join-Path $WorkBuddyConfig "plugins\\marketplaces\\my-experts\\plugins\\${expertPluginName}"
 $Runner = Join-Path $PluginRoot "scripts\\run-memory-reflection-workbuddy.ps1"
 if (-not (Test-Path $Runner)) { throw "Report Expert Reflection runner not found: $Runner" }
-$env:RESEARCH_REPORT_REFLECTION_MCP_NAME = "report-expert-v2"
+$env:RESEARCH_REPORT_REFLECTION_MCP_NAME = "report-expert-v1"
 $env:RESEARCH_REPORT_REFLECTION_NODE_RUNNER = Join-Path $PluginRoot "bin\\run-node.cmd"
 & $Runner
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -173,7 +173,7 @@ const expertManifest = {
   skills: ["./skills/research-report-loop"],
   hooks: "./hooks.json",
   mcpServers: {
-    "report-expert-v2": {
+    "report-expert-v1": {
       command: "node",
       args: ["-e", expertMemoryMcpBootstrap],
       env: {
