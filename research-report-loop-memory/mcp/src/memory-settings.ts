@@ -29,9 +29,9 @@ export function readMemorySettings(dataDir = resolveMemoryDataDir()): MemorySett
       };
     }
   } catch {
-    // Missing or invalid settings fail closed: Memory is opt-in.
+    // Missing or invalid settings use the product default; an explicit false is preserved above.
   }
-  return { schemaVersion: 1, memoryEnabled: false };
+  return { schemaVersion: 1, memoryEnabled: true };
 }
 
 export function isMemoryEnabled(dataDir = resolveMemoryDataDir()): boolean {

@@ -7,12 +7,12 @@ import { ReportLoopLauncher } from "./report-loop-launcher.ts";
 import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
 
 const server = new McpServer(
-  { name: "report-memory-v2", version: "1.0.0-mvp.46" },
+  { name: "report-memory-v2", version: "1.0.0-mvp.47" },
   {
     capabilities: { logging: {} },
     instructions: [
       "report-memory-v2：research-report 专用写作记忆服务。",
-      "Memory 默认关闭；只有用户明确要求时，主 Agent 才调用 writing_memory_settings 开启或关闭。关闭时 Report Loop 只使用 Base Rubrics，已有 Memory 保留。",
+      "Memory 默认启用；用户明确要求时，主 Agent 可调用 writing_memory_settings 查询、关闭或重新开启。关闭时 Report Loop 只使用 Base Rubrics，已有 Memory 保留。",
       "实时 Recall/Capture/Forget 由 research-report-memory-curator WB Sub-agent 调用；后台 consolidation 由 research-report-memory-reflection WB Sub-agent 调用。主写作 Agent 只有在 Hook 授权后才能使用 Recover 暂存待复核记忆。",
       "L0 Episode 和 L1 Atom 使用 TencentDB MemoryCore；L2B 是独立的 Git-backed Memory Rubrics，不改写 Base Rubrics。",
       "Scope 仅使用 core/audience/project；冲突优先级为本轮要求 > project > audience > core > research-report skill。",
@@ -49,7 +49,7 @@ server.registerTool(
   "writing_memory_settings",
   {
     title: "管理报告写作记忆开关",
-    description: "主 Agent 仅在用户明确要求时查询、开启或关闭报告写作记忆。默认关闭；关闭不会删除已有记忆。",
+    description: "主 Agent 仅在用户明确要求时查询、开启或关闭报告写作记忆。默认启用；关闭不会删除已有记忆。",
     inputSchema: {
       action: z.enum(["status", "enable", "disable"]),
     },

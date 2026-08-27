@@ -1,6 +1,6 @@
 ---
 name: research-report-loop
-description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究报告、复盘报告或高管汇报，并提供默认关闭、由用户明确启用的长期写作记忆；启用后才从用户反馈中学习写作要求并用于后续评测。当用户要求根据访谈、问卷、PDF、Word、Excel、CSV、structured_data 或公开信息生成研究报告、调研洞察、战略分析或管理层汇报，或要求开启、关闭报告记忆时使用。
+description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究报告、复盘报告或高管汇报，并提供默认启用、可由用户明确关闭的长期写作记忆；从用户反馈中学习写作要求并用于后续评测。当用户要求根据访谈、问卷、PDF、Word、Excel、CSV、structured_data 或公开信息生成研究报告、调研洞察、战略分析或管理层汇报，或要求开启、关闭报告记忆时使用。
 ---
 
 # 调研洞察汇报报告生成 · Report Loop
@@ -12,7 +12,7 @@ description: 使用宿主 Agent 撰写并自动迭代调研报告、战略研究
 本 Skill 包含两套配套机制：
 
 - **Report Loop**：宿主 Agent 完成初稿后，Python Runner 使用冻结的 Rubrics 调度隔离 Judge 和持久 Rewriter，最终交付历史最佳版本。
-- **Report Memory**：可选的长期写作记忆，默认关闭。只有用户明确要求开启时，主 Agent 才调用 Memory MCP 的 `writing_memory_settings(action=enable)`；开启后，用户反馈会在当前报告修改完成后交给 Memory Curator，形成的 Memory Rubrics 在后续 Report Loop 中参与 Judge。关闭时只使用 Base Rubrics，已有记忆保留但不读、不写、不整理。
+- **Report Memory**：默认启用的长期写作记忆。用户反馈会在当前报告修改完成后交给 Memory Curator，形成的 Memory Rubrics 在后续 Report Loop 中参与 Judge。用户明确要求关闭或重新开启时，主 Agent 调用 Memory MCP 的 `writing_memory_settings(action=disable|enable)`；关闭时只使用 Base Rubrics，已有记忆保留但不读、不写、不整理。
 
 ## 执行步骤
 

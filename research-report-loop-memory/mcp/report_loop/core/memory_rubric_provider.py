@@ -72,12 +72,10 @@ class MemoryRubricProvider:
         try:
             value = json.loads(settings_path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
-            return False
-        return (
-            isinstance(value, dict)
-            and value.get("schemaVersion") == 1
-            and value.get("memoryEnabled") is True
-        )
+            return True
+        if not isinstance(value, dict) or value.get("schemaVersion") != 1:
+            return True
+        return value.get("memoryEnabled") is not False
 
     def _read_document(self, head: str, relative_path: str) -> dict[str, Any] | None:
         completed = subprocess.run(

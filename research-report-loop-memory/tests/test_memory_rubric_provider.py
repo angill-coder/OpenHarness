@@ -103,8 +103,20 @@ class MemoryRubricProviderTests(unittest.TestCase):
         self.assertEqual(len(shared), 2)
         self.assertEqual(len({item["id"] for item in shared}), 2)
 
-    def test_default_disabled_hides_existing_memory_rubrics(self) -> None:
+    def test_default_enabled_loads_existing_memory_rubrics(self) -> None:
         (self.memory_dir / "settings.json").unlink()
+        snapshot = MemoryRubricProvider(self.memory_dir).load(
+            audience="总办M（总裁/最高管理层）",
+            project="DS 用户时长",
+        )
+        self.assertEqual(snapshot["status"], "loaded")
+        self.assertGreater(len(snapshot["items"]), 0)
+
+    def test_explicit_disable_hides_existing_memory_rubrics(self) -> None:
+        (self.memory_dir / "settings.json").write_text(
+            json.dumps({"schemaVersion": 1, "memoryEnabled": False}),
+            encoding="utf-8",
+        )
         snapshot = MemoryRubricProvider(self.memory_dir).load(
             audience="总办M（总裁/最高管理层）",
             project="DS 用户时长",

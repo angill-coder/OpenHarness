@@ -181,11 +181,36 @@ test("report context corrections trigger Curator without forcing a rewrite", (t)
   assert.match(correction.systemMessage, /research-report-memory-curator/u);
 });
 
-test("memory capture stays inactive by default", (t) => {
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-disabled-"));
+test("memory capture is active by default", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-default-enabled-"));
   t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
-  const session_id = "capture-disabled";
+  const session_id = "capture-default-enabled";
 
+  invoke("post-tool", {
+    session_id,
+    tool_name: "Skill",
+    tool_input: { skill: "research-report-loop" },
+    tool_response: { status: "ok" },
+  }, stateDir);
+  const feedback = invoke("prompt", {
+    session_id,
+    prompt: "以后所有正式报告的摘要都控制在两到三行。",
+  }, stateDir);
+
+  assert.match(feedback.systemMessage, /research-report-memory-curator/u);
+  assert.equal(invoke("stop", { session_id }, stateDir).hookSpecificOutput.permissionDecision, "deny");
+});
+
+test("an explicit memory disable suppresses capture", (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "capture-hook-explicit-disabled-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  const dataDir = path.join(stateDir, "memory");
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dataDir, "settings.json"),
+    JSON.stringify({ schemaVersion: 1, memoryEnabled: false }),
+  );
+  const session_id = "capture-explicit-disabled";
   invoke("post-tool", {
     session_id,
     tool_name: "Skill",

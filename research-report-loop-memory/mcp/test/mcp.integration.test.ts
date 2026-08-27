@@ -62,7 +62,11 @@ test("V2 keeps ordinary feedback in L0/L1 and exposes only explicit L2B rubrics"
     const defaultStatus = payload(await client.callTool({
       name: "writing_memory_settings", arguments: { action: "status" },
     }));
-    assert.equal(defaultStatus.memoryEnabled, false);
+    assert.equal(defaultStatus.memoryEnabled, true);
+    const disabled = payload(await client.callTool({
+      name: "writing_memory_settings", arguments: { action: "disable" },
+    }));
+    assert.equal(disabled.memoryEnabled, false);
     const disabledRecall = payload(await client.callTool({
       name: "writing_memory_recall",
       arguments: { task: "用户研究报告", purpose: "writing" },

@@ -6,7 +6,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { reflectionAutoEnablePlan } from "../src/reflection-auto-enable.ts";
 
-test("Reflection is installed only after memory is enabled for a packaged plugin", () => {
+test("Reflection is installed by default and respects an explicit memory disable", () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "reflection-auto-enable-"));
   const pluginRoot = path.join(temporary, "plugin");
   const dataDirectory = path.join(temporary, "memory");
@@ -16,24 +16,25 @@ test("Reflection is installed only after memory is enabled for a packaged plugin
   const moduleUrl = pathToFileURL(path.join(pluginRoot, "dist/memory-server.mjs")).href;
 
   try {
+    const defaultPlan = reflectionAutoEnablePlan(moduleUrl, {
+      RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDirectory,
+    }, "darwin");
+    assert.equal(defaultPlan.action, "install");
+
+    fs.mkdirSync(dataDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataDirectory, "settings.json"),
+      JSON.stringify({ schemaVersion: 1, memoryEnabled: false }),
+    );
     const disabledPlan = reflectionAutoEnablePlan(moduleUrl, {
       RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDirectory,
     }, "darwin");
     assert.deepEqual(disabledPlan, { action: "skip", reason: "memory_disabled" });
 
-    fs.mkdirSync(dataDirectory, { recursive: true });
     fs.writeFileSync(
       path.join(dataDirectory, "settings.json"),
       JSON.stringify({ schemaVersion: 1, memoryEnabled: true }),
     );
-    const plan = reflectionAutoEnablePlan(moduleUrl, {
-      RESEARCH_REPORT_MEMORY_V2_0821_DIR: dataDirectory,
-    }, "darwin");
-    assert.equal(plan.action, "install");
-    if (plan.action === "install") {
-      assert.equal(plan.command, "/bin/sh");
-      assert.equal(plan.dataDirectory, dataDirectory);
-    }
 
     const sourcePlan = reflectionAutoEnablePlan(
       pathToFileURL(path.join(pluginRoot, "mcp/src/server.ts")).href,
@@ -46,7 +47,7 @@ test("Reflection is installed only after memory is enabled for a packaged plugin
   }
 });
 
-test("A persisted user opt-out prevents Reflection from being re-enabled", () => {
+test("A persisted Reflection opt-out prevents Reflection from being re-enabled", () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "reflection-auto-disable-"));
   const pluginRoot = path.join(temporary, "plugin");
   const dataDirectory = path.join(temporary, "memory");

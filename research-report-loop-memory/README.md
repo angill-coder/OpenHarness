@@ -67,7 +67,7 @@ node scripts/migrate-rubric-scope-paths.mjs
 node scripts/migrate-rubric-scope-paths.mjs --apply
 ```
 
-Report Memory 默认关闭。用户明确要求主 Agent 开启记忆后，Memory MCP 才会读写长期记忆，并调用 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1` 注册每天 16:30 的 Reflection 任务。关闭 Memory 不会删除已有数据；已有定时任务即使仍被系统唤起，也会立即退出，不调用模型。
+Report Memory 默认启用。Memory MCP 会读写长期记忆，并调用 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1` 注册每天 16:30 的 Reflection 任务。用户可明确要求主 Agent 关闭；关闭 Memory 不会删除已有数据，已有定时任务即使仍被系统唤起，也会立即退出，不调用模型。
 
 ## Windows x64 安装包
 

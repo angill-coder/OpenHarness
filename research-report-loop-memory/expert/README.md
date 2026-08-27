@@ -1,6 +1,6 @@
 # 报告专家V1
 
-面向 WorkBuddy 的研究报告写作 Expert。用户提交访谈、问卷、数据或文档后，Expert 会按 `research-report-loop` Skill 完成素材解析、报告写作、自动评测和迭代改写。长期写作记忆默认关闭；用户明确要求开启后，才会从后续反馈中沉淀 Memory Rubrics。
+面向 WorkBuddy 的研究报告写作 Expert。用户提交访谈、问卷、数据或文档后，Expert 会按 `research-report-loop` Skill 完成素材解析、报告写作、自动评测和迭代改写。长期写作记忆默认启用，并从用户后续反馈中沉淀 Memory Rubrics；用户可明确要求关闭。
 
 ## 内置能力
 

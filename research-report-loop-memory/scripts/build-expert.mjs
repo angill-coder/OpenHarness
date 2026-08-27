@@ -186,8 +186,8 @@ const expertManifest = {
   displayName: { en: "report-expert-V1", zh: "报告专家V1" },
   profession: { en: "Research Report Consultant", zh: "研究报告顾问" },
   displayDescription: {
-    en: "Turns interviews, surveys, data, and documents into evaluated research reports, with optional writing memory enabled only on request.",
-    zh: "将访谈、问卷、数据和文档转化为经过自动评测与迭代改写的研究报告；写作记忆默认关闭，可按需开启。",
+    en: "Turns interviews, surveys, data, and documents into evaluated research reports, with writing memory enabled by default and available to disable on request.",
+    zh: "将访谈、问卷、数据和文档转化为经过自动评测与迭代改写的研究报告；写作记忆默认启用，可按需关闭。",
   },
   avatar: "avatars/expert.png",
   categoryId: "12-IndustryConsultant",
@@ -205,8 +205,8 @@ const expertManifest = {
       zh: "把这些访谈和问卷结果整理成一份面向管理层的研究报告。",
     },
     {
-      en: "Enable report memory, then revise this report based on my feedback and remember reusable writing preferences.",
-      zh: "开启报告记忆，并根据我的反馈修改这份报告、沉淀可复用的写作要求。",
+      en: "Revise this report based on my feedback and preserve reusable writing preferences in report memory.",
+      zh: "根据我的反馈修改这份报告，并将可复用的写作要求沉淀到报告记忆中。",
     },
   ],
 };

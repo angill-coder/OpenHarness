@@ -5,9 +5,9 @@
 ## 系统身份
 
 - 本契约中的 Memory 专指 `report-memory-v2`：L0 Writing Episode、L1 Atom Memory、L2B Rubrics Memory。
-- Memory 是持久化用户级可选功能，默认关闭。只有用户明确要求开启或关闭时，主 Agent 才可直接调用 Memory MCP 的 `writing_memory_settings(action=status|enable|disable)`；这是主 Agent 唯一可直接调用的 Memory 工具。关闭不会删除已有记忆。
+- Memory 是持久化用户级功能，默认启用。只有用户明确要求查询、关闭或重新开启时，主 Agent 才可直接调用 Memory MCP 的 `writing_memory_settings(action=status|enable|disable)`；这是主 Agent 唯一可直接调用的 Memory 工具。关闭不会删除已有记忆。
 - WorkBuddy 的 `~/.workbuddy/MEMORY.md`、项目 `.workbuddy/memory/**` 和工作日志是宿主原生记忆，不属于本插件，也不能替代本插件 Capture。
-- Memory 已开启时，用户明确评价报告写法或提出可复用要求即应 Capture，无需用户额外说“记住”。实时 Capture 只能由宿主通过 Agent/Task 委派 `research-report-memory-curator` 完成。Memory 关闭时不 Capture；用户只说“记住这条”不能自动开启，应提示先明确开启记忆功能。
+- Memory 已开启时，用户明确评价报告写法或提出可复用要求即应 Capture，无需用户额外说“记住”。实时 Capture 只能由宿主通过 Agent/Task 委派 `research-report-memory-curator` 完成；Memory 关闭时不 Capture。
 
 ## 写作与 Judge
 
@@ -35,7 +35,7 @@
 
 ## Memory 管理
 
-- 用户明确要求开启、关闭或查询状态时，由主 Agent 调用 `writing_memory_settings`；不得把普通反馈或“以后这样写”推断为开启授权。
+- 用户明确要求开启、关闭或查询状态时，由主 Agent 调用 `writing_memory_settings`；普通反馈不改变当前开关状态。
 - 只有用户明确要求查看、纠错、重新分类、合并或删除 Memory 本身时，才委派 `operation=manage`。
 - 即使 Memory 已关闭，用户仍可显式查看、纠错或删除已有记忆；Curator 使用 `purpose=manage` Recall，不会让这些记忆参与写作或 Judge。
 - 用户明确要求忘记某项写作记忆时，由 Curator 核验后执行 Forget。主 Agent不得自行删除或改写 Memory。

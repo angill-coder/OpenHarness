@@ -5,17 +5,17 @@ import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
 
-test("integrated Skill keeps memory opt-in and delegates capture only when enabled", () => {
+test("integrated Skill enables memory by default and delegates capture unless disabled", () => {
   const skill = fs.readFileSync(path.join(root, "skills/research-report-loop/SKILL.md"), "utf8");
   const orchestration = fs.readFileSync(
     path.join(root, "skills/research-report-loop/references/memory-orchestration.md"),
     "utf8",
   );
-  assert.match(skill, /长期写作记忆，默认关闭/u);
-  assert.match(skill, /writing_memory_settings\(action=enable\)/u);
+  assert.match(skill, /默认启用的长期写作记忆/u);
+  assert.match(skill, /writing_memory_settings\(action=disable\|enable\)/u);
   assert.match(skill, /Memory 已开启时[\s\S]*operation=capture/u);
   assert.match(skill, /写作前不要 Recall Memory/u);
-  assert.match(orchestration, /默认关闭/u);
+  assert.match(orchestration, /默认启用/u);
   assert.match(orchestration, /writing_memory_settings\(action=status\|enable\|disable\)/u);
   assert.match(orchestration, /关闭时.*Base Rubrics/u);
   assert.match(orchestration, /operation=capture/u);
