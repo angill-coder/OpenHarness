@@ -197,7 +197,7 @@ function reportLoopArtifactPaths(jobPath, jobPayload) {
     .update(JSON.stringify(jobPayload))
     .digest("hex")
     .slice(0, 12);
-  const prefix = `${jobPath}.report-loop.${digest}`;
+  const prefix = path.join(path.dirname(jobPath), `.report-loop.${digest}`);
   return {
     digest,
     lockPath: `${prefix}.lock`,
