@@ -95,7 +95,7 @@ test("release builder emits platform-native Memory MCP and Hook configurations",
   assert.match(builder, /command: "sh"/u);
   assert.match(builder, /run-node\.sh/u);
   assert.match(builder, /capture-checkpoint\.mjs/u);
-  assert.match(builder, /deepseek-v4-pro-ioa/u);
+  assert.match(builder, /gpt-5\.6-sol/u);
   assert.match(builder, /reflection-current\.ps1/u);
   assert.match(builder, /defaultJudgeProvider: "workbuddy"/u);
   assert.match(builder, /judgeDefaults/u);

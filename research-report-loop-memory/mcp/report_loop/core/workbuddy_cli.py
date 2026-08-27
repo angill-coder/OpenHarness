@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_MODEL = "deepseek-v4-pro-ioa"
+DEFAULT_MODEL = "gpt-5.6-sol"
 DEFAULT_EFFORT = "medium"
 MAC_CLI_SUFFIX = Path("Contents/Resources/app.asar.unpacked/cli/bin/codebuddy")
 

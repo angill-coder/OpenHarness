@@ -7,7 +7,7 @@
 1. `research-report-loop` Skill 确认需求并由宿主 Agent 写初稿。
 2. Memory Curator 将稳定反馈维护为 `core / audience / project` 下的独立 L2B Memory Rubrics，不修改或预先映射 Base Rubrics。
 3. 宿主写入 Job Schema v2，插件 PostToolUse Hook 自动在 Agent 沙箱外启动 Python Runner；Runner 读取 Base 与全部 L2B 候选，由 Resolution Judge 按当前任务决定 `additional / interpret / ignore`，再冻结本轮 Rubric。该链路不依赖 Report Loop 工具是否被当前会话索引。
-4. Runner 默认并发六个隔离 Judge，不创建第七维。Judge Provider 默认是 WorkBuddy `deepseek-v4-pro-ioa / medium`，也可选 Codex `gpt-5.6-sol / medium`；调用失败、空响应或 Judge JSON 不合规时，自动切换到 WorkBuddy App 当前主模型。
+4. Runner 默认并发六个隔离 Judge，不创建第七维。Judge Provider 默认是 WorkBuddy `gpt-5.6-sol / medium`，也可选 Codex `gpt-5.6-sol / medium`；调用失败、空响应或 Judge JSON 不合规时，自动切换到 WorkBuddy App 当前主模型。
 5. Runner 使用 App 主模型启动一个持久 Rewriter CLI，串行执行 Rewrite → Judge，直到 5 分、连续两轮未采纳或 60 分钟，并返回历史最佳报告。
 6. 用户明确反馈后，Skill 指引宿主先修改当前报告，再委派 `research-report-memory-curator` Capture；Judge 反馈不会进入 Memory。
 
@@ -25,7 +25,7 @@ Hook 不注册 `PreToolUse`，不负责写前 Recall或报告内容校验。它�
 ## Report Loop 模型与隔离
 
 - Writer 与 Rewriter 使用 WorkBuddy App 主对话中用户实际选择的模型；Hook 记录 session，Runner 从主会话 trace 自动读取 `requestModelId`，不再让 Agent 猜写模型 ID。
-- Judge Provider 默认 `workbuddy`，固定为 `deepseek-v4-pro-ioa / medium`；也可在 Job 中明确选择 `codex`，固定为 `gpt-5.6-sol / medium`。Judge Prompt 均通过 stdin 传入。只有调用失败、空响应或输出不满足 Judge JSON 合约时，才熔断到 WorkBuddy App 当前主模型，评分低不会触发回退。
+- Judge Provider 默认 `workbuddy`，固定为 `gpt-5.6-sol / medium`；也可在 Job 中明确选择 `codex`，固定为 `gpt-5.6-sol / medium`。Judge Prompt 均通过 stdin 传入。只有调用失败、空响应或输出不满足 Judge JSON 合约时，才熔断到 WorkBuddy App 当前主模型，评分低不会触发回退。
 - 三项开场输入必须附带用户消息原文；系统/App 注入的路径和附件清单只算候选素材，不能确认重点素材或替代用户回答。
 - 每个 Rubric Dimension 和每轮 Judge 使用独立 CLI 进程与上下文；query 和三项 intake 会传给每个 Judge。
 - Rewriter 与 Judge 隔离，整个 Run 只保留一个 Rewriter stream-json 进程；它只接收净化后的 revision brief，不接收 Judge 原始输出。

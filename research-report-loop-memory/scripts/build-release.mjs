@@ -15,7 +15,7 @@ const curatorPromptVariant = curatorPromptExplicit
   ? process.argv[curatorPromptArgIndex + 1]
   : "v1-gate-first";
 const judgeDefaults = {
-  workbuddy: { model: "deepseek-v4-pro-ioa", effort: "medium" },
+  workbuddy: { model: "gpt-5.6-sol", effort: "medium" },
   codex: { model: "gpt-5.6-sol", effort: "medium" },
 };
 const noArchive = process.argv.includes("--no-archive");
