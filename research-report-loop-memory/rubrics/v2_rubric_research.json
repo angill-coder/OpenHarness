@@ -1,7 +1,7 @@
 {
   "product": "research_insight",
-  "version": "v2.3",
-  "_note": "v2.3 精简 rubric：25 条 checks。在 v2.2 基础上合并高度重叠项，并将 benchmark 专用噪声检查移出主 rubric。",
+  "version": "v2.4",
+  "_note": "v2.4 在 v2.3 精简 rubric 基础上新增正文层级化组织检查，共 26 条 checks。",
   "dimensions": [
     {
       "name": "traceability",
@@ -355,8 +355,8 @@
         {
           "id": "E1",
           "label": "精炼与可扫读性",
-          "desc": "直接表达对决策有价值的结论，避免铺垫和无信息增量重复；相同主体、背景、限定条件、口径或单位在不影响理解时合并表达。每个段落或 bullet 原则上承载一个核心意思，并列、递进或多层信息应拆分呈现，不用 bullet 形式包装长段；摘要与正文可重申核心结论，但正文必须增加证据、分析或机制。若只有 Markdown 而无最终版式，以一段一意、明显并列信息是否拆分及是否出现 4 句以上分析长段作为替代判据。",
-          "effect": "多处无效重复、核心长段或明显可拆信息未分层时降档",
+          "desc": "直接表达对决策有价值的结论，避免铺垫和无信息增量重复；相同主体、背景、限定条件、口径或单位在不影响理解时合并表达。每个段落或 bullet 原则上承载一个核心意思；摘要与正文可重申核心结论，但正文必须增加证据、分析或机制。",
+          "effect": "多处无效重复、铺垫过长或一段一条混入多个独立意思时降档",
           "optimizer": {
             "pattern_id": "expr_concise_scannable",
             "directive_hint": "require_rigorous_wording",
@@ -417,6 +417,17 @@
             "pattern_id": "expr_final_readable",
             "directive_hint": "require_rigorous_wording",
             "priority": 64
+          }
+        },
+        {
+          "id": "E7",
+          "label": "正文层级化组织",
+          "desc": "正文按照“中心判断或短过渡 → 一级 bullet 分论点 → 必要的二级 bullet 证据、案例、解释或边界”组织。出现两项以上并列、递进或多层信息时应明确分层；同层 bullet 保持同一划分维度和信息粒度。过渡、综合判断和需要连续叙述的短案例可以使用短段落，但不得出现连续长段堆叠，也不得用缺少承接关系的扁平 bullet 代替内容组织。",
+          "effect": "关键发现中多处连续长段、应分层未分层、层级混乱或扁平 bullet 堆砌时降档；偶发短过渡段或短叙事不扣分",
+          "optimizer": {
+            "pattern_id": "expr_hierarchical_body",
+            "directive_hint": "use_hierarchical_bullets",
+            "priority": 65
           }
         }
       ]

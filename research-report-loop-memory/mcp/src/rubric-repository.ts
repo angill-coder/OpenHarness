@@ -120,7 +120,7 @@ export class RubricRepository {
       version: "v0",
       versionNumber: 0,
       parentVersion: null,
-      baseRubricVersion: "v2.3",
+      baseRubricVersion: "v2.4",
       updatedAt: new Date().toISOString(),
     } satisfies RubricSetManifest, null, 2)}\n`);
     await fs.mkdir(path.join(this.root, "views"), { recursive: true, mode: 0o700 });
@@ -339,7 +339,7 @@ export class RubricRepository {
       version: "v0",
       versionNumber: 0,
       parentVersion: null,
-      baseRubricVersion: "v2.3",
+      baseRubricVersion: "v2.4",
       updatedAt: new Date().toISOString(),
     };
     await this.atomicWrite(path.join(this.root, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
