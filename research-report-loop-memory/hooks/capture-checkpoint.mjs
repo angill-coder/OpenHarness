@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isMemoryEnabled, resolveMemoryDataDir } from "../mcp/src/memory-settings.ts";
 import { classifyWritingFeedback } from "../mcp/src/relevance.ts";
 import { ReportLoopLauncher } from "../mcp/src/report-loop-launcher.ts";
 
@@ -26,6 +27,7 @@ const MEMORY_MANAGEMENT_PATTERN =
 const NEW_REPORT_PATTERN = /另一份|再写|重新写|新(?:的)?报告|换.{0,8}(?:报告|汇报|主题)/iu;
 const CANCEL_REPORT_PATTERN = /(?:不写了|不用写了|取消(?:这次|本次)?(?:报告|任务)?|先暂停|停止(?:写作|任务)?|算了)/iu;
 const WRITE_TOOL_PATTERN = /^(?:write|edit|create_file)$/iu;
+const TASK_OUTPUT_TOOL_PATTERN = /^(?:taskoutput|task_output)$/iu;
 const REPORT_LOOP_SIDECAR_SUFFIX = ".session.json";
 const REPORT_LOOP_LOCK_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const REPORT_LOOP_WAIT_TIMEOUT_MS = 65 * 60 * 1000;
@@ -37,6 +39,9 @@ function emptyState(sessionId) {
     sessionId,
     active: false,
     reportProduced: false,
+    loopPending: false,
+    loopResultPath: "",
+    loopStatusPath: "",
     capturePending: false,
     pendingFeedback: "",
     pendingKind: "writing",
@@ -108,6 +113,45 @@ function clearCapture(state) {
   state.capturePending = false;
   state.pendingFeedback = "";
   state.pendingKind = "writing";
+}
+
+function clearLoop(state) {
+  state.loopPending = false;
+  state.loopResultPath = "";
+  state.loopStatusPath = "";
+}
+
+function reportLoopTerminalPayload(value) {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = reportLoopTerminalPayload(item);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+  if (typeof value === "object") {
+    if (typeof value.finalArtifactPath === "string" && value.finalArtifactPath.trim()) return value;
+    if (value.status === "error" && (value.reason || value.detail)) return value;
+    for (const key of ["structuredContent", "result", "text", "content", "output", "toolResult"]) {
+      if (!(key in value)) continue;
+      const nested = reportLoopTerminalPayload(value[key]);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try {
+    return reportLoopTerminalPayload(JSON.parse(value));
+  } catch {
+    const match = value.match(/\{[\s\S]*\}/u);
+    if (!match) return undefined;
+    try {
+      return reportLoopTerminalPayload(JSON.parse(match[0]));
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 function detectSkillActivation(toolName, toolInput) {
@@ -375,9 +419,11 @@ async function onPrompt(input) {
   const longTermPreference = classified.relevant && LONG_TERM_PREFERENCE_PATTERN.test(prompt);
   const reportContext = state.active && REPORT_CONTEXT_PATTERN.test(prompt);
   const memoryManagement = MEMORY_MANAGEMENT_PATTERN.test(prompt) && !revisionFeedback;
+  const memoryEnabled = isMemoryEnabled(resolveMemoryDataDir());
 
   if (reportTask) state.active = true;
-  if (!reportTask && !memoryManagement && (classified.relevant || reportContext)
+  if (!memoryEnabled) clearCapture(state);
+  if (memoryEnabled && !reportTask && !memoryManagement && (classified.relevant || reportContext)
     && (state.reportProduced || revisionFeedback || reportContext || (state.active && longTermPreference))) {
     state.active = true;
     state.capturePending = true;
@@ -415,7 +461,10 @@ async function onPostTool(input) {
     : undefined;
   if (loopLaunch) {
     state.active = true;
-    state.reportProduced = true;
+    state.reportProduced = false;
+    state.loopPending = true;
+    state.loopResultPath = loopLaunch.resultPath;
+    state.loopStatusPath = loopLaunch.statusPath;
     message = [
       loopLaunch.state === "completed"
         ? "Report Loop 已有可用结果。"
@@ -426,6 +475,18 @@ async function onPostTool(input) {
       "收到 <task-notification> 后调用 TaskOutput(task_id) 读取完整结果；不要自行轮询文件。",
       "不要搜索或调用 report_loop_run，不要检查 MCP，也不要自行运行或测试 Runner。",
     ].join(" ");
+  }
+
+  if (state.loopPending && TASK_OUTPUT_TOOL_PATTERN.test(actualToolName)) {
+    const payload = reportLoopTerminalPayload(result);
+    if (payload) {
+      clearLoop(state);
+      state.active = true;
+      state.reportProduced = true;
+      message = payload.status === "error"
+        ? "Report Loop 已返回失败结果。停止等待并如实说明原因，交付现有 V1 或历史最佳版本；不要展示原始 JSON。"
+        : "Report Loop 已完成。交付 finalArtifactPath 和 versionsDirectory，并简要说明 judgedVersions、rewriteRounds、bestVersion 与 bestScore；不要展示原始 JSON。";
+    }
   }
 
   if (successful && detectSkillActivation(toolName, toolInput)) state.active = true;
@@ -457,6 +518,41 @@ async function onPostTool(input) {
 
 async function onStop(input) {
   const state = await loadState(requireSessionId(input));
+  if (state.loopPending) {
+    const result = state.loopResultPath ? await readJson(state.loopResultPath) : undefined;
+    const waitCommand = state.loopResultPath && state.loopStatusPath
+      ? reportLoopWaitCommand(state.loopResultPath, state.loopStatusPath)
+      : "";
+    const reason = result
+      ? [
+        "Report Loop 结果已经生成，但尚未通过 TaskOutput 读取和交付。",
+        waitCommand ? `如原 task_id 不可用，用 Bash(run_in_background=true) 重新执行等待命令：${waitCommand}。` : "",
+        "随后调用 TaskOutput，读取结果并交付最终报告；不要把原始 JSON 当作交付物。",
+      ].filter(Boolean).join(" ")
+      : [
+        "Report Loop 仍在后台运行，本轮不能提前结束。",
+        waitCommand ? `继续等待现有 task_id；如 task_id 丢失，用 Bash(run_in_background=true) 执行：${waitCommand}。` : "",
+        "收到 <task-notification> 后调用 TaskOutput 读取结果，再交付最终报告。",
+      ].filter(Boolean).join(" ");
+    printJson({
+      hookSpecificOutput: {
+        hookEventName: "Stop",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+      reason,
+      systemMessage: "Report Loop 尚未完成结果读取，已阻止提前结束。",
+    });
+    return;
+  }
+  if (!isMemoryEnabled(resolveMemoryDataDir())) {
+    if (state.capturePending) {
+      clearCapture(state);
+      await saveState(state);
+    }
+    printJson({ hookSpecificOutput: { hookEventName: "Stop", permissionDecision: "allow" } });
+    return;
+  }
   if (!state.capturePending) {
     printJson({ hookSpecificOutput: { hookEventName: "Stop", permissionDecision: "allow" } });
     return;

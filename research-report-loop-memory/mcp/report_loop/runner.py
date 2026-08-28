@@ -130,7 +130,40 @@ def _deliver(result: dict[str, Any], output_value: str) -> dict[str, Any]:
         temporary = output.with_name(output.name + ".report-loop.tmp")
         shutil.copyfile(source, temporary)
         os.replace(temporary, output)
-    return {**result, "finalArtifactPath": str(output)}
+
+    version_sources = (
+        sorted(
+            (
+                item
+                for item in source.parent.glob("v*.md")
+                if item.stem[1:].isdigit()
+            ),
+            key=lambda item: int(item.stem[1:]),
+        )
+        if source.parent.name == "reports"
+        else [source]
+    )
+    versions_directory = output.with_name(f"{output.stem}-versions")
+    versions_directory.mkdir(parents=True, exist_ok=True)
+    for stale in versions_directory.glob("v*.md"):
+        if stale.stem[1:].isdigit():
+            stale.unlink()
+    version_artifacts: list[str] = []
+    for index, version_source in enumerate(version_sources, start=1):
+        version_name = version_source.name if version_source.stem[1:].isdigit() else f"v{index}.md"
+        version_output = versions_directory / version_name
+        temporary = version_output.with_name(version_output.name + ".report-loop.tmp")
+        shutil.copyfile(version_source, temporary)
+        os.replace(temporary, version_output)
+        version_artifacts.append(str(version_output))
+
+    return {
+        **result,
+        "finalArtifactPath": str(output),
+        "versionsDirectory": str(versions_directory),
+        "versionArtifacts": version_artifacts,
+        "rewriteRounds": max(0, len(version_artifacts) - 1),
+    }
 
 
 def run(

@@ -182,7 +182,7 @@ class ReportLoopRuntime:
         targetScore: float = 5.0,
         maxJudgedVersions: int | None = None,
         maxElapsedSeconds: int = 3600,
-        skillVersion: str = "research-report-loop/1.0.0-mvp.42",
+        skillVersion: str = "research-report-loop/1.0.0-mvp.47",
     ) -> dict[str, Any]:
         original_query = str(originalUserQuery or task or "").strip()
         if not original_query:

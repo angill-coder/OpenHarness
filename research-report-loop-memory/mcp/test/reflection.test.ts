@@ -21,6 +21,7 @@ function serverTransport(root: string) {
 
 test("Reflection reviews processed episodes once and accepts an unchanged checkpoint", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-reflection-"));
+  fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ schemaVersion: 1, memoryEnabled: true }));
   const root = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "reflection-test", version: "1.0.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({
@@ -100,6 +101,7 @@ test("Reflection reviews processed episodes once and accepts an unchanged checkp
 
 test("Reflection uses one compact Capture to merge L1 evidence and update L2B", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "research-report-memory-reflection-compact-"));
+  fs.writeFileSync(path.join(dataDir, "settings.json"), JSON.stringify({ schemaVersion: 1, memoryEnabled: true }));
   const root = path.resolve(import.meta.dirname, "../..");
   const client = new Client({ name: "reflection-compact-test", version: "1.0.0" }, { capabilities: {} });
   const transport = new StdioClientTransport({

@@ -23,6 +23,11 @@ class MemoryRubricProviderTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.memory_dir = self.root / "memory"
+        (self.memory_dir / "settings.json").parent.mkdir(parents=True, exist_ok=True)
+        (self.memory_dir / "settings.json").write_text(
+            json.dumps({"schemaVersion": 1, "memoryEnabled": True}),
+            encoding="utf-8",
+        )
         self.repository = self.memory_dir / "l2b-rubrics" / "personal" / "default"
         self.repository.mkdir(parents=True)
         subprocess.run(["git", "init", "-q"], cwd=self.repository, check=True)
@@ -97,6 +102,28 @@ class MemoryRubricProviderTests(unittest.TestCase):
         shared = [item for item in items if item.get("sourceMemoryId") == "MR-SHARED"]
         self.assertEqual(len(shared), 2)
         self.assertEqual(len({item["id"] for item in shared}), 2)
+
+    def test_default_enabled_loads_existing_memory_rubrics(self) -> None:
+        (self.memory_dir / "settings.json").unlink()
+        snapshot = MemoryRubricProvider(self.memory_dir).load(
+            audience="总办M（总裁/最高管理层）",
+            project="DS 用户时长",
+        )
+        self.assertEqual(snapshot["status"], "loaded")
+        self.assertGreater(len(snapshot["items"]), 0)
+
+    def test_explicit_disable_hides_existing_memory_rubrics(self) -> None:
+        (self.memory_dir / "settings.json").write_text(
+            json.dumps({"schemaVersion": 1, "memoryEnabled": False}),
+            encoding="utf-8",
+        )
+        snapshot = MemoryRubricProvider(self.memory_dir).load(
+            audience="总办M（总裁/最高管理层）",
+            project="DS 用户时长",
+        )
+        self.assertEqual(snapshot["status"], "disabled")
+        self.assertEqual(snapshot["items"], [])
+        self.assertEqual(snapshot["documents"], [])
 
 
 class RunnerMemoryProviderTests(unittest.TestCase):
@@ -181,6 +208,58 @@ class RunnerMemoryProviderTests(unittest.TestCase):
             self.assertEqual(result["judgedVersions"], 0)
             self.assertEqual(Path(result["finalArtifactPath"]), output.resolve())
             self.assertEqual(output.read_text(encoding="utf-8"), "# 可交付的 V1\n")
+            versions = Path(result["versionsDirectory"])
+            self.assertEqual(result["rewriteRounds"], 0)
+            self.assertEqual([Path(item).name for item in result["versionArtifacts"]], ["v1.md"])
+            self.assertEqual((versions / "v1.md").read_text(encoding="utf-8"), "# 可交付的 V1\n")
+
+    def test_runner_exports_all_judged_report_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            reports = root / "internal-run" / "reports"
+            reports.mkdir(parents=True)
+            (reports / "v1.md").write_text("# V1\n", encoding="utf-8")
+            (reports / "v2.md").write_text("# V2\n", encoding="utf-8")
+            output = root / "report-final.md"
+
+            class FakeRuntime:
+                def __init__(self, **kwargs):
+                    pass
+
+                def start(self, **kwargs):
+                    return {"runId": "run-versions"}
+
+                def deadline_at(self, run_id):
+                    return 9_999_999_999.0
+
+                def submit(self, **kwargs):
+                    return {
+                        "status": "completed",
+                        "nextAction": "deliver",
+                        "bestArtifactPath": str(reports / "v2.md"),
+                        "bestVersion": "v2",
+                        "bestScore": 5.0,
+                        "judgedVersions": 2,
+                    }
+
+            job = {
+                "originalUserQuery": "写报告",
+                "intakeContext": {},
+                "hostModel": {"modelId": "deepseek-v4-pro-ioa"},
+                "judgeProvider": "workbuddy",
+                "audience": "",
+                "project": "",
+                "v1ArtifactPath": str(reports / "v1.md"),
+                "outputPath": str(output),
+            }
+            result = run(job, runtime_factory=FakeRuntime)
+
+            self.assertEqual(output.read_text(encoding="utf-8"), "# V2\n")
+            self.assertEqual(result["rewriteRounds"], 1)
+            self.assertEqual([Path(item).name for item in result["versionArtifacts"]], ["v1.md", "v2.md"])
+            versions = Path(result["versionsDirectory"])
+            self.assertEqual((versions / "v1.md").read_text(encoding="utf-8"), "# V1\n")
+            self.assertEqual((versions / "v2.md").read_text(encoding="utf-8"), "# V2\n")
 
 
 if __name__ == "__main__":

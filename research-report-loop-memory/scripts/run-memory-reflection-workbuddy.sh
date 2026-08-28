@@ -9,6 +9,12 @@ DATA_DIR=${RESEARCH_REPORT_MEMORY_V2_0821_DIR:-$HOME/.research-report-memory-v2-
 NODE_BIN=${WORKBUDDY_NODE:-${CODEBUDDY_CODE_NODE_PATH:-${CODEBUDDY_NODE_BIN:-}}}
 MCP_NAME=${RESEARCH_REPORT_REFLECTION_MCP_NAME:-report-memory-v2}
 NODE_RUNNER=${RESEARCH_REPORT_REFLECTION_NODE_RUNNER:-$PLUGIN_ROOT/scripts/run-node.sh}
+SETTINGS_FILE="$DATA_DIR/settings.json"
+
+if [ ! -f "$SETTINGS_FILE" ] || ! grep -Eq '"memoryEnabled"[[:space:]]*:[[:space:]]*true' "$SETTINGS_FILE"; then
+  echo "Report Memory is disabled; Reflection skipped."
+  exit 0
+fi
 
 if [ -z "$NODE_BIN" ]; then
   old_ifs=$IFS

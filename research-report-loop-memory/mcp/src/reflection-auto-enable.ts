@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMemoryEnabled } from "./memory-settings.ts";
 
 type ReflectionPreference = { enabled?: boolean };
 
@@ -48,6 +49,9 @@ export function reflectionAutoEnablePlan(
       || path.join(os.homedir(), ".research-report-memory-v2-0821"),
   );
   const settingsPath = path.join(dataDirectory, "reflection", "schedule-settings.json");
+  if (!isMemoryEnabled(dataDirectory)) {
+    return { action: "skip" as const, reason: "memory_disabled" };
+  }
   const preference = readPreference(settingsPath);
   if (preference?.enabled === false) return { action: "skip" as const, reason: "disabled_by_user" };
   if (preference?.enabled === true) return { action: "skip" as const, reason: "already_enabled" };

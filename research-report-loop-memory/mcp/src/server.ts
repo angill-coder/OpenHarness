@@ -2,15 +2,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { autoEnableReflection } from "./reflection-auto-enable.ts";
+import { readMemorySettings, resolveMemoryDataDir, writeMemorySettings } from "./memory-settings.ts";
 import { ReportLoopLauncher } from "./report-loop-launcher.ts";
 import { WRITING_MEMORY_SCOPES, WritingMemoryRuntime } from "./runtime.ts";
 
 const server = new McpServer(
-  { name: "report-memory-v2", version: "1.0.0-mvp.42" },
+  { name: "report-memory-v2", version: "1.0.0-mvp.47" },
   {
     capabilities: { logging: {} },
     instructions: [
       "report-memory-v2：research-report 专用写作记忆服务。",
+      "Memory 默认启用；用户明确要求时，主 Agent 可调用 writing_memory_settings 查询、关闭或重新开启。关闭时 Report Loop 只使用 Base Rubrics，已有 Memory 保留。",
       "实时 Recall/Capture/Forget 由 research-report-memory-curator WB Sub-agent 调用；后台 consolidation 由 research-report-memory-reflection WB Sub-agent 调用。主写作 Agent 只有在 Hook 授权后才能使用 Recover 暂存待复核记忆。",
       "L0 Episode 和 L1 Atom 使用 TencentDB MemoryCore；L2B 是独立的 Git-backed Memory Rubrics，不改写 Base Rubrics。",
       "Scope 仅使用 core/audience/project；冲突优先级为本轮要求 > project > audience > core > research-report skill。",
@@ -44,6 +46,33 @@ server.registerTool(
 );
 
 server.registerTool(
+  "writing_memory_settings",
+  {
+    title: "管理报告写作记忆开关",
+    description: "主 Agent 仅在用户明确要求时查询、开启或关闭报告写作记忆。默认启用；关闭不会删除已有记忆。",
+    inputSchema: {
+      action: z.enum(["status", "enable", "disable"]),
+    },
+  },
+  async ({ action }) => {
+    const dataDir = resolveMemoryDataDir();
+    const settings = action === "status"
+      ? readMemorySettings(dataDir)
+      : writeMemorySettings(action === "enable", dataDir);
+    if (action === "enable") autoEnableReflection(import.meta.url);
+    return result({
+      status: "ok",
+      action,
+      memoryEnabled: settings.memoryEnabled,
+      existingMemoryPreserved: true,
+      instruction: settings.memoryEnabled
+        ? "后续写作反馈可由 Memory Curator Capture；后续 Report Loop 可使用 Memory Rubrics。"
+        : "停止自动 Recall、Capture、Memory Rubrics 和 Reflection；已有记忆保留，可显式管理或删除。",
+    });
+  },
+);
+
+server.registerTool(
   "writing_memory_recall",
   {
     title: "读取报告写作记忆",
@@ -55,7 +84,7 @@ server.registerTool(
       project: z.string().max(200).optional().describe("当前项目名或稳定项目标识"),
       includeL1: z.boolean().optional().default(false).describe("仅在 Memory Agent 需要原子证据时开启；写作 Recall 默认关闭"),
       limit: z.number().int().min(1).max(100).optional(),
-      purpose: z.enum(["writing", "judge", "review", "reflection"]).optional().default("writing"),
+      purpose: z.enum(["writing", "judge", "review", "reflection", "manage"]).optional().default("writing"),
     },
   },
   async (input) => result(await runtime.recall(input)),
@@ -204,6 +233,5 @@ const shutdown = async () => {
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
 
-await runtime.initialize();
 await server.connect(new StdioServerTransport());
 autoEnableReflection(import.meta.url);

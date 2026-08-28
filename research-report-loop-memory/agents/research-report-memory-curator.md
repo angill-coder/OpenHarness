@@ -123,7 +123,7 @@ Capture Payload 的结构固定如下；删除本轮不需要的可选项，不�
 
 ### `operation=manage`
 
-仅响应用户对 Memory 的明确查看、纠错、重分类、合并或删除请求。先 Recall 核验；修改优先用一次 Capture，明确删除才调用 Forget。
+仅响应用户对 Memory 的明确查看、纠错、重分类、合并或删除请求。先调用 `writing_memory_recall(purpose=manage, includeL1=true)` 核验；修改优先用一次 `mode=manage` Capture，明确删除才调用 Forget。即使自动 Memory 已关闭，显式管理仍可执行。
 
 ## 5. 自检
 

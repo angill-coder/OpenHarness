@@ -32,7 +32,8 @@ Hook 不注册 `PreToolUse`，不负责写前 Recall或报告内容校验。它�
 ## Hook、MCP 与 Runner 边界
 
 - 只维护一个 `report-memory-v2` MCP Server，负责 L0/L1/L2B；其中保留 `report_loop_run` 作为兼容入口，但正常写作链路不依赖当前对话暴露该工具。
-- Job 写入后，宿主 Hook 启动 `mcp/report_loop/runner.py`，并把状态与最终结果写在 Job 同目录。路径由插件根目录和 Job 动态解析，不写死用户名、安装目录或操作系统路径。
+- Job、状态和内部结果统一放在报告目录的 `.report-loop/` 中。宿主 Hook 启动 `mcp/report_loop/runner.py` 后会阻止会话提前结束，直至宿主读取完成或失败结果。路径由插件根目录和 Job 动态解析，不写死用户名、安装目录或操作系统路径。
+- Runner 对用户只交付最终报告和一个版本记录目录；评测 JSON、状态文件与工具日志不进入用户交付区。
 - Python Runner 仍是唯一循环入口，负责 Rubric 编译、Judge、Rewrite、版本采纳与停止；Hook 不复制任何 Loop 逻辑。
 - Agent 不直接运行 Python，也不需要申请访问 WorkBuddy 的认证或日志目录。
 
@@ -66,7 +67,7 @@ node scripts/migrate-rubric-scope-paths.mjs
 node scripts/migrate-rubric-scope-paths.mjs --apply
 ```
 
-安装包默认在 Memory MCP 首次启动时调用 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1`，注册每天 16:30 的 Reflection 任务；任务通过稳定启动器自动解析当前已安装的插件版本，只连接本插件的 Memory MCP，不启动 Report Loop Judge。需要关闭时运行对应的 `disable-reflection-*` 脚本；关闭状态会持久化，后续升级不会自动恢复。
+Report Memory 默认启用。Memory MCP 会读写长期记忆，并调用 `scripts/install-reflection-macos.sh` 或 `scripts/install-reflection-windows.ps1` 注册每天 16:30 的 Reflection 任务。用户可明确要求主 Agent 关闭；关闭 Memory 不会删除已有数据，已有定时任务即使仍被系统唤起，也会立即退出，不调用模型。
 
 ## Windows x64 安装包
 
@@ -78,7 +79,7 @@ Windows 包使用 `cmd.exe + run-node.cmd` 启动统一 MCP；宿主 Hook 使用
 scripts\run-node.cmd scripts\verify-mcp-contract.mjs
 ```
 
-Reflection 默认启用；如需重新启用，可执行：
+Memory 开启后会自动注册 Reflection；也可手动执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-reflection-windows.ps1
@@ -98,7 +99,7 @@ macOS 包使用 `sh + run-node.sh` 启动统一 MCP，宿主 Hook 通过 `run-py
 npm run build:release:macos
 ```
 
-Reflection 默认启用；需要关闭时执行：
+Memory 开启后会自动注册 Reflection；需要单独关闭 Reflection 时执行：
 
 ```bash
 sh scripts/disable-reflection-macos.sh

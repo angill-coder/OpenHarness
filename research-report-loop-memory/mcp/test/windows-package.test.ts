@@ -73,6 +73,8 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   assert.match(windowsReflection, /\$OutputEncoding = \$Utf8NoBom/u);
   assert.match(windowsReflection, /Get-Content -Raw -Encoding utf8/u);
   assert.match(windowsReflection, /Execute operation=reflection/u);
+  assert.match(windowsReflection, /settings\.json/u);
+  assert.match(windowsReflection, /memoryEnabled/u);
   assert.doesNotMatch(windowsReflection, /[^\x00-\x7F]/u);
   assert.doesNotMatch(windowsReflection, /"\/s"|\$CommandLine/u);
   assert.match(macInstaller, /reflection-current\.sh/u);
@@ -86,6 +88,8 @@ test("Reflection schedules resolve the currently installed plugin on both platfo
   assert.match(macReflection, /CODEBUDDY_CODE_PATH/u);
   assert.match(macReflection, /WORKBUDDY_EXTRA_PATHS/u);
   assert.match(macReflection, /\/Volumes\/\*\/Applications\/WorkBuddy\.app/u);
+  assert.match(macReflection, /settings\.json/u);
+  assert.match(macReflection, /memoryEnabled/u);
   assert.match(windowsInstaller, /schedule-settings\.json/u);
   assert.match(windowsDisable, /enabled = \$false/u);
   assert.match(macInstaller, /schedule-settings\.json/u);
