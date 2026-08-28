@@ -97,3 +97,22 @@ test("integrated manifests register only Memory MCP plus Curator and Reflection"
   assert.match(loop, /不要执行 ToolSearch/u);
   assert.match(loop, /不要调用 `report_loop_run`/u);
 });
+
+test("Writing Instruction and Base Rubric require hierarchical body organization", () => {
+  const writing = fs.readFileSync(
+    path.join(root, "skills/research-report-loop/references/writing-instructions.md"),
+    "utf8",
+  );
+  const rubric = JSON.parse(
+    fs.readFileSync(path.join(root, "rubrics/v2_rubric_research.json"), "utf8"),
+  );
+  const expression = rubric.dimensions.find((dimension: { name?: string }) => dimension.name === "expression");
+  const check = expression?.checks?.find((item: { id?: string }) => item.id === "E7");
+
+  assert.equal(rubric.version, "v2.4");
+  assert.match(writing, /中心判断或短过渡.*一级 bullet.*二级 bullet/su);
+  assert.match(writing, /连续长段堆叠.*扁平 bullet/su);
+  assert.equal(check?.label, "正文层级化组织");
+  assert.match(check?.desc ?? "", /中心判断或短过渡.*一级 bullet.*二级 bullet/su);
+  assert.match(check?.effect ?? "", /连续长段.*层级混乱.*扁平 bullet/su);
+});
