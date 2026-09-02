@@ -1,0 +1,41 @@
+{
+  "skill_name": "research-report-loop-v2",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "基于素材文件夹里的访谈和问卷，写一篇面向管理层的三页研究报告。",
+      "expected_output": "主 Agent 完成素材确认和 V0；Resolution 冻结标准；按动态维度 Judge 并交付历史最佳版本。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "把报告摘要改成两行，并且以后都不要写过程性语言。",
+      "expected_output": "先修改当前报告，再由 Memory Agent 保存 Episode，并自主判断是否形成 L1/L2B。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "以后评测这类报告时，单独检查是否给出了明确的管理决策选项。",
+      "expected_output": "Memory Agent 可提出新维度候选；Resolution 根据具体任务决定新增、合并或忽略。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "继续刚才中断的报告评测，不要重新开始。",
+      "expected_output": "主 Agent 读取 run-state 与冻结 Plan，从未完成阶段恢复，不重复 Resolution 或已完成 Judge。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Memory Rubric 的适用范围看不清时再核对来源，不要默认加载全部历史。",
+      "expected_output": "Resolution 首轮按需返回 inspectSourceFor；主 Agent 精确读取一次 L1 后完成最终冻结。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "候选版本在结构维度提高，但总分从 4.3 降到 4.2。",
+      "expected_output": "候选因 overall 下降被拒绝，历史最佳版本不变，并计入连续无改善。",
+      "files": []
+    }
+  ]
+}
