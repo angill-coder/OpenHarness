@@ -1,0 +1,72 @@
+{
+  "name": "report-agent-v2",
+  "version": "0.3.0",
+  "description": "WorkBuddy 原生研究报告 Expert：写作前先整理结构化论据，主 Agent 写 V0，子代理完成动态评测、改写与写作记忆。",
+  "author": {
+    "name": "Research Report Team"
+  },
+  "license": "MIT",
+  "keywords": [
+    "research-report",
+    "report-loop",
+    "judge",
+    "memory",
+    "workbuddy-native"
+  ],
+  "agents": [
+    "./agents/report-agent-v2.md",
+    "./agents/report-memory-agent-v2.md",
+    "./agents/report-resolution-judge-v2.md",
+    "./agents/report-dimension-judge-v2.md",
+    "./agents/report-rewriter-v2.md",
+    "./agents/report-evidence-agent-v2.md"
+  ],
+  "skills": [
+    "./skills/research-report-agent-v2",
+    "./skills/report-evidence-v2"
+  ],
+  "expertType": "agent",
+  "agentName": "report-agent-v2",
+  "displayName": {
+    "en": "Report Expert V2",
+    "zh": "报告专家V2"
+  },
+  "profession": {
+    "en": "Research Report Consultant",
+    "zh": "研究报告顾问"
+  },
+  "displayDescription": {
+    "en": "Writes a V0 report in the main conversation, then uses native WorkBuddy sub-agents for dynamic judging, rewriting, and writing memory.",
+    "zh": "由主 Agent 撰写 V0，再用 WorkBuddy 原生子代理完成动态评测、改写和写作记忆。"
+  },
+  "categoryId": "12-IndustryConsultant",
+  "defaultInitPrompt": {
+    "zh": "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页",
+    "en": "Based on the materials in the XX folder, write an X-page research report on “XX”."
+  },
+  "plugin": "report-agent-v2",
+  "tags": [
+    {
+      "en": "Research Report",
+      "zh": "研究报告"
+    },
+    {
+      "en": "Native Report Loop",
+      "zh": "原生评测循环"
+    },
+    {
+      "en": "Writing Memory",
+      "zh": "写作记忆"
+    }
+  ],
+  "quickPrompts": [
+    {
+      "zh": "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页",
+      "en": "Based on the materials in the XX folder, write an X-page research report on “XX”."
+    },
+    {
+      "zh": "根据我的反馈修改当前报告，并更新可复用的报告写作记忆。",
+      "en": "Revise the current report from my feedback and update reusable report-writing memory."
+    }
+  ]
+}
