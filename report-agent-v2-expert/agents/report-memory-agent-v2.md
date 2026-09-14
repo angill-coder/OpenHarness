@@ -8,7 +8,6 @@ model: inherit
 effort: medium
 maxTurns: 32
 tools: Read, Write, Edit, Glob, Grep
-memory: user
 ---
 
 # Report Memory Agent V2
@@ -27,16 +26,17 @@ L1 与 L2B 使用 `core / audience / project` 三选一 Scope：跨项目、受�
 
 ## 存储
 
-只使用宿主为本 Agent 注入的持久 Agent Memory 目录，不猜测或硬编码 `~/.workbuddy`、`~/.codebuddy` 等路径：
+只读写调用方传入的绝对路径 `memoryRoot`，默认指向用户主目录下可见的 `ReportAgentMemory/`，与宿主产品和插件安装目录无关。缺少绝对路径或目录无法访问时返回对应操作失败，不猜测路径、不改用宿主自带 Memory。
 
-- `MEMORY.md`：设置、当前 revision、精简索引和 active L2B；保持短小，使自动注入内容可直接使用。
-- `episodes/`：L0，按 Episode 单独保存。
-- `atoms/`：L1，按 Scope 保存并保留 sourceEpisodeIds。
-- `history/`：L2B 变更前的简洁快照与原因。
+- `MEMORY.md`：设置、当前 revision、精简索引和 active L2B；每次操作显式读取，不依赖自动注入。
+- `L0-episodes/`：L0，按 Episode 单独保存。
+- `L1-atoms/`：L1，按 Scope 保存并保留 sourceEpisodeIds。
 
-所有写入使用 Markdown。不要写系统提示、推理过程、工具日志或非写作偏好。
+所有写入使用 Markdown。只使用上述三项，不新建 history 或 MEMORY 历史副本；已有旧目录不自动删除。不要写系统提示、推理过程、工具日志或非写作偏好。
 
-`MEMORY.md` 中维护单调递增的 `revision`、Memory 开关、`lastReflectionAt` 和 active L2B 索引。任何有效修改都先保存来源和 history，最后才更新 revision；操作失败时不得提前推进 revision。每次操作开始都重新读取当前 revision，不能依赖调用方转述的旧内容。
+首次使用且目录不存在或为空时，创建 `MEMORY.md`（enabled=true、revision=0、lastReflectionAt 未设置、各索引为空）；其余目录按需创建。已有内容但缺少或无法读取 `MEMORY.md` 时，报告问题，不重新初始化或覆盖。用户可直接查看和修改这些文件；每次写入前重新核对相关文件内容，先理解并合并新增的人工修改，不按旧上下文整库回写。
+
+`MEMORY.md` 顶部明确写 `revision: N` 作为唯一版本号（初始为 0），并维护 Memory 开关、`lastReflectionAt`、索引和当前 active L2B。先保存来源与 Atom，最后将 MEMORY 内容及递增的 revision 一起写入并核验；持久化修改成功才推进版本，无文件变化不递增。已有 revision 继续递增，不重置；只有旧文件缺失版本号时才核验现状并登记基线。版本号用于识别当前状态，不提供历史回滚。每次操作开始重新读取当前 revision，不能依赖旧上下文。
 
 ## 判断原则
 
@@ -78,7 +78,7 @@ Memory 关闭或没有候选时仍返回成功，`candidates=[]`。
 
 ### `operation=inspect_sources`
 
-只响应 Resolution Judge 首轮的精确溯源请求。输入必须包含本轮 Resolve 返回的 `revision`、候选 ID 和待读取的 `sourceL1Ids`。重新读取当前 revision；若已变化，返回 `MEMORY_SOURCE_CONFLICT`，由主 Agent重新 Resolve，不混用快照。
+只响应 Resolution Judge 首轮的精确溯源请求。输入必须包含本轮 Resolve 返回的 `revision`、候选 ID 和待读取的 `sourceL1Ids`。重新读取当前 revision；若已变化，返回 `MEMORY_SOURCE_CONFLICT`，由主 Agent重新 Resolve，不混用版本。
 
 只返回请求 ID 对应的 L1 内容、Scope、sourceEpisodeIds，以及缺失 ID；不得顺带返回其他 Atom：
 
@@ -96,15 +96,15 @@ Memory 关闭或没有候选时仍返回成功，`candidates=[]`。
 {"marker":"MEMORY_CAPTURE_COMPLETED","captureId":"...","episodeId":"...","revision":"...","idempotent":false,"l1Changes":[],"l2bChanges":[]}
 ```
 
-写入顺序固定为：Episode → Atom/L2B 与 history → `MEMORY.md` 索引和新 revision。中途失败时保留已落下的 Episode 供下一次 Reflection 恢复，但返回 `MEMORY_CAPTURE_FAILED: <reason>`，不得假成功或重复创建 Episode。
+写入顺序固定为：Episode → Atom → `MEMORY.md` 中的当前 L2B、索引和新 revision。中途失败时保留已落下的 Episode 供下一次 Reflection 恢复，但返回 `MEMORY_CAPTURE_FAILED: <reason>`，不得假成功或重复创建 Episode。
 
 ### `operation=manage`
 
-仅响应用户明确要求查看、纠错、重分类、合并或删除报告写作记忆。用户要求忘记时，先核验具体目标和来源，再删除或失效对应项；主 Agent不得代为判断。修改前保留简洁 history，修改完成后推进 revision；返回 `MEMORY_MANAGE_COMPLETED`、新 revision 或明确失败。
+仅响应用户明确要求查看、纠错、重分类、合并或删除报告写作记忆。用户要求忘记时，先核验具体目标和来源，再删除或失效对应项；主 Agent不得代为判断。修改完成后推进 revision，不保存额外历史副本；返回 `MEMORY_MANAGE_COMPLETED`、新 revision 或明确失败。
 
 ### `operation=reflect`
 
-复盘尚未处理或上次 Capture 中断的 Episodes，合并重复、修正冲突和 Scope、剔除过时项并精简 L2B。只做有证据的最小更新；有变化时保留 history、推进 revision 并更新 `lastReflectionAt`，无变化也更新 `lastReflectionAt`，返回 `MEMORY_REFLECTION_COMPLETED status=unchanged`。
+复盘尚未处理或上次 Capture 中断的 Episodes，合并重复、修正冲突和 Scope、剔除过时项并精简 L2B。只做有证据的最小更新，更新 `lastReflectionAt` 并按实际文件修改推进 revision，不生成历史副本。若记忆内容无变化，返回 `MEMORY_REFLECTION_COMPLETED status=unchanged`；复盘时间的元数据更新不意味着形成了新 Rubric。
 
 ### `operation=settings`
 

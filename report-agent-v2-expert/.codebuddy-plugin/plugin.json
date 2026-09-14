@@ -1,7 +1,7 @@
 {
   "name": "report-agent-v2",
   "version": "0.3.0",
-  "description": "WorkBuddy 原生研究报告 Expert：写作前先整理结构化论据，主 Agent 写 V0，子代理完成动态评测、改写与写作记忆。",
+  "description": "WorkBuddy 原生研究报告 Expert：写作前先整理结构化论据，主 Agent 调度，Writer 持续完成初稿和改写，子代理负责动态评测与写作记忆。",
   "author": {
     "name": "Research Report Team"
   },
@@ -18,12 +18,11 @@
     "./agents/report-memory-agent-v2.md",
     "./agents/report-resolution-judge-v2.md",
     "./agents/report-dimension-judge-v2.md",
-    "./agents/report-rewriter-v2.md",
+    "./agents/report-writer-v2.md",
     "./agents/report-evidence-agent-v2.md"
   ],
   "skills": [
-    "./skills/research-report-agent-v2",
-    "./skills/report-evidence-v2"
+    "./skills/research-report-agent-v2"
   ],
   "expertType": "agent",
   "agentName": "report-agent-v2",
@@ -36,8 +35,8 @@
     "zh": "研究报告顾问"
   },
   "displayDescription": {
-    "en": "Writes a V0 report in the main conversation, then uses native WorkBuddy sub-agents for dynamic judging, rewriting, and writing memory.",
-    "zh": "由主 Agent 撰写 V0，再用 WorkBuddy 原生子代理完成动态评测、改写和写作记忆。"
+    "en": "Coordinates a persistent Writer for drafting and revision, with native WorkBuddy sub-agents for dynamic judging and writing memory.",
+    "zh": "主 Agent 调度 Writer 持续写作，用 WorkBuddy 原生子代理完成动态评测和写作记忆。"
   },
   "categoryId": "12-IndustryConsultant",
   "defaultInitPrompt": {

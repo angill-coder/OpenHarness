@@ -1,26 +1,12 @@
 # WorkBuddy Native Report Loop 执行卡
 
-只在初稿 V0 已保存后读取本文件。主 Agent负责流程编排和结果聚合，但不代替 Resolution Judge、Dimension Judge 或 Rewriter 做各自的判断。
+只在初稿 V0 已保存后读取本文件。主 Agent负责流程编排和结果聚合，但不代替 Resolution Judge、Dimension Judge 或 Writer 做各自的判断。
 
-## 1. 建立本轮目录
+## 1. 沿用本轮目录
 
-在当前报告目录维护以下文件；过程状态放进隐藏目录，不散落到用户交付目录：
+沿用第 0 步按 [保存位置与交付](workspace-and-delivery.md) 确定的报告工作区，不在 WorkBuddy 会话目录另起一套。初稿为 `历史版本/<报告主题>-v0.md`，后续候选依次保存为 `历史版本/<报告主题>-v1.md`、`<报告主题>-v2.md`……不要覆盖 V0 或历史最佳版本。
 
-```text
-.report-loop-v2/
-├── versions/v0.md
-├── .state/
-│   ├── run-state.json
-│   ├── resolution-plan.json
-│   ├── judgments/v0.json
-│   └── revision-briefs/v0.json
-├── final.md
-└── summary.md
-```
-
-后续候选依次保存为 `versions/v1.md`、`v2.md`……不要覆盖 V0 或历史最佳版本。
-
-完整执行并持续维护 [state-and-scoring.md](state-and-scoring.md) 中的单一状态、确定性评分、候选采纳和停止规则。V0 保存后立即建立 `run-state.json`；会话恢复时先按状态继续，不重新启动另一轮 Loop。
+完整执行并持续维护 [state-and-scoring.md](state-and-scoring.md) 中的单一状态、确定性评分、候选采纳和停止规则。沿用初稿阶段的 `run-state.json` 和 `writerAgentId`，V0 核验完成后进入 resolving 并开始一小时时间预算，不重新初始化状态；会话恢复时先按状态继续，不重新启动另一轮 Loop。
 
 ## 2. 整理本轮评测输入
 
@@ -36,11 +22,11 @@
 
 重点素材路径可以指向单个文件，也可以指向整个素材目录；目录表示其中素材整体优先，不要为满足输入格式递归展开成大量文件项。没有 `structured_data.json` 时不要传入该字段，也不得填写不存在的占位路径。发现必要路径不存在时，只修正输入一次；仍无效则停止 Loop，保留 V0 并如实说明。
 
-使用资料整理员时，传入主 Agent 已采纳的工作区论据快照及原始素材根目录，不直接引用可变的 `source/structured_data.json`；整轮保持同一版本，不在各次 Judge/Rewrite 前重新清洗。相对 `source_ref` 按原始素材根目录解析，论据不是独立于原始来源的第二个信源。用户中途更新材料按 [evidence-orchestration.md](evidence-orchestration.md) 停止后续派发并保留旧运行，不能混用新材料和旧评分。
+使用资料整理员时，传入共享 `structured_data.json`、原始素材根目录及本轮绑定的 dataVersion/dataSha256，不保存数据快照。整轮保持同一数据版本；每次 Writer 和每批 Judge 调用前后按 [evidence-orchestration.md](evidence-orchestration.md) 核验指纹，不重新清洗。指纹变化时停止后续派发，本次结果不得作为旧版本有效评分或候选采纳；保留文件并标记“数据已变，未验证”，不得偷偷改成新版本继续 Loop。相对 `source_ref` 按原始素材根目录解析，论据不是独立于原始来源的第二个信源。
 
 ## 3. 读取 Memory 候选
 
-委派 `report-memory-agent-v2` 执行 `operation=resolve`，传入：
+先按 [Memory 调度契约](memory-orchestration.md#记忆位置) 确定 `memoryRoot`；本轮所有 Memory 调用均携带该绝对路径。委派 `report-memory-agent-v2` 执行 `operation=resolve`，传入：
 
 - 当前 task、audience、project；
 - 已确认的汇报背景、摘要观点假设和重点素材；
@@ -56,7 +42,7 @@ Memory 关闭、无候选或 Resolve 失败时，不调用 Resolution Judge；�
 
 若首轮返回 `status=needs_source`，只对 `inspectSourceFor` 中的候选委派 Memory Agent 执行 `operation=inspect_sources`，按其 `sourceL1Ids` 读取准确 L1；然后把证据补给同一个 Resolution Judge 完成第二次、也是最后一次判断。不得预先读取全部 L1，也不得允许第二次溯源请求。
 
-将其返回的完整 JSON 原样保存到 `.report-loop-v2/.state/resolution-plan.json`。检查：
+将其返回的完整 JSON 原样保存到 `Agent运行记录/评测与改写记录/resolution-plan.json`。检查：
 
 - `dimensions[]` 非空，ID 唯一；
 - 权重合计为 `1.0`；
@@ -86,34 +72,36 @@ Dimension Judge 只返回各 Check 的 `met / partial / miss` 判断，不拥有
 
 ## 6. Rewrite 与停止
 
-V0 首次完成有效 Judge 后自动成为历史最佳。达到总分 `5.0`、所有维度为 `5` 且没有 redline/hard floor 失败时结束。否则先按 [state-and-scoring.md](state-and-scoring.md) 生成当前历史最佳版本的 Revision Brief，再委派 `report-rewriter-v2`，传入：
+V0 首次完成有效 Judge 后自动成为历史最佳。达到总分 `5.0`、所有维度为 `5` 且没有 redline/hard floor 失败时结束。否则先按 [state-and-scoring.md](state-and-scoring.md) 生成当前历史最佳版本的 Revision Brief，再按 [Writer 调用与续写](writer-orchestration.md) 以 `mode=revise`、`resume=writerAgentId` 续用 `report-writer-v2`，传入：
 
 - 当前历史最佳报告与新候选路径；
 - 冻结 Resolution Plan；
-- Revision Brief 与简短前序改写历史；
+- Revision Brief、上一候选的采纳结果与简短前序改写历史；
 - 素材与篇幅边界。
 
-Rewriter 只能从历史最佳版本生成新候选。生成后按同一冻结 Plan 重新执行全部维度 Judge；严格执行四项候选采纳门槛，包括 **overall 不得下降**。拒绝候选仍保留在 `versions/` 供追溯，但不能成为下一轮改写基线；其回退项进入下一份 Revision Brief 的 `avoid`。
+Writer 只能从历史最佳版本生成新候选。生成后按同一冻结 Plan 重新执行全部维度 Judge；严格执行四项候选采纳门槛，包括 **overall 不得下降**。拒绝候选仍保留在 `历史版本/` 供追溯，但不能成为下一轮改写基线；其回退项进入下一份 Revision Brief 的 `avoid`。
 
 满足以下任一条件即停止：
 
 - 达到 5.0 且无门槛失败；
 - 连续两个候选没有改善；
 - 从 V0 首次 Judge 开始已运行约一小时；
-- Rewriter 返回 `REPORT_REWRITE_FAILED: <reason>`。
+- Writer 返回 `REPORT_WRITE_FAILED: <reason>`。
+- 数据或来源变化导致绑定失效：`data_version_changed`，不采纳本次未验证输出。
 - 用户明确要求停止。
 
 V2 不另设固定 Rewrite 轮数上限；停止条件沿用 V1 的目标分、连续无改善、一小时时间预算及用户取消语义。
 
 ## 7. 交付
 
-将历史最佳版本保存为 `.report-loop-v2/final.md`；在 `summary.md` 记录：
+按统一目录约定，将历史最佳版本保存为工作区根目录的 `报告主题.md`；在 `历史版本/版本说明.md` 记录：
 
 - `judgedVersions`：完成评测的版本数；
 - `rewriteRounds`：改写次数；
 - `bestVersion`：历史最佳版本；
 - 最终各维度分数与 `bestScore`；
 - stop code 与简短原因；
+- 每个报告版本对应的 dataVersion/dataSha256、生成时间、修改内容；未评测版本明确标注，不沿用其他版本分数；
 - 如有失败，仅记录简短状态。
 
-向用户交付 `final.md`、`versions/` 和简短结果摘要。不要展示 `.state`、Resolution Plan、Judge JSON、Sub-agent Prompt 或内部调用日志。
+向用户交付正式报告、`历史版本/` 和简短结果摘要。不要展示 `Agent运行记录/`、Resolution Plan、Judge JSON、Sub-agent Prompt 或内部调用日志。

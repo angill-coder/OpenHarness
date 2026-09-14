@@ -10,6 +10,7 @@ const included = [
   ".codebuddy-plugin",
   "agents",
   "skills",
+  "resources",
   "rubrics",
   "README.md",
 ];
