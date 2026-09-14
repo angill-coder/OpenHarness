@@ -10,15 +10,15 @@
 
 ## 调用与结果
 
-传入 `caseId`、主题、准确的 `sourcePaths`、`outputPath` 和 `workDir`：
+传入 `caseId`、主题、准确的 `sourcePaths`、完整素材目录 `sourceRoot`、`outputPath` 和 `workDir`：
 
 - `outputPath` 为已确定的 `素材目录/structured_data.json`，保存位置遵循 [统一目录约定](workspace-and-delivery.md)，不追加子目录。
 - `workDir` 为本轮报告工作区的 `Agent运行记录/本轮论据快照/r001`，资料更新依次使用未占用的 `r002`。解析文件、更新前副本及本轮快照放在这里。
-- 扫描原始素材时排除 `structured_data.json`、`报告/`、指定工作区和解析产物；共享论据只作复用输入，不是新的独立信源。
+- 扫描原始素材时排除 `structured_data.json`、`素材清单.json`、`报告/`、指定工作区和解析产物；共享论据只作复用输入，不是新的独立信源。
 
 `caseId` 沿用已有论据表的 `case_id`，首次可用项目文件夹名；同项目后续保持不变。恢复会话时检查已有版本与当前来源，不重复初始化，也不把失败或部分完成的版本冒充完整结果。同一项目的资料更新串行执行，不让两个整理任务覆盖同一输出。
 
-更新另传 `previousPath`（通常等于 `outputPath`）、变化的来源路径及 `changeRequest`。用户直接提供的数据更正，先把对应用户原文保存为 `workDir/user-update.md`，标明来自用户消息、尚未独立核验，并以绝对路径作为显式来源传入；不得把写作假设或主 Agent 的分析保存成“用户事实”。
+更新另传 `previousPath`（通常等于 `outputPath`）及 `changeRequest`。默认用户不明确指出变化文件，由 Evidence Agent 用素材清单自动比较新增、修改和删除；主 Agent 不先解析整套材料。用户直接提供的数据更正，先把对应用户原文保存为 `workDir/user-update.md`，标明来自用户消息、尚未独立核验，并以绝对路径作为显式来源传入；不得把写作假设或主 Agent 的分析保存成“用户事实”。
 
 收到结果后读取返回文件并核对基本格式、case_id、数量与缺口；将本次采用内容保存为 `workDir/structured_data.json` 固定快照（子代理已生成时核对复用，不覆盖不同内容）。后续写作和 Loop 只用该快照；同时记录共享文件及原始素材根目录的绝对路径，快照中的相对 `source_ref` 仍按原始素材根目录解析。完整理解论据后再提出 hypothesis，不只读子代理摘要。
 

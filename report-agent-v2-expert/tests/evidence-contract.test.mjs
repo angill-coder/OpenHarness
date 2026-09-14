@@ -86,3 +86,17 @@ test("evidence fixtures and schema remain independent of the OpenHarness checkou
   // Exact copy of OpenHarness's structured_data.schema.json; no source checkout required.
   assert.equal(hash, "7565c93231d101e0b184df284feb31607c9028e9d2266e3daf9583754f025e67");
 });
+
+test("source scanning precedes incremental review and confirmation follows evidence publication", () => {
+  const skill = read("skills/report-evidence-v2/SKILL.md");
+  const contract = read("skills/report-evidence-v2/references/source-changes.md");
+  assert.match(skill, /用户无需指出新增/u);
+  assert.match(skill, /sourceRoot/u);
+  assert.match(contract, /SHA-256/u);
+  assert.match(contract, /fullReviewRequired=true/u);
+  assert.match(contract, /全部变化来源已经成功处理后/u);
+  assert.match(contract, /解析失败.*不 confirm/u);
+  assert.match(contract, /不能跳过这类明确更正/u);
+  assert.match(contract, /没有可用 Python.*不临时安装环境/u);
+  assert.match(read("skills/research-report-agent-v2/references/workspace-and-delivery.md"), /素材清单.json/u);
+});
