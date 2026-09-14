@@ -2,10 +2,11 @@
 
 面向 WorkBuddy 的研究报告助手：先整理结构化论据，由主 Agent 调度 Writer 撰写初稿、续用同一写作会话改写，再由原生子代理完成评测和写作记忆。V2 不依赖 V1 的 MCP、Hook、Python Runner 或外部模型 CLI。
 
-## 两种交付形态
+## 源码与两种交付形态
 
 | 目录 | 用途 |
 | --- | --- |
+| [report-agent-v2-source/](report-agent-v2-source/) | 不含宿主安装封装的原始工作流源码，供同事封装 Codex / Claude Code 等插件；适配边界见目录内 README。 |
 | [report-agent-v2-expert/](report-agent-v2-expert/) | 专家版及完整开发源码，包含 Agents、Skills、Rubrics、构建脚本和测试；后续开发只改这里。 |
 | [report-agent-v2-plugin/](report-agent-v2-plugin/) | 同源生成的普通插件市场，可独立安装，无需依赖专家目录；不在此手动修改工作流。 |
 
