@@ -15,6 +15,8 @@
 
 这是用户可见、跨项目和宿主共用的真实文件夹，不位于 WorkBuddy、插件或报告工作区内。目录的初始化和读写由 Memory Agent 负责；无法确定或访问时说明原因，不静默换一个位置。切换宿主时沿用同一路径，不另建记忆副本。
 
+目录仅包含 `MEMORY.md`（顶部 revision 版本号、开关、索引及当前 L2B）、`L0-episodes/` 和 `L1-atoms/`；不生成 history 或历史 MEMORY 副本。旧目录不自动删除，版本号不代表可回滚。
+
 ## 写作与 Judge
 
 - 写作前不执行面向主 Agent 的 Memory Recall。Writer 只按本轮用户要求和写作规则完成 V0。
@@ -47,7 +49,7 @@
 - 用户要求立即整理时，委派 `operation=reflect`。
 - Memory Agent 在每天 16:30 后首次被调用时补做当日 Reflection；无需主 Agent另行启动后台任务，同一天不得重复。
 - 即使自动 Memory 已关闭，用户仍可显式查看、纠错或删除已有记忆。
-- 用户明确要求忘记某项写作记忆时，由 Memory Agent 先核验目标及来源，再删除或失效对应项并保留 history；主 Agent不得直接删除、改写或猜测目标。
+- 用户明确要求忘记某项写作记忆时，由 Memory Agent 先核验目标及来源，再删除或失效对应项并更新 revision；主 Agent不得直接删除、改写或猜测目标。
 
 ## 优先级
 

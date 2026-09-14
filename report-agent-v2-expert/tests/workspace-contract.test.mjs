@@ -32,9 +32,9 @@ test("new workspace separates delivery, immutable history and internal state", (
   assert.match(policy, /不改变记忆目录/u);
   assert.ok(policy.includes("Agent运行记录/本轮需求.md"));
   assert.ok(read(`${skillRoot}/references/writer-orchestration.md`).includes("Agent运行记录/本轮需求.md"));
-  assert.ok(read(`${skillRoot}/references/evidence-orchestration.md`).includes("Agent运行记录/本轮论据快照/r001"));
+  assert.ok(read(`${skillRoot}/references/evidence-orchestration.md`).includes("Agent运行记录/评测与改写记录/素材处理/r001"));
   assert.match(policy, /可见的过程记录目录/u);
-  for (const artifact of ["历史版本/v0-初稿.md", "历史版本/v1.md", "历史版本/版本说明.md", "报告主题.md"]) {
+  for (const artifact of ["历史版本/<报告主题>-v0.md", "历史版本/<报告主题>-v1.md", "历史版本/版本说明.md", "报告主题.md"]) {
     assert.ok(loop.includes(artifact), artifact);
   }
   for (const artifact of ["run-state.json", "judgments/<version>.json", "revision-briefs/<version>.json"]) {
@@ -46,5 +46,10 @@ test("new workspace separates delivery, immutable history and internal state", (
       assert.doesNotMatch(read(`${group}/${name}`), /source\/structured_data\.json|\.report-loop-v2\/|\.report-agent\/|inputs\.md|`versions\/|`summary\.md`/u, name);
     }
   }
-  assert.match(read("skills/report-evidence-v2/references/output-contract.md"), /不另建 snapshot 文件/u);
+  assert.match(policy, /日期时间在本轮开始时确定/u);
+  assert.match(policy, /数据版本说明.md/u);
+  assert.doesNotMatch(policy, /├── 本轮论据快照/u);
+  assert.match(policy, /每次 Writer 成功.*包括用户反馈直接修订/u);
+  assert.match(policy, /dataVersion\/dataSha256/u);
+  assert.match(read("skills/report-evidence-v2/references/output-contract.md"), /不在工作区保存.*副本或 previous 备份/u);
 });

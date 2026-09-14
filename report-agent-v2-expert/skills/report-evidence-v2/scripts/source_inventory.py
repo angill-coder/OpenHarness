@@ -1,15 +1,17 @@
 """Track source bytes, not facts. Standard library only; no model or network calls."""
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 
 
-MANIFEST = "素材清单.json"
+MANIFEST = "数据版本说明.md"
 SCHEMA = "report-agent-source-inventory/v1"
 SKIP_DIRS = {"报告", ".git", ".workbuddy", ".report-agent", "Agent运行记录", "__pycache__", "__MACOSX"}
 
@@ -32,7 +34,13 @@ def optional_digest(filename):
 
 def load(filename):
     with filename.open(encoding="utf-8-sig") as stream:
-        return json.load(stream)
+        text = stream.read()
+    if filename.name == MANIFEST:
+        blocks = re.findall(r"```json\n(.*?)\n```", text, re.S)
+        if len(blocks) != 1 or text.count("## 当前素材指纹清单") != 1:
+            raise ValueError("Invalid data version log: expected one current source inventory")
+        text = blocks[0]
+    return json.loads(text)
 
 
 def inventory(root, exclusions):
@@ -45,7 +53,7 @@ def inventory(root, exclusions):
                 continue
             if entry.name == ".DS_Store" or entry.name.startswith(("._", "~$")):
                 continue
-            if directory == root and entry.name in {MANIFEST, "structured_data.json"}:
+            if directory == root and entry.name in {MANIFEST, "structured_data.json", "素材清单.json"}:
                 continue
             if entry.name in SKIP_DIRS and entry.is_dir():
                 continue
@@ -121,7 +129,7 @@ def scan(root, output, exclude):
             "unchangedCount": len(current.keys() & old.keys()) - len(delta["modified"])}
 
 
-def confirm(scan_path, evidence_snapshot):
+def confirm(scan_path, evidence_hash, summary):
     candidate = load(scan_path)
     if not isinstance(candidate, dict) or candidate.get("schema") != SCHEMA:
         raise ValueError("Invalid scan schema")
@@ -132,26 +140,60 @@ def confirm(scan_path, evidence_snapshot):
     if inventory(root, candidate["excluded"]) != candidate["files"]:
         raise ValueError("Sources changed after scan; do not mark them processed")
     shared = root / "structured_data.json"
-    evidence_hash = digest(evidence_snapshot)
     if digest(shared) != evidence_hash:
-        raise ValueError("Shared evidence differs from the reviewed snapshot")
+        raise ValueError("Shared evidence differs from the reviewed hash")
     # Semantic review/schema validation is the Evidence Agent's responsibility.
     evidence = load(shared)
     if not isinstance(evidence, dict) or evidence.get("schema") != "openharness-structured-data/v1" or not evidence.get("items"):
         raise ValueError("No valid structured evidence to associate with inventory")
     published = {k: candidate[k] for k in ("schema", "root", "excluded", "files")}
     published["structuredDataSha256"] = evidence_hash
-    # Atomic manifest replacement; no source/report/evidence files are changed here.
+    old_text = manifest.read_text(encoding="utf-8-sig") if manifest.exists() else ""
+    old = load(manifest) if old_text else None
+    if old and not re.fullmatch(r"D[1-9][0-9]*", old.get("dataVersion", "")):
+        raise ValueError("Invalid data version; do not reset version history")
+    changed = old is None or old.get("structuredDataSha256") != evidence_hash
+    version = (int(old["dataVersion"][1:]) if old else 0) + int(changed)
+    published["dataVersion"] = "D" + str(version)
+    published["updatedAt"] = datetime.now().astimezone().isoformat(timespec="seconds") if changed else old["updatedAt"]
+    history = old_text.split("## 当前素材指纹清单", 1)[0] if old else (
+        "# 数据版本说明\n\n版本只记录变更，不保存旧数据副本；不能据此恢复旧数据。\n\n"
+        "| 数据版本 | 更新时间 | 更新内容 | 数据 SHA-256 |\n|---|---|---|---|\n"
+    )
+    if changed:
+        description = " ".join(summary.split()).replace("|", "／").replace("`", "＇").replace("#", "＃")
+        if not description:
+            raise ValueError("A data change summary is required")
+        history = history.rstrip() + f"\n| D{version} | {published['updatedAt']} | {description} | {evidence_hash} |\n"
+    text = history.rstrip() + "\n\n## 当前素材指纹清单\n\n用于增量核验，不是数据快照；只保留当前清单。\n\n```json\n"
+    text += json.dumps(published, ensure_ascii=False, indent=2) + "\n```\n"
+    # One atomic version log + current inventory; no source or evidence backup.
     fd, temp = tempfile.mkstemp(prefix=".source-inventory-", suffix=".tmp", dir=root)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(published, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+            stream.write(text)
         os.replace(temp, manifest)
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
-    return {"manifestPath": str(manifest), "status": "confirmed"}
+    return {"manifestPath": str(manifest), "status": "confirmed", "dataVersion": published["dataVersion"],
+            "dataSha256": evidence_hash, "versionChanged": changed}
+
+
+def check(root, version=None, expected_hash=None):
+    root = root.resolve(strict=True)
+    metadata = load(root / MANIFEST)
+    actual = digest(root / "structured_data.json")
+    if (not isinstance(metadata, dict) or metadata.get("schema") != SCHEMA
+            or metadata.get("root") != str(root)
+            or not re.fullmatch(r"D[1-9][0-9]*", metadata.get("dataVersion", ""))
+            or metadata.get("structuredDataSha256") != actual
+            or (version is not None and metadata.get("dataVersion") != version)
+            or (expected_hash is not None and actual != expected_hash)):
+        raise ValueError("DATA_VERSION_CHANGED: do not use stale evidence or scores")
+    if inventory(root, metadata["excluded"]) != metadata["files"]:
+        raise ValueError("DATA_VERSION_CHANGED: sources differ from the registered evidence")
+    return {"dataVersion": metadata["dataVersion"], "dataSha256": actual, "status": "ok"}
 
 
 def main():
@@ -163,10 +205,20 @@ def main():
     scanner.add_argument("--exclude", action="append", default=[])
     confirmer = commands.add_parser("confirm")
     confirmer.add_argument("--scan", type=Path, required=True)
-    confirmer.add_argument("--evidence-snapshot", type=Path, required=True)
+    confirmer.add_argument("--evidence-sha256", required=True)
+    confirmer.add_argument("--summary", required=True)
+    checker = commands.add_parser("check")
+    checker.add_argument("--root", type=Path, required=True)
+    checker.add_argument("--version")
+    checker.add_argument("--sha256")
     args = parser.parse_args()
     try:
-        result = scan(args.root, args.output, args.exclude) if args.command == "scan" else confirm(args.scan, args.evidence_snapshot)
+        if args.command == "scan":
+            result = scan(args.root, args.output, args.exclude)
+        elif args.command == "confirm":
+            result = confirm(args.scan, args.evidence_sha256, args.summary)
+        else:
+            result = check(args.root, args.version, args.sha256)
         print(json.dumps(result, ensure_ascii=True))
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(json.dumps({"error": str(error)}, ensure_ascii=True), file=sys.stderr)

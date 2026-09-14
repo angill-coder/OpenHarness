@@ -27,6 +27,6 @@
 ## 范围与限制
 
 - 包中无平台二进制，Windows / macOS 使用同一包；两端真实安装与完整运行仍需验证。
-- 默认启用写作记忆，可明确要求关闭。与专家版共用当前用户主目录下可见的 `ReportAgentMemory/`：`MEMORY.md` 保存设置、索引和 L2B，`L0-episodes/`、`L1-atoms/`、`history/` 保存来源及历史。不依赖 WorkBuddy 原生 Memory，不自动扫描或清空旧记忆。
+- 默认启用写作记忆，可明确要求关闭。与专家版共用当前用户主目录下可见的 `ReportAgentMemory/`：`MEMORY.md` 带 revision 版本号，保存设置、索引和当前 L2B；`L0-episodes/`、`L1-atoms/` 保存来源，不生成 history。不依赖 WorkBuddy 原生 Memory，不自动扫描或清空旧记忆。
 - Reflection 仍为到期后首次调用时补做，不新增后台定时任务。
 - 普通插件不会把全局默认 Agent 改成报告专家；只有选择该 Skill 或匹配其写作请求时才进入报告流程。

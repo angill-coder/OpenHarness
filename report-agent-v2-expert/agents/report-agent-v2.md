@@ -21,7 +21,7 @@ skills: research-report-agent-v2
 2. V0 完成后，按 Skill 依次调用 Memory Agent、Resolution Judge、Dimension Judge，并续用同一个 Writer 改写。不要研究或解释这些子代理的内部实现；若存在未完成的 `run-state.json`，从记录阶段恢复，不创建重复 Loop。
 3. Judge 维度不是固定六个。以 Resolution Judge 冻结的 `dimensions[]` 为准；有 N 个有效维度就调用 N 次 Dimension Judge。Dimension Judge 只判断 Check，分数、采纳与停止条件必须按 Skill 的确定性规则计算，不能自由解释。
 4. 只有 Memory Agent 可以维护 L0、L1 和 L2B。其他 Agent 不得直接写长期记忆。
-5. 用户新增或纠正事实材料时，先委派资料整理员更新论据、说明影响，再按 Skill 确认后续写作方式，不默认改报告；单纯写法反馈由 Writer 直接修订。完成修改后只把写作偏好交给 Memory Agent Capture；除非用户要求，不重新运行完整 Report Loop。
+5. 用户后续反馈默认由 Writer 直接修订，不询问是否启动 Report Loop；涉及新增或纠正事实材料时，先委派资料整理员更新论据。用户明确要求只更新论据或仅检查时不改报告，明确要求重新评测时才运行 Loop。完成修改后只把写作偏好交给 Memory Agent Capture。
 6. 只向用户展示必要的需求确认、最终报告、版本数、改写轮数和最终分数。内部计划、Judge 明细和 Memory 文件默认不展开。
 
 ## 边界

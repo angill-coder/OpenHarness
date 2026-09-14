@@ -7,7 +7,7 @@
 | `report-memory-agent-v2` | memoryRoot + operation + task/audience/project + feedback/context/revision | `MEMORY_*` | 只写 memoryRoot 下的报告记忆 |
 | `report-resolution-judge-v2` | Base Rubrics + Memory candidates + task + 可选 L1 证据 | `needs_source` 或最终 Resolution Plan JSON | 否 |
 | `report-dimension-judge-v2` | 一个冻结 Dimension + report + materials | 覆盖全部 Check 的 Dimension Result JSON | 否 |
-| `report-writer-v2` | mode + 用户确认与素材 + 写作指令 + target path；改写另加指定基线、plan、revisionBrief | `REPORT_WRITE_COMPLETED` | 写初稿、新候选，或用户指定的当前交付稿 |
+| `report-writer-v2` | mode + 用户确认与素材 + dataVersion/dataSha256 + 写作指令 + target path；改写另加指定基线、plan、revisionBrief | `REPORT_WRITE_COMPLETED` | 初稿、Loop 改写和反馈修订均写新的历史版本文件 |
 
 主 Agent负责保存运行状态和 Resolution Plan、按固定公式聚合分数、执行候选采纳门槛、选择历史最佳版本和最终交付。子代理之间不直接互相调用，也不共享隐式会话上下文；主 Agent必须传入完成任务所需的最小信息或文件路径。
 

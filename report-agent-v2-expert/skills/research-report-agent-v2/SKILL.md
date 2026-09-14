@@ -23,7 +23,7 @@ description: 主 Agent 确认需求并调度 WorkBuddy 原生子代理，由 Wri
 
 - 先查素材目录内的 `structured_data.json`，交给资料整理员核验复用或更新，不因更换工作区重新清洗。
 - 返回后，主 Agent 完整读取结构化论据并回查必要原文，理解数据、访谈事实、口径冲突与缺口；不只看文件名或子代理摘要。
-- 将实际采用的论据在本轮工作区保存一份固定快照，并保留原始来源的绝对路径，供写作和 Report Loop 核验；来源号只用于内部核验，最终报告正文不展示。
+- 记录共享论据表、原始来源的绝对路径及实际采用的数据版本/指纹，供写作和 Report Loop 核验，不保存数据快照；来源号只用于内部核验，最终报告正文不展示。
 
 ### 第 1 步：确认写作输入
 
@@ -39,21 +39,21 @@ description: 主 Agent 确认需求并调度 WorkBuddy 原生子代理，由 Wri
 
 按 [Writer 调用与续写](references/writer-orchestration.md) 委派 `report-writer-v2`，由它完整读取 [writing-instructions.md](references/writing-instructions.md)，按其中的证据边界、三段结构、洞察和表达要求写作。
 
-Writer 在本轮报告工作区的 `历史版本/v0-初稿.md` 保存可编辑的 Markdown 初稿 V0。主 Agent 等待并核验文件，保存 Writer 的真实 agentId 供后续续写。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
+Writer 在本轮报告工作区的 `历史版本/<报告主题>-v0.md` 保存可编辑的 Markdown 初稿 V0。主 Agent 等待并核验文件，保存 Writer 的真实 agentId 供后续续写。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
 
 V0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或解释 Judge 与 Memory Agent；写作前不要把 Memory 注入 Writer 上下文。主 Agent 不代写初稿。
 
 ### 第 3 步：启动 Report Loop
 
-确认 V0 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V0 和素材路径启动原生 Sub-agent 流程。全过程维护单一隐藏状态；会话恢复时继续未完成阶段，不重复启动。必须等待 Resolution、全部 Judge 和必要的 Rewrite 完成，不得提前结束任务，也不得把 Resolution Plan 或 Judge JSON 当作交付物。
+确认 V0 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V0 和素材路径启动原生 Sub-agent 流程。全过程维护单一运行状态；会话恢复时继续未完成阶段，不重复启动。必须等待 Resolution、全部 Judge 和必要的 Rewrite 完成，不得提前结束任务，也不得把 Resolution Plan 或 Judge JSON 当作交付物。
 
 宿主不得事前阅读 Sub-agent Prompt、运行测试或自行替代 Judge 与 Rewrite。完成后交付最终报告和版本记录目录，并简要说明评测版本数、改写次数、最佳版本和最终得分；不要展示内部 JSON、详细 Judge 过程或工具日志。
 
 ### 第 4 步：处理用户反馈
 
-用户新增、替换或纠正素材/论据时，先按 [evidence-orchestration.md](references/evidence-orchestration.md) 更新论据并说明对报告的影响，再按用户意图选择只更新论据、更新现有报告或更新并重新评测；意图不明确时简短确认，不默认改报告。事实更新不作为写作偏好存入 Memory，修改后的报告不沿用旧评分。
+用户新增、替换或纠正素材/论据时，先按 [evidence-orchestration.md](references/evidence-orchestration.md) 更新论据并说明影响，再默认续用 Writer 直接修改当前报告，不询问是否启动 Report Loop；用户明确要求只更新论据或仅检查时不改报告，明确要求重新评测时才运行 Loop。事实更新不作为写作偏好存入 Memory，修改后的报告不沿用旧评分。
 
-用户对已交付报告提出修改意见时，按 [Writer 调用与续写](references/writer-orchestration.md) 续用 Writer 直接修改当前报告，不重新运行 Report Loop；只有用户明确要求重新评测时才再运行。Memory 已开启时，修改成功后按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `report-memory-agent-v2` 执行 `operation=capture`，再交付修改结果；Memory 关闭时直接交付，不 Capture，也不反复询问用户是否开启。
+用户对已交付报告提出修改意见时，按 [Writer 调用与续写](references/writer-orchestration.md) 续用 Writer 直接修改当前报告，不重新运行 Report Loop，也不询问是否启动；只有用户明确要求重新评测时才再运行。Memory 已开启时，修改成功后按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `report-memory-agent-v2` 执行 `operation=capture`，再交付修改结果；Memory 关闭时直接交付，不 Capture，也不反复询问用户是否开启。
 
 Judge 反馈和自动改写不得进入 Memory。除处理用户明确提出的记忆开关或管理要求外，主 Agent 不直接维护 Memory；也不得因用户反馈修改 Skill、Base Rubrics、Expert 文件或 WorkBuddy 原生通用 Memory。
 

@@ -10,9 +10,9 @@
 python "<Skill目录>/scripts/source_inventory.py" scan --root "<素材目录>" --output "<workDir>/素材扫描.json"
 ```
 
-`--root` 是本项目完整素材目录，不是用户本次提及的单个文件。默认排除共享 `structured_data.json`、`素材清单.json`、`报告/`、Agent 运行记录及常见工具缓存；用户把产物另存在素材目录内部时，用 `--exclude "<自定义报告总目录>"` 排除，保持跨轮扫描范围一致。素材扫描文件放在排除范围内，不当作原始素材。
+`--root` 是本项目完整素材目录，不是用户本次提及的单个文件。默认排除共享 `structured_data.json`、`数据版本说明.md`、旧版 `素材清单.json`、`报告/`、Agent 运行记录及常见工具缓存；用户把产物另存在素材目录内部时，用 `--exclude "<自定义报告总目录>"` 排除，保持跨轮扫描范围一致。素材扫描文件放在排除范围内，不当作原始素材。
 
-脚本读取素材目录的 `素材清单.json` 作为上次已处理清单，返回：
+脚本读取素材目录的 `数据版本说明.md` 中当前素材指纹清单，返回：
 
 - `added`：新路径，解析后与旧论据去重；新文件不一定有新事实。
 - `modified`：同路径、内容指纹改变，重新解析该文件，对照关联的旧 Evidence 与必要交叉来源。
@@ -28,11 +28,19 @@ python "<Skill目录>/scripts/source_inventory.py" scan --root "<素材目录>" 
 按输出契约验证并发布论据表，且本次全部变化来源已经成功处理后，再执行：
 
 ```text
-python "<Skill目录>/scripts/source_inventory.py" confirm --scan "<workDir>/素材扫描.json" --evidence-snapshot "<workDir>/structured_data.json"
+python "<Skill目录>/scripts/source_inventory.py" confirm --scan "<workDir>/素材扫描.json" --evidence-sha256 "<校验候选时由程序计算的SHA-256>" --summary "<本次论据更新摘要>"
 ```
 
-脚本重新核验素材与共享论据是否仍对应本轮快照，再更新 `素材目录/素材清单.json`。清单同时绑定已发布论据表的指纹，不能手写或提前确认“已处理”。如果只有排版变化、或全无变化，仍先在 workDir 保留采用的论据快照，再 confirm；不为此改写共享论据表。
+脚本重新核验素材和共享论据的指纹，再一次写入 `素材目录/数据版本说明.md`：上半部是版本、更新时间、更新摘要和数据指纹；下半部是当前素材指纹 JSON，仅供增量核验。清单不含论据原文，不是数据快照。首次登记 D1，共享数据指纹变化才增加到 D2、D3…；无变化只更新当前素材清单，不新增版本记录。不另建素材清单或数据快照文件。
 
-资料未读全、解析失败、发布失败或用户更正尚未处理时，不 confirm，保留旧清单，下次仍会检查未处理变化。confirm 失败须在返回摘要中说明“素材清单未更新”，不能把整个流程报为完成；已发布的合法论据不回滚。
+写作和 Judge 前后，用同一脚本核验本轮绑定的数据，防止共享文件已变化但仍沿用旧评分：
+
+```text
+python "<Skill目录>/scripts/source_inventory.py" check --root "<素材目录>" --version "D2" --sha256 "<本轮dataSha256>"
+```
+
+省略 version/sha256 可查询当前合法版本。返回 `DATA_VERSION_CHANGED` 时停止使用当前任务的旧数据绑定，由主 Agent 按素材更新流程处理；不能凭旧版本号还原已被替换的数据。不保存数据副本，也不要求子代理反复解析全量原文。
+
+资料未读全、解析失败、发布失败或用户更正尚未处理时，不 confirm，保留旧版本记录，下次仍会检查未处理变化。confirm 失败须说明“数据版本未登记”，不能把整个流程报为完成或以旧版本继续写作；已发布的合法论据不回滚。
 
 用户直接给出的事实更正仍使用 `user-update.md` 和 changeRequest；即使磁盘文件未变化，也不能跳过这类明确更正。没有可用 Python 时说明限制，采用原有逐项核验，不临时安装环境，也不伪造指纹清单。

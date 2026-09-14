@@ -13,6 +13,8 @@
   "stateRevision": 0,
   "status": "drafting|resolving|judging|rewriting|completed",
   "writerAgentId": null,
+  "dataVersion": "D1",
+  "dataSha256": "<共享论据表的真实 SHA-256>",
   "startedAt": null,
   "deadlineAt": null,
   "baseRubricVersion": "...",
@@ -38,6 +40,8 @@
 版本文件一经写入不得覆盖。V0 首次完成有效 Judge 后自动成为历史最佳；后续候选必须经过采纳门槛。若目标版本文件已存在，不得复用同一版本号。
 
 `writerAgentId` 只保存宿主工具实际返回的可恢复 ID，更新状态时保留它，不在进入 Loop 时重置。旧状态没有该字段时视为 null，保留其余运行记录；不得用后台 taskId 或 Writer 自报文本代替。
+
+dataVersion/dataSha256 在本轮开始时绑定，不能随共享数据变化而静默替换；每个 Judgment 和报告版本说明都记录实际绑定值。恢复时先校验，无法取得原数据则不能继续旧评测。数据变化导致本次输出未验证时停止并说明，不把旧评分嫁接到新数据；已有历史结果仍保留其原版本标识。
 
 ## 2. Judgment 持久化与校验
 
@@ -97,6 +101,7 @@ dimensionScore = 1 + 4 × average(checkValues)
 - 当前时间达到 `deadlineAt`：`time_budget_exhausted`；
 - Judge 最多重试后仍不可用：`judge_unavailable`；
 - Writer 失败或无法安全写入新版本：`rewrite_unavailable`；
+- 数据版本或来源指纹变化，无法核验本轮输入：`data_version_changed`；
 - 用户明确要求停止：`user_cancelled`。
 
 停止后将 `status=completed`，保存 stop code/reason，只交付完成 Judge 的历史最佳版本。除以上原因外，不得提前结束；也不设置固定 Rewrite 轮数上限。

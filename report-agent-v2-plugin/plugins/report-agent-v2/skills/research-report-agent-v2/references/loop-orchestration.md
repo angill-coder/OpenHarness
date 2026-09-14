@@ -4,7 +4,7 @@
 
 ## 1. 沿用本轮目录
 
-沿用第 0 步按 [保存位置与交付](workspace-and-delivery.md) 确定的报告工作区，不在 WorkBuddy 会话目录另起一套。初稿为 `历史版本/v0-初稿.md`，后续候选依次保存为 `历史版本/v1.md`、`v2.md`……不要覆盖 V0 或历史最佳版本。
+沿用第 0 步按 [保存位置与交付](workspace-and-delivery.md) 确定的报告工作区，不在 WorkBuddy 会话目录另起一套。初稿为 `历史版本/<报告主题>-v0.md`，后续候选依次保存为 `历史版本/<报告主题>-v1.md`、`<报告主题>-v2.md`……不要覆盖 V0 或历史最佳版本。
 
 完整执行并持续维护 [state-and-scoring.md](state-and-scoring.md) 中的单一状态、确定性评分、候选采纳和停止规则。沿用初稿阶段的 `run-state.json` 和 `writerAgentId`，V0 核验完成后进入 resolving 并开始一小时时间预算，不重新初始化状态；会话恢复时先按状态继续，不重新启动另一轮 Loop。
 
@@ -22,7 +22,7 @@
 
 重点素材路径可以指向单个文件，也可以指向整个素材目录；目录表示其中素材整体优先，不要为满足输入格式递归展开成大量文件项。没有 `structured_data.json` 时不要传入该字段，也不得填写不存在的占位路径。发现必要路径不存在时，只修正输入一次；仍无效则停止 Loop，保留 V0 并如实说明。
 
-使用资料整理员时，传入主 Agent 已采纳的工作区论据快照及原始素材根目录，不直接引用可变的共享 `structured_data.json`；整轮保持同一版本，不在各次 Judge/Rewrite 前重新清洗。相对 `source_ref` 按原始素材根目录解析，论据不是独立于原始来源的第二个信源。用户中途更新材料按 [evidence-orchestration.md](evidence-orchestration.md) 停止后续派发并保留旧运行，不能混用新材料和旧评分。
+使用资料整理员时，传入共享 `structured_data.json`、原始素材根目录及本轮绑定的 dataVersion/dataSha256，不保存数据快照。整轮保持同一数据版本；每次 Writer 和每批 Judge 调用前后按 [evidence-orchestration.md](evidence-orchestration.md) 核验指纹，不重新清洗。指纹变化时停止后续派发，本次结果不得作为旧版本有效评分或候选采纳；保留文件并标记“数据已变，未验证”，不得偷偷改成新版本继续 Loop。相对 `source_ref` 按原始素材根目录解析，论据不是独立于原始来源的第二个信源。
 
 ## 3. 读取 Memory 候选
 
@@ -87,6 +87,7 @@ Writer 只能从历史最佳版本生成新候选。生成后按同一冻结 Pla
 - 连续两个候选没有改善；
 - 从 V0 首次 Judge 开始已运行约一小时；
 - Writer 返回 `REPORT_WRITE_FAILED: <reason>`。
+- 数据或来源变化导致绑定失效：`data_version_changed`，不采纳本次未验证输出。
 - 用户明确要求停止。
 
 V2 不另设固定 Rewrite 轮数上限；停止条件沿用 V1 的目标分、连续无改善、一小时时间预算及用户取消语义。
@@ -100,6 +101,7 @@ V2 不另设固定 Rewrite 轮数上限；停止条件沿用 V1 的目标分、�
 - `bestVersion`：历史最佳版本；
 - 最终各维度分数与 `bestScore`；
 - stop code 与简短原因；
+- 每个报告版本对应的 dataVersion/dataSha256、生成时间、修改内容；未评测版本明确标注，不沿用其他版本分数；
 - 如有失败，仅记录简短状态。
 
 向用户交付正式报告、`历史版本/` 和简短结果摘要。不要展示 `Agent运行记录/`、Resolution Plan、Judge JSON、Sub-agent Prompt 或内部调用日志。

@@ -40,19 +40,18 @@ npm run build:plugin
 
 ```text
 ReportAgentMemory/
-├── MEMORY.md       设置、索引和 active L2B Rubrics
+├── MEMORY.md       revision 版本号、设置、索引和当前 L2B Rubrics
 ├── L0-episodes/    原始反馈及上下文
-├── L1-atoms/       原子证据
-└── history/        L2B 修改快照与原因
+└── L1-atoms/       原子证据
 ```
 
-用户可以直接查看、修改 Markdown；Memory Agent 每次操作重新读取，写前核对人工修改。旧版宿主 Agent Memory 不自动扫描或双写；升级迁移时将原 `episodes/`、`atoms/` 分别复制为 `L0-episodes/`、`L1-atoms/`，同步修正 Markdown 相对引用，并保留旧目录备份，不覆盖已有目标内容。
+用户可以直接查看、修改 Markdown；Memory Agent 每次操作重新读取，写前核对人工修改。新写入不生成 history；旧版宿主 Memory、旧目录及历史副本不自动扫描、搬迁或删除。MEMORY.md 的 revision 标识当前版本，不表示保留了可回滚副本。
 
 ## 已知待验证项
 
-资料整理采用 [report-evidence-v2](skills/report-evidence-v2/SKILL.md)，复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入其外部模型 CLI 或 Human Report 质检打分。共享论据直接保存在素材目录的 `structured_data.json`，跨工作区优先核验复用，资料变化时更新；报告工作区 `Agent运行记录/本轮论据快照/rNNN/structured_data.json` 只保留本轮固定快照。原始素材和历史报告快照不覆盖；这是项目数据，不是长期 Memory。两种包包含完全相同的 6 个 Agent 和 2 个 Skill。
+资料整理采用 [report-evidence-v2](skills/report-evidence-v2/SKILL.md)，复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入外部模型 CLI 或 Human Report 质检。共享论据保存在素材目录的 `structured_data.json`，不另存数据快照；每份历史稿及 Judgment 记录 dataVersion/dataSha256，数据变化时停止沿用旧绑定。原始素材和历史报告不覆盖。两种包包含完全相同的 6 个 Agent 和 2 个 Skill。
 
-素材目录的 `素材清单.json` 记录上次成功处理的文件指纹。自带标准库脚本使用宿主已有的 Python 3.9+ 识别新增、删除和内容修改，Evidence Agent 只重新解析变化文件并核验相关旧论据；没有可信清单时先完整核验。解析或发布未完成不确认清单，无 Python 时明确降级为逐项核验，不自动安装依赖。详见 [素材变化识别](skills/report-evidence-v2/references/source-changes.md)。
+素材目录的 `数据版本说明.md` 记录 D1、D2…、更新时间、更新内容和当前文件指纹清单，不另建素材清单文件。自带标准库脚本使用宿主已有的 Python 3.9+ 识别新增、删除和内容修改；全部处理并发布成功才登记数据版本。无变化不递增版本；没有可信清单先完整核验。没有 Python 时可逐项检查资料，但不能伪造已完成的版本登记或继续受版本校验保护的 Loop，不自动安装依赖。详见 [素材变化识别](skills/report-evidence-v2/references/source-changes.md)。
 
 1. 可见记忆目录在 Windows / macOS 实际会话中的权限、跨 Session 复用及人工编辑后的读取；
 2. WorkBuddy 实际会话中的 Writer agentId 返回与 resume 续写，以及主 Agent 对同一个 Dimension Judge 的动态 N 次并行调用；
