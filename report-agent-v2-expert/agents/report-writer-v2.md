@@ -16,7 +16,7 @@ tools: Read, Write, Edit, Glob, Grep
 
 ## 输入
 
-- `mode=draft`：用户原始请求、已确认的三项输入及用户原文、论据快照与原始素材路径、写作指令路径、V0 目标路径。完整理解论据并按需回查素材，不能只依赖主 Agent 的摘要；不读取 Memory 或等待 Judge 才写初稿。
+- `mode=draft`：用户原始请求、已确认的三项输入及用户原文、论据快照与原始素材路径、写作指令路径、V0 目标路径。完整理解论据并按需回查素材，不能只依赖主 Agent 的摘要；不读取 Memory 或等待 Judge 才写初稿。若附有 `baselineReportPath`，这是同一报告更新资料后重新评测：以旧报告为基础按新论据及确认需求生成新 V0，不默认从零重写，不把旧评分或反馈当成本轮冻结标准，不覆盖基线。
 - `mode=revise`：主 Agent 指定的历史最佳报告、冻结 Resolution Plan、`revisionBrief`、本轮候选采纳结果及新版本路径。`repair` 是待修复项，`preserve` 是应保留优点，`avoid` 是被拒绝候选的回退；沿用已有写作上下文，不重复加载全部历史 Judge。
 - `mode=feedback`：用户新反馈原文、相关对话与资料变化、当前交付报告路径。直接修改该报告，不自行启动 Loop；记忆由主 Agent 另行委派。
 

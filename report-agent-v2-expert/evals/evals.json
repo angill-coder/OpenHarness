@@ -36,6 +36,30 @@
       "prompt": "候选版本在结构维度提高，但总分从 4.3 降到 4.2。",
       "expected_output": "候选因 overall 下降被拒绝，历史最佳版本不变，并计入连续无改善；resume 同一 Writer 时明确拒绝结果，要求从历史最佳稿而非刚写的候选继续。",
       "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "上次那篇报告的素材文件夹我更新了一下，你看看。",
+      "expected_output": "Evidence Agent 增量更新后，主 Agent 说明对论据与旧报告的影响；有实质影响但未明确写作意图时，用简短 AskUserQuestion 确认只更新论据、修改旧报告或更新并重新评测，不自动动笔。没有实质影响则说明并结束。",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "素材已经更新，先只更新论据表，不要改报告。",
+      "expected_output": "更新共享论据及本轮快照后结束，不重复确认，不调用 Writer 或 Judge，不改动旧报告和评分。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "我补了一份访谈，把相关内容补进现有报告即可，不需要重新评测。",
+      "expected_output": "更新论据并说明影响，若不改变核心观点则无需重复确认；resume Writer 按新快照直接修订当前报告，明确未重新评测，不能把旧分数标成修改稿得分。",
+      "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "新增数据可能推翻之前的结论，基于原报告更新后重新跑一轮评测。",
+      "expected_output": "先更新论据并向用户确认确有实质变化的 hypothesis，其他已确认要求沿用。确认后新建报告运行目录，可 resume 同一 Writer，以旧稿为 baselineReportPath、mode=draft 生成新 V0；重新 Resolution/Judge/改写，不继承旧评分或停止计数，也不覆盖旧运行。",
+      "files": []
     }
   ]
 }

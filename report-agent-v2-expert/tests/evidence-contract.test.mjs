@@ -100,3 +100,30 @@ test("source scanning precedes incremental review and confirmation follows evide
   assert.match(contract, /没有可用 Python.*不临时安装环境/u);
   assert.match(read("skills/research-report-agent-v2/references/workspace-and-delivery.md"), /素材清单.json/u);
 });
+
+test("material updates explain impact and honor user choice before writing", () => {
+  const contract = read("skills/research-report-agent-v2/references/evidence-orchestration.md");
+  assert.match(contract, /先在普通回复中简述.*影响哪些内容/u);
+  assert.match(contract, /意图时直接按要求执行，不重复确认/u);
+  assert.match(contract, /AskUserQuestion/u);
+  assert.match(contract, /只更新论据.*报告不动，不调用 Writer 或 Judge/u);
+  assert.match(contract, /更新现有报告.*不跑 Loop.*旧评分不代表/u);
+  assert.match(contract, /更新并重新评测.*以旧报告为基础/u);
+  assert.match(contract, /动笔前提出调整后的 hypothesis 并确认/u);
+  assert.match(contract, /不重问全部开场问题/u);
+  assert.match(contract, /没有明确写作或重评请求时到此结束/u);
+  const skill = read("skills/research-report-agent-v2/SKILL.md");
+  assert.match(skill, /意图不明确时简短确认，不默认改报告/u);
+});
+
+test("rejudging updated materials creates fresh state and preserves the previous report", () => {
+  const contract = read("skills/research-report-agent-v2/references/evidence-orchestration.md");
+  const writer = read("skills/research-report-agent-v2/references/writer-orchestration.md");
+  const prompt = read("agents/report-writer-v2.md");
+  assert.match(contract, /新的报告运行目录.*新的 drafting 状态/u);
+  assert.match(contract, /不继承旧评分、旧采纳结果或停止计数/u);
+  assert.match(contract, /旧运行、报告与论据快照保持不动/u);
+  assert.match(writer, /可续用原 Writer.*mode=draft.*baselineReportPath/u);
+  assert.match(writer, /实际 Writer ID 保存到新运行状态/u);
+  assert.match(prompt, /baselineReportPath.*按新论据.*不覆盖基线/u);
+});

@@ -15,6 +15,8 @@
 - Loop：传 `mode=revise`、历史最佳版本及新候选路径、冻结 Plan、Revision Brief，并明确上一候选被采纳还是拒绝。候选即使刚由该 Writer 写出，被拒绝后也不能作为下一轮基线。
 - 用户反馈：传 `mode=feedback`、当前交付报告路径、新反馈原文及必要对话；新增资料先由 Evidence Agent 更新，再传新快照。等待修改成功后再执行 Memory Capture，不自动重跑 Loop，旧评分不代表修订稿的新评分。
 
+资料更新后先按 [资料更新后的选择](evidence-orchestration.md#资料更新后如何继续) 确定是否写作。“只更新论据”不调用 Writer；“更新现有报告”走上述 feedback。同一报告选择“更新并重新评测”时，可续用原 Writer，但传 `mode=draft`、`baselineReportPath`（旧报告）、确认后的需求与新论据、全新的 V0 目标路径；它是在旧稿基础上生成新轮初稿，不按旧 Judge 修补，也不写回旧稿。将实际 Writer ID 保存到新运行状态，后续改写只依据本轮的新评分；与此前不同主题的新报告仍新建 Writer。原 Writer 不可恢复时按下文重建，传入新轮输入，不恢复旧 Loop 状态。
+
 每轮追加新要求与反馈，不重复发送完整对话或全部历史 Judge；上下文过长可能被宿主压缩，因此基线、用户要求和修改记录仍以文件为准。不同报告不复用 writerAgentId。
 
 ## 恢复与失败

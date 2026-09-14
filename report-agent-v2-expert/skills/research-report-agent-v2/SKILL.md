@@ -51,7 +51,7 @@ V0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或�
 
 ### 第 4 步：处理用户反馈
 
-用户新增、替换或纠正素材/论据时，先按 [evidence-orchestration.md](references/evidence-orchestration.md) 委派资料整理员更新论据，再续用 Writer 据此修改报告；事实更新不作为写作偏好存入 Memory，修改后的报告不沿用旧评分。
+用户新增、替换或纠正素材/论据时，先按 [evidence-orchestration.md](references/evidence-orchestration.md) 更新论据并说明对报告的影响，再按用户意图选择只更新论据、更新现有报告或更新并重新评测；意图不明确时简短确认，不默认改报告。事实更新不作为写作偏好存入 Memory，修改后的报告不沿用旧评分。
 
 用户对已交付报告提出修改意见时，按 [Writer 调用与续写](references/writer-orchestration.md) 续用 Writer 直接修改当前报告，不重新运行 Report Loop；只有用户明确要求重新评测时才再运行。Memory 已开启时，修改成功后按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `report-memory-agent-v2` 执行 `operation=capture`，再交付修改结果；Memory 关闭时直接交付，不 Capture，也不反复询问用户是否开启。
 
