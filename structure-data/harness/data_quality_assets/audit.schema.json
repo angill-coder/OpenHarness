@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project",
+    "case_id",
+    "human_report_core",
+    "evidence_classifications",
+    "omissions",
+    "conflicts",
+    "structured_data_gaps",
+    "noise_clusters",
+    "scope_risks",
+    "assessment",
+    "recommendations"
+  ],
+  "properties": {
+    "project": {"type": "string"},
+    "case_id": {"type": "string"},
+    "human_report_core": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "text", "quote", "location", "importance"],
+        "properties": {
+          "id": {"type": "string"},
+          "text": {"type": "string"},
+          "quote": {"type": "string"},
+          "location": {"type": "string"},
+          "importance": {"enum": ["critical", "material"]}
+        }
+      }
+    },
+    "evidence_classifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence_id", "classification", "human_report_ids", "reason"],
+        "properties": {
+          "evidence_id": {"type": "string"},
+          "classification": {"enum": ["used", "noise", "conflict"]},
+          "human_report_ids": {"type": "array", "items": {"type": "string"}},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "human_report_id",
+          "human_report_text",
+          "human_report_quote",
+          "human_report_location",
+          "severity",
+          "search_note",
+          "reason"
+        ],
+        "properties": {
+          "human_report_id": {"type": "string"},
+          "human_report_text": {"type": "string"},
+          "human_report_quote": {"type": "string"},
+          "human_report_location": {"type": "string"},
+          "severity": {"enum": ["critical", "material"]},
+          "search_note": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_id",
+          "human_report_id",
+          "source_text",
+          "source_ref",
+          "human_report_text",
+          "human_report_quote",
+          "human_report_location",
+          "conflict_type",
+          "severity",
+          "reason"
+        ],
+        "properties": {
+          "evidence_id": {"type": "string"},
+          "human_report_id": {"type": "string"},
+          "source_text": {"type": "string"},
+          "source_ref": {"type": "string"},
+          "human_report_text": {"type": "string"},
+          "human_report_quote": {"type": "string"},
+          "human_report_location": {"type": "string"},
+          "conflict_type": {
+            "enum": ["numeric", "direction", "conclusion", "factual"]
+          },
+          "severity": {"enum": ["critical", "material"]},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "structured_data_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "human_report_ids",
+          "gap_type",
+          "importance",
+          "source_fact",
+          "source_ref",
+          "reason"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^MG-[0-9]{3,}$"},
+          "human_report_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          },
+          "gap_type": {"enum": ["missing", "underrepresented"]},
+          "importance": {"enum": ["critical", "material"]},
+          "source_fact": {"type": "string", "minLength": 1},
+          "source_ref": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "noise_clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["theme", "evidence_ids", "representative_text", "reason"],
+        "properties": {
+          "theme": {"type": "string"},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}},
+          "representative_text": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "scope_risks": {"type": "array", "items": {"type": "string"}},
+    "assessment": {"type": "string"},
+    "recommendations": {"type": "array", "items": {"type": "string"}}
+  }
+}
