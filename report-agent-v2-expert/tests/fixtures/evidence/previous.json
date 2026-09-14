@@ -1,0 +1,10 @@
+{
+  "schema": "openharness-structured-data/v1",
+  "case_id": "evidence-fixture",
+  "items": [
+    {"id":"EV-001","type":"quantitative","source_ref":"source/metrics.csv / 第2行","content":"2026年6月，100名样本用户的平均月使用时长为12小时；抽样方式未说明。"},
+    {"id":"EV-002","type":"quantitative","source_ref":"source/metrics.csv / 第3行","content":"2026年7月，120名样本用户的平均月使用时长为15小时；抽样方式未说明。"},
+    {"id":"EV-003","type":"qualitative","source_ref":"source/interview.md / 2026-08-01试点访谈；source/interview-notes.md / 同次访谈整理稿","content":"5人运营试点整理单份记录的平均用时由80分钟降至60分钟，不能推广到其他团队；逐字稿与整理稿属于同一个信源。"}
+  ],
+  "unresolved": ["metrics.csv 未说明抽样方法。"]
+}
