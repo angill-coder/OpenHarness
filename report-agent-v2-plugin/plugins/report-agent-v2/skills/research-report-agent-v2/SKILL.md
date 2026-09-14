@@ -19,9 +19,9 @@ description: 使用宿主 Agent 撰写并通过 WorkBuddy 原生 Sub-agent 自�
 
 ### 第 0 步：盘点并解析素材
 
-先定位用户指定路径或当前任务范围内的素材，按 [evidence-orchestration.md](references/evidence-orchestration.md) 委派 `report-evidence-agent-v2` 整理结构化论据，等待返回后再确认写作输入。少量素材也走这一步，主 Agent 不先自行完成整套解析。
+先定位素材，按 [保存位置与交付](references/workspace-and-delivery.md) 确定本轮报告工作区，再按 [evidence-orchestration.md](references/evidence-orchestration.md) 委派 `report-evidence-agent-v2` 整理结构化论据，等待返回后再确认写作输入。少量素材也走这一步，主 Agent 不先自行完成整套解析。
 
-- 先查素材目录下的 `source/structured_data.json`（用户直接指定 `source` 时就在该目录查找），交给资料整理员核验复用或更新，不因更换工作区重新清洗。
+- 先查素材目录内的 `structured_data.json`，交给资料整理员核验复用或更新，不因更换工作区重新清洗。
 - 返回后，主 Agent 完整读取结构化论据并回查必要原文，理解数据、访谈事实、口径冲突与缺口；不只看文件名或子代理摘要。
 - 将实际采用的论据在本轮工作区保存一份固定快照，并保留原始来源的绝对路径，供写作和 Report Loop 核验；来源号只用于内部核验，最终报告正文不展示。
 
@@ -39,7 +39,7 @@ description: 使用宿主 Agent 撰写并通过 WorkBuddy 原生 Sub-agent 自�
 
 产出前完整阅读 [writing-instructions.md](references/writing-instructions.md)，按其中的证据边界、三段结构、洞察和表达要求写作。
 
-在当前报告目录的 `.report-loop-v2/versions/v0.md` 保存可编辑的 Markdown 初稿 V0，避免把过程稿散落在用户交付目录。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
+在本轮报告工作区的 `历史版本/v0-初稿.md` 保存可编辑的 Markdown 初稿 V0。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
 
 V0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或解释 Judge、Rewriter 与 Memory Agent。V0 必须由主 Agent 完成，不能委派给 Rewriter；写作前不要把 Memory 注入写作上下文。
 

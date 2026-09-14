@@ -15,7 +15,7 @@
 
 资料整理 → 用户确认 → 主 Agent 写 V0 → Resolution 冻结动态评测标准 → 分维度 Judge / Rewrite → 交付历史最佳报告。
 
-- 第 0 步默认委派 `report-evidence-agent-v2`，核验复用或更新素材目录的 `source/structured_data.json`；每轮报告另留固定论据快照。
+- 第 0 步默认委派 `report-evidence-agent-v2`，核验复用或更新直接位于素材目录的 `structured_data.json`；每轮报告另留固定论据快照。报告默认保存到该素材目录下的 `报告/报告主题-日期时间/`，用户指定位置优先。
 - Memory 默认开启，可由用户明确关闭；用户反馈先用于修改报告，再交给 Memory Agent。Memory Rubrics 参与评测，不直接注入首次写作。
 - Reflection 在每日 16:30 后首次调用 Memory Agent 时执行或补做，并非无人值守的后台计划任务。
 - Resolution 可按任务增减维度，不限制为六维；Base Rubrics 本身保留六个基础维度。
@@ -41,4 +41,4 @@ npm --prefix report-agent-v2-expert run build
 
 Windows / macOS 使用同一组工作流文件，不附带平台二进制。自动化测试覆盖结构、内容一致性和关键契约，不代表所有 WorkBuddy 版本均已完成真实安装及完整报告实验。
 
-原有工作区状态目录 `.report-loop-v2/` 和 Memory Agent 的 `memory: user` 保持不变；此次改名不迁移、不清空已有数据。两种形态可能访问同名 Memory Agent 的已有记忆，不是两套隔离记忆库。仓库不包含真实报告、实验日志或用户记忆。
+新任务将正式报告、历史版本与 `.report-agent/` 内部文件分开保存；既有实验恢复时沿用原路径，不搬迁旧数据。Memory Agent 的 `memory: user` 不变；两种形态可能访问同名 Agent 的已有记忆，不是两套隔离记忆库。仓库不包含真实报告、实验日志或用户记忆。

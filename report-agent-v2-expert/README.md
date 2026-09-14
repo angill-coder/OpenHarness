@@ -32,11 +32,11 @@ npm run build:plugin
 
 `npm test` 检查包内声明路径、工作流文件逐字节一致性及安装包结构；这些静态检查不代替 Windows / macOS 的实际子代理调用验证。
 
-产品、插件和主 Agent 的标识统一为 `report-agent-v2`，主 Skill 为 `research-report-agent-v2`。报告状态目录继续使用 `.report-loop-v2/`，以兼容已有实验；Memory Agent 名称及 `memory: user` 不变，不迁移或清空既有记忆。旧名称安装与新名称安装不要在同一会话中同时启用。
+产品、插件和主 Agent 的标识统一为 `report-agent-v2`，主 Skill 为 `research-report-agent-v2`。新任务按 [保存位置与交付](skills/research-report-agent-v2/references/workspace-and-delivery.md) 保存到用户项目，恢复旧实验时沿用原路径；Memory Agent 名称及 `memory: user` 不变，不迁移或清空既有记忆。旧名称安装与新名称安装不要在同一会话中同时启用。
 
 ## 已知待验证项
 
-资料整理采用 [report-evidence-v2](skills/report-evidence-v2/SKILL.md)，复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入其外部模型 CLI 或 Human Report 质检打分。共享论据保存在素材目录的 `source/structured_data.json`，跨工作区优先核验复用，资料变化时更新；报告工作区 `.report-loop-v2/evidence/rNNN/structured_data.json` 只保留本轮固定快照。原始素材和历史报告快照不覆盖；这是项目数据，不是长期 Memory。两种包包含完全相同的 6 个 Agent 和 2 个 Skill。
+资料整理采用 [report-evidence-v2](skills/report-evidence-v2/SKILL.md)，复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入其外部模型 CLI 或 Human Report 质检打分。共享论据直接保存在素材目录的 `structured_data.json`，跨工作区优先核验复用，资料变化时更新；报告工作区 `.report-agent/evidence/rNNN/structured_data.json` 只保留本轮固定快照。原始素材和历史报告快照不覆盖；这是项目数据，不是长期 Memory。两种包包含完全相同的 6 个 Agent 和 2 个 Skill。
 
 1. `memory: user` 在 WorkBuddy 实际 Expert 会话中的跨 Session 行为；
 2. 主 Agent 对同一个 Dimension Judge 的动态 N 次并行调用；

@@ -19,11 +19,11 @@
 
 ## 保存与返回
 
-共享文件固定为素材目录下的 `source/structured_data.json`；不要在 `source` 下新增版本目录。`workDir` 放在报告工作区，用于保留本轮快照与解析文件。
+只使用主 Agent 传入的 `outputPath` 和 `workDir`：前者是素材目录内的共享论据表，后者用于本轮快照与解析文件，不自行改路径。
 
 - 无变化：返回 `EVIDENCE_UNCHANGED`，不改写共享文件。
 - 有变化：先把读入的原共享文件保存为 `workDir/previous-structured_data.json`，将完整候选写入 `workDir/structured_data.json` 并重读校验。确认共享文件仍与开始时一致（首次生成则仍不存在），才用已验证的候选更新 `outputPath`；更新后核对内容一致。若发生并发变更或写入失败，返回失败，不覆盖他人更新，也不声称发布成功。
-- 本轮快照与已有报告快照不再覆盖；无变化时由主 Agent 将采用的共享内容保存为本轮快照。历史快照仍可回查，不随共享文件更新而改变。
+- 本轮快照与已有报告快照不再覆盖；无变化时由主 Agent 将采用的共享内容保存为本轮快照。只用 `workDir/structured_data.json` 这一份，不另建 snapshot 文件；历史快照不随共享文件更新而改变。
 
 用户更正原文放在 `workDir/user-update.md` 并使用绝对来源路径；原材料的相对来源仍相对于素材根目录，而非工作区。解析中间文件不是独立证据。
 

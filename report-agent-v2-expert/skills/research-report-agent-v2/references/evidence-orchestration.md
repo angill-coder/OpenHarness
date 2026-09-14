@@ -5,16 +5,16 @@
 ## 何时调用
 
 - 新报告：在第 0 步委派 `operation=prepare`，少量易读素材也调用，完成后再确认写作输入。
-- 先在本项目素材目录查找 `source/structured_data.json`，不要只查当前工作区。已有文件作为 `previousPath` 一并传入，由资料整理员核验格式、来源与 unresolved；与当前资料一致时返回 `EVIDENCE_UNCHANGED` 并复用，不重新清洗或改写共享文件。不能仅凭文件存在跳过核验。
+- 先在本项目素材目录查找 `structured_data.json`，不要只查当前工作区。已有文件作为 `previousPath` 一并传入，由资料整理员核验格式、来源与 unresolved；与当前资料一致时返回 `EVIDENCE_UNCHANGED` 并复用，不重新清洗或改写共享文件。不能仅凭文件存在跳过核验。
 - 用户新增、替换、撤回材料，纠正数据或指出论据遗漏：已有表就 `operation=update`，没有则 `prepare`。单纯“摘要短些、改标题”不调用。事实更新不是 Memory Capture；同轮还包含写作偏好时，报告修订后只把偏好交给 Memory Agent。
 
 ## 调用与结果
 
 传入 `caseId`、主题、准确的 `sourcePaths`、`outputPath` 和 `workDir`：
 
-- `outputPath` 固定为本项目素材目录下的 `source/structured_data.json`。用户直接指定 `source` 时，不再嵌套一层 `source`；素材直接放在所选目录且没有 `source` 子目录时，保存在该目录的 `structured_data.json`。多处素材没有明确项目根目录时先确认保存位置，不擅自选某个公共父目录。
-- `workDir` 为当前报告工作区 `.report-loop-v2/evidence/r001`，本轮更新依次使用未占用的 `r002`。解析中间文件、更新前副本及本轮论据快照放在这里，不散落到素材目录。
-- 扫描原始素材时排除 `structured_data.json`、工作目录和解析产物；共享论据只作复用输入，不是新的独立信源。
+- `outputPath` 为已确定的 `素材目录/structured_data.json`，保存位置遵循 [统一目录约定](workspace-and-delivery.md)，不追加子目录。
+- `workDir` 为本轮报告工作区的 `.report-agent/evidence/r001`，资料更新依次使用未占用的 `r002`。解析文件、更新前副本及本轮快照放在这里。
+- 扫描原始素材时排除 `structured_data.json`、`报告/`、指定工作区和解析产物；共享论据只作复用输入，不是新的独立信源。
 
 `caseId` 沿用已有论据表的 `case_id`，首次可用项目文件夹名；同项目后续保持不变。恢复会话时检查已有版本与当前来源，不重复初始化，也不把失败或部分完成的版本冒充完整结果。同一项目的资料更新串行执行，不让两个整理任务覆盖同一输出。
 
