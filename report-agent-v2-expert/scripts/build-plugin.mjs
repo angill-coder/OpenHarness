@@ -12,7 +12,7 @@ export function buildPlugin(outputDirectory) {
   const manifest = Object.fromEntries(
     ["name", "version", "author", "license", "keywords", "agents", "skills"].map((key) => [key, source[key]]),
   );
-  manifest.description = "原生研究报告 V2：子代理先整理结构化论据，宿主写初稿，再完成记忆、评测和改写。使用 research-report-agent-v2 Skill 启动。";
+  manifest.description = "原生研究报告 V2：子代理先整理结构化论据，主 Agent 调度 Writer 持续写作，再完成记忆与评测。使用 research-report-agent-v2 Skill 启动。";
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(path.join(pluginRoot, ".codebuddy-plugin"), { recursive: true });
   for (const entry of ["agents", "skills", "rubrics"]) {

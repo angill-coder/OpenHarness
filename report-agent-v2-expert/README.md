@@ -4,13 +4,13 @@ WorkBuddy Native V2。它与现有 `research-report-loop-memory` V1 并列，不
 
 ## 当前范围
 
-- 主 Agent 在第 0 步先委派资料整理员生成或核验复用结构化论据，再确认输入并亲自撰写 V0；
+- 主 Agent 在第 0 步先委派资料整理员生成或核验复用结构化论据，再确认输入并委派 Writer 撰写 V0；
 - Memory Agent 在用户主目录的 `ReportAgentMemory/` 管理 L0/L1/L2B，不依赖宿主原生 Memory；
 - Resolution Judge 根据任务动态冻结 N 个评测维度；
 - 参数化 Dimension Judge 按 N 个维度运行；
 - 主 Agent按 V1 公式确定性计分并执行候选采纳门槛；
-- Rewriter 只从历史最佳版本生成候选，主 Agent保存 Judgment 与恢复状态；
-- 用户反馈后先改报告，再 Capture。
+- Writer 首次完整读取写作指令，用同一写作会话完成初稿与改写；Loop 改写只从历史最佳版本生成候选，主 Agent 保存 writerAgentId、Judgment 与恢复状态；
+- 用户反馈后先续用 Writer 修改报告，再 Capture。
 
 V2 不安装平台相关的每日 Automation。Memory Agent 在每日 16:30 后首次被调用时执行当日 Reflection；长期未使用时在下次调用补做，因此不引入 MCP、Hook 或系统计划任务。
 
@@ -53,7 +53,7 @@ ReportAgentMemory/
 资料整理采用 [report-evidence-v2](skills/report-evidence-v2/SKILL.md)，复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入其外部模型 CLI 或 Human Report 质检打分。共享论据直接保存在素材目录的 `structured_data.json`，跨工作区优先核验复用，资料变化时更新；报告工作区 `.report-agent/evidence/rNNN/structured_data.json` 只保留本轮固定快照。原始素材和历史报告快照不覆盖；这是项目数据，不是长期 Memory。两种包包含完全相同的 6 个 Agent 和 2 个 Skill。
 
 1. 可见记忆目录在 Windows / macOS 实际会话中的权限、跨 Session 复用及人工编辑后的读取；
-2. 主 Agent 对同一个 Dimension Judge 的动态 N 次并行调用；
+2. WorkBuddy 实际会话中的 Writer agentId 返回与 resume 续写，以及主 Agent 对同一个 Dimension Judge 的动态 N 次并行调用；
 3. 无 Hook 时反馈 Capture 的稳定触发率；
 4. Windows 与 macOS 的同包安装；
 5. 原生 Sub-agent 方案和 V1 在报告质量、Token、耗时与失败率上的真实 E2E 差异。

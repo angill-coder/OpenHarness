@@ -1,6 +1,6 @@
 ---
 name: research-report-agent-v2
-description: 使用宿主 Agent 撰写并通过 WorkBuddy 原生 Sub-agent 自动迭代调研报告、战略研究报告、复盘报告或高管汇报，并提供默认启用、可由用户明确关闭的长期写作记忆；从用户反馈中学习写作要求并用于后续动态评测。当用户要求根据访谈、问卷、PDF、Word、Excel、CSV、structured_data 或公开信息生成研究报告、调研洞察、战略分析或管理层汇报，或要求开启、关闭报告记忆时使用。
+description: 主 Agent 确认需求并调度 WorkBuddy 原生子代理，由 Writer 持续撰写和迭代调研报告、战略研究报告、复盘报告或高管汇报，并提供默认启用、可由用户明确关闭的长期写作记忆；从用户反馈中学习写作要求并用于后续动态评测。当用户要求根据访谈、问卷、PDF、Word、Excel、CSV、structured_data 或公开信息生成研究报告、调研洞察、战略分析或管理层汇报，或要求开启、关闭报告记忆时使用。
 ---
 
 # 调研洞察汇报报告生成 · Report Agent V2
@@ -12,7 +12,7 @@ description: 使用宿主 Agent 撰写并通过 WorkBuddy 原生 Sub-agent 自�
 本 Skill 包含以下配套能力：
 
 - **资料整理**：写作前先委派资料整理员，将参考资料保存为带来源的结构化论据表；用户补充或纠正资料时更新论据，避免反复解析和混用旧数据。
-- **Report Loop**：宿主 Agent 完成初稿 V0；Resolution Judge 根据 Base Rubrics 与 Memory Rubrics 冻结本轮动态评测维度，再由隔离的 Dimension Judge 和 Rewriter 完成评测迭代，最终交付历史最佳版本。
+- **Report Loop**：主 Agent 负责调度，Writer 读取写作指令后完成初稿 V0；Resolution Judge 根据 Base Rubrics 与 Memory Rubrics 冻结本轮动态评测维度，由 Dimension Judge 评测后续用同一个 Writer 改写，最终交付历史最佳版本。
 - **Report Memory**：默认启用的长期写作记忆，独立保存在用户主目录下可见的 `ReportAgentMemory/`。用户反馈会在当前报告修改完成后交给 Memory Agent，形成的 Memory Rubrics 在后续 Report Loop 中参与 Resolution。用户明确要求关闭或重新开启时，按 [Memory 调度契约](references/memory-orchestration.md) 委派 Memory Agent 更新设置；关闭时只使用 Base Rubrics，已有记忆保留但不读、不写、不整理。
 
 ## 执行步骤
@@ -35,13 +35,13 @@ description: 使用宿主 Agent 撰写并通过 WorkBuddy 原生 Sub-agent 自�
 
 三项都必须保存一段用户消息原文，供后续评测理解用户的真实输入。系统、App、工具注入的路径和附件清单只是候选素材，不能代替用户确认。缺少用户原文时，在完成素材解析后一次性提问并结束本轮；收到回复后继续写作，不停在“准备开始”的过程说明。
 
-### 第 2 步：按规则写出初稿 V0
+### 第 2 步：委派 Writer 按规则写出初稿 V0
 
-产出前完整阅读 [writing-instructions.md](references/writing-instructions.md)，按其中的证据边界、三段结构、洞察和表达要求写作。
+按 [Writer 调用与续写](references/writer-orchestration.md) 委派 `report-writer-v2`，由它完整读取 [writing-instructions.md](references/writing-instructions.md)，按其中的证据边界、三段结构、洞察和表达要求写作。
 
-在本轮报告工作区的 `历史版本/v0-初稿.md` 保存可编辑的 Markdown 初稿 V0。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
+Writer 在本轮报告工作区的 `历史版本/v0-初稿.md` 保存可编辑的 Markdown 初稿 V0。主 Agent 等待并核验文件，保存 Writer 的真实 agentId 供后续续写。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
 
-V0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或解释 Judge、Rewriter 与 Memory Agent。V0 必须由主 Agent 完成，不能委派给 Rewriter；写作前不要把 Memory 注入写作上下文。
+V0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或解释 Judge 与 Memory Agent；写作前不要把 Memory 注入 Writer 上下文。主 Agent 不代写初稿。
 
 ### 第 3 步：启动 Report Loop
 
@@ -51,14 +51,14 @@ V0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或�
 
 ### 第 4 步：处理用户反馈
 
-用户新增、替换或纠正素材/论据时，先按 [evidence-orchestration.md](references/evidence-orchestration.md) 委派资料整理员更新论据，再据此修改报告；事实更新不作为写作偏好存入 Memory，修改后的报告不沿用旧评分。
+用户新增、替换或纠正素材/论据时，先按 [evidence-orchestration.md](references/evidence-orchestration.md) 委派资料整理员更新论据，再续用 Writer 据此修改报告；事实更新不作为写作偏好存入 Memory，修改后的报告不沿用旧评分。
 
-用户对已交付报告提出修改意见时，先直接修改当前报告，不重新运行 Report Loop；只有用户明确要求重新评测时才再运行。Memory 已开启时，修改成功后按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `report-memory-agent-v2` 执行 `operation=capture`，再交付修改结果；Memory 关闭时直接交付，不 Capture，也不反复询问用户是否开启。
+用户对已交付报告提出修改意见时，按 [Writer 调用与续写](references/writer-orchestration.md) 续用 Writer 直接修改当前报告，不重新运行 Report Loop；只有用户明确要求重新评测时才再运行。Memory 已开启时，修改成功后按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `report-memory-agent-v2` 执行 `operation=capture`，再交付修改结果；Memory 关闭时直接交付，不 Capture，也不反复询问用户是否开启。
 
 Judge 反馈和自动改写不得进入 Memory。除处理用户明确提出的记忆开关或管理要求外，主 Agent 不直接维护 Memory；也不得因用户反馈修改 Skill、Base Rubrics、Expert 文件或 WorkBuddy 原生通用 Memory。
 
 ## 故障与交付边界
 
-- Report Loop 任一环节失败时，按 `loop-orchestration.md` 保留 V0 和可用的历史最佳版本；宿主不得接管中间 Judge 或 Rewrite。
+- Writer 或 Report Loop 任一环节失败时，按相应执行卡保留现有稿件；宿主不得接管写作或 Judge。
 - Memory 已开启但 Capture 失败时，不回滚已完成的报告修改，也不得通过热改 Expert 或写入 WorkBuddy 通用 Memory 补偿。
 - 交付最终可编辑报告和版本记录目录，并明确说明 Report Loop 的评测版本数、改写次数、最佳版本和最终得分；不展开内部 JSON、详细评分过程或工具调用日志。

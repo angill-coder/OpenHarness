@@ -18,7 +18,7 @@
 
 在单独的普通测试会话中，不选择写作 Skill，输入：
 
-> 请验证 report-agent-v2 插件的子代理是否可用。分别委派 report-evidence-agent-v2、report-memory-agent-v2、report-resolution-judge-v2、report-dimension-judge-v2 和 report-rewriter-v2，仅要求各自回复 AVAILABLE。不要读取素材、执行记忆操作、修改文件或开始报告写作。请逐项报告真实返回；不可用就停止，不用通用子代理替代，也不要修改插件或安装配置。
+> 请验证 report-agent-v2 插件的子代理是否可用。分别委派 report-evidence-agent-v2、report-memory-agent-v2、report-resolution-judge-v2、report-dimension-judge-v2 和 report-writer-v2，仅要求各自回复 AVAILABLE。不要读取素材、执行记忆操作、修改文件或开始报告写作。请逐项报告真实返回；不可用就停止，不用通用子代理替代，也不要修改插件或安装配置。
 
 这只是一次安装验证，会产生少量模型调用。成功仅证明子代理可调用，不代表完整 Report Loop 已通过。随后另开普通会话，选择 Skill 测试真实报告，检查 Resolution、Judge、Rewrite 及最终得分。
 

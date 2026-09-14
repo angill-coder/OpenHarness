@@ -1,12 +1,12 @@
 # WorkBuddy Native Report Loop 执行卡
 
-只在初稿 V0 已保存后读取本文件。主 Agent负责流程编排和结果聚合，但不代替 Resolution Judge、Dimension Judge 或 Rewriter 做各自的判断。
+只在初稿 V0 已保存后读取本文件。主 Agent负责流程编排和结果聚合，但不代替 Resolution Judge、Dimension Judge 或 Writer 做各自的判断。
 
 ## 1. 沿用本轮目录
 
 沿用第 0 步按 [保存位置与交付](workspace-and-delivery.md) 确定的报告工作区，不在 WorkBuddy 会话目录另起一套。初稿为 `历史版本/v0-初稿.md`，后续候选依次保存为 `历史版本/v1.md`、`v2.md`……不要覆盖 V0 或历史最佳版本。
 
-完整执行并持续维护 [state-and-scoring.md](state-and-scoring.md) 中的单一状态、确定性评分、候选采纳和停止规则。V0 保存后立即建立 `run-state.json`；会话恢复时先按状态继续，不重新启动另一轮 Loop。
+完整执行并持续维护 [state-and-scoring.md](state-and-scoring.md) 中的单一状态、确定性评分、候选采纳和停止规则。沿用初稿阶段的 `run-state.json` 和 `writerAgentId`，V0 核验完成后进入 resolving 并开始一小时时间预算，不重新初始化状态；会话恢复时先按状态继续，不重新启动另一轮 Loop。
 
 ## 2. 整理本轮评测输入
 
@@ -72,21 +72,21 @@ Dimension Judge 只返回各 Check 的 `met / partial / miss` 判断，不拥有
 
 ## 6. Rewrite 与停止
 
-V0 首次完成有效 Judge 后自动成为历史最佳。达到总分 `5.0`、所有维度为 `5` 且没有 redline/hard floor 失败时结束。否则先按 [state-and-scoring.md](state-and-scoring.md) 生成当前历史最佳版本的 Revision Brief，再委派 `report-rewriter-v2`，传入：
+V0 首次完成有效 Judge 后自动成为历史最佳。达到总分 `5.0`、所有维度为 `5` 且没有 redline/hard floor 失败时结束。否则先按 [state-and-scoring.md](state-and-scoring.md) 生成当前历史最佳版本的 Revision Brief，再按 [Writer 调用与续写](writer-orchestration.md) 以 `mode=revise`、`resume=writerAgentId` 续用 `report-writer-v2`，传入：
 
 - 当前历史最佳报告与新候选路径；
 - 冻结 Resolution Plan；
-- Revision Brief 与简短前序改写历史；
+- Revision Brief、上一候选的采纳结果与简短前序改写历史；
 - 素材与篇幅边界。
 
-Rewriter 只能从历史最佳版本生成新候选。生成后按同一冻结 Plan 重新执行全部维度 Judge；严格执行四项候选采纳门槛，包括 **overall 不得下降**。拒绝候选仍保留在 `历史版本/` 供追溯，但不能成为下一轮改写基线；其回退项进入下一份 Revision Brief 的 `avoid`。
+Writer 只能从历史最佳版本生成新候选。生成后按同一冻结 Plan 重新执行全部维度 Judge；严格执行四项候选采纳门槛，包括 **overall 不得下降**。拒绝候选仍保留在 `历史版本/` 供追溯，但不能成为下一轮改写基线；其回退项进入下一份 Revision Brief 的 `avoid`。
 
 满足以下任一条件即停止：
 
 - 达到 5.0 且无门槛失败；
 - 连续两个候选没有改善；
 - 从 V0 首次 Judge 开始已运行约一小时；
-- Rewriter 返回 `REPORT_REWRITE_FAILED: <reason>`。
+- Writer 返回 `REPORT_WRITE_FAILED: <reason>`。
 - 用户明确要求停止。
 
 V2 不另设固定 Rewrite 轮数上限；停止条件沿用 V1 的目标分、连续无改善、一小时时间预算及用户取消语义。

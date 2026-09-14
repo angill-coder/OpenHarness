@@ -4,13 +4,13 @@
     {
       "id": 1,
       "prompt": "基于素材文件夹里的访谈和问卷，写一篇面向管理层的三页研究报告。",
-      "expected_output": "主 Agent 完成素材确认和 V0；Resolution 冻结标准；按动态维度 Judge 并交付历史最佳版本。",
+      "expected_output": "主 Agent 完成素材确认；Writer 完整读取写作指令并生成 V0，主 Agent 保存工具返回的 agentId；Resolution 冻结标准；按动态维度 Judge，resume 同一 Writer 改写并交付历史最佳版本。",
       "files": []
     },
     {
       "id": 2,
       "prompt": "把报告摘要改成两行，并且以后都不要写过程性语言。",
-      "expected_output": "先修改当前报告，再由 Memory Agent 保存 Episode，并自主判断是否形成 L1/L2B。",
+      "expected_output": "先 resume 本报告的 Writer 修改当前报告，不重跑 Loop，再由 Memory Agent 保存 Episode，并自主判断是否形成 L1/L2B。",
       "files": []
     },
     {
@@ -22,7 +22,7 @@
     {
       "id": 4,
       "prompt": "继续刚才中断的报告评测，不要重新开始。",
-      "expected_output": "主 Agent 读取 run-state 与冻结 Plan，从未完成阶段恢复，不重复 Resolution 或已完成 Judge。",
+      "expected_output": "主 Agent 读取 run-state 与冻结 Plan，从未完成阶段恢复，不重复 Resolution 或已完成 Judge；续用 writerAgentId，不可恢复时用文件重建一次 Writer，不覆盖已有版本。",
       "files": []
     },
     {
@@ -34,7 +34,7 @@
     {
       "id": 6,
       "prompt": "候选版本在结构维度提高，但总分从 4.3 降到 4.2。",
-      "expected_output": "候选因 overall 下降被拒绝，历史最佳版本不变，并计入连续无改善。",
+      "expected_output": "候选因 overall 下降被拒绝，历史最佳版本不变，并计入连续无改善；resume 同一 Writer 时明确拒绝结果，要求从历史最佳稿而非刚写的候选继续。",
       "files": []
     }
   ]

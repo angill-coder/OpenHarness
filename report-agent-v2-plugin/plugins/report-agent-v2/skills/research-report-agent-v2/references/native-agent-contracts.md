@@ -7,10 +7,10 @@
 | `report-memory-agent-v2` | memoryRoot + operation + task/audience/project + feedback/context/revision | `MEMORY_*` | 只写 memoryRoot 下的报告记忆 |
 | `report-resolution-judge-v2` | Base Rubrics + Memory candidates + task + 可选 L1 证据 | `needs_source` 或最终 Resolution Plan JSON | 否 |
 | `report-dimension-judge-v2` | 一个冻结 Dimension + report + materials | 覆盖全部 Check 的 Dimension Result JSON | 否 |
-| `report-rewriter-v2` | best report + plan + revisionBrief + target path | `REPORT_REWRITE_COMPLETED` | 只写目标候选版本 |
+| `report-writer-v2` | mode + 用户确认与素材 + 写作指令 + target path；改写另加指定基线、plan、revisionBrief | `REPORT_WRITE_COMPLETED` | 写初稿、新候选，或用户指定的当前交付稿 |
 
 主 Agent负责保存运行状态和 Resolution Plan、按固定公式聚合分数、执行候选采纳门槛、选择历史最佳版本和最终交付。子代理之间不直接互相调用，也不共享隐式会话上下文；主 Agent必须传入完成任务所需的最小信息或文件路径。
 
 Resolution 的可选溯源最多一轮：Resolution Judge 返回候选 ID，主 Agent调用 Memory Agent 的 `inspect_sources`，再把准确 L1 证据交回 Resolution Judge。Dimension Judge 不能请求 Memory，也不能给出最终分数。
 
-Memory Agent 显式读取 `memoryRoot` 中的长期状态，不使用宿主的原生 Memory 注入。其他三个子代理均为无状态认知组件。
+Memory Agent 显式读取 `memoryRoot` 中的长期状态，不使用宿主的原生 Memory 注入。Writer 通过 `resume=writerAgentId` 延续同一报告的写作上下文；Resolution 与 Dimension Judge 保持隔离，不共享 Writer 对话。详见 [Writer 调用与续写](writer-orchestration.md)。

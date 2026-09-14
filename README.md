@@ -1,6 +1,6 @@
 # Report Agent V2
 
-面向 WorkBuddy 的研究报告助手：先整理结构化论据，由主 Agent 撰写初稿，再通过原生子代理完成评测、改写和写作记忆。V2 不依赖 V1 的 MCP、Hook、Python Runner 或外部模型 CLI。
+面向 WorkBuddy 的研究报告助手：先整理结构化论据，由主 Agent 调度 Writer 撰写初稿、续用同一写作会话改写，再由原生子代理完成评测和写作记忆。V2 不依赖 V1 的 MCP、Hook、Python Runner 或外部模型 CLI。
 
 ## 两种交付形态
 
@@ -13,7 +13,7 @@
 
 ## 功能流程
 
-资料整理 → 用户确认 → 主 Agent 写 V0 → Resolution 冻结动态评测标准 → 分维度 Judge / Rewrite → 交付历史最佳报告。
+资料整理 → 用户确认 → Writer 写 V0 → Resolution 冻结动态评测标准 → 分维度 Judge / 续用 Writer 改写 → 交付历史最佳报告。
 
 - 第 0 步默认委派 `report-evidence-agent-v2`，核验复用或更新直接位于素材目录的 `structured_data.json`；每轮报告另留固定论据快照。报告默认保存到该素材目录下的 `报告/报告主题-日期时间/`，用户指定位置优先。
 - Memory 默认开启，可由用户明确关闭；用户反馈先用于修改报告，再交给 Memory Agent。Memory Rubrics 参与评测，不直接注入首次写作。

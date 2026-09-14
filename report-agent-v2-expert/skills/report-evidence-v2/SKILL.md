@@ -5,7 +5,7 @@ description: 将研究资料清洗、去重并保存为带来源的结构化论�
 
 # 结构化论据整理
 
-把原始资料变成紧凑、可回查的论据 list，供主 Agent 写作和 Judge 核验。读取 [清洗规则](references/cleaning-rules.md) 和 [输出与更新格式](references/output-contract.md) 后执行。沿用 OpenHarness 的 `openharness-structured-data/v1` 格式，不依赖 OpenHarness 运行环境。
+把原始资料变成紧凑、可回查的论据 list，供主 Agent 确认需求、Writer 写作和 Judge 核验。读取 [清洗规则](references/cleaning-rules.md) 和 [输出与更新格式](references/output-contract.md) 后执行。沿用 OpenHarness 的 `openharness-structured-data/v1` 格式，不依赖 OpenHarness 运行环境。
 
 ## 输入
 

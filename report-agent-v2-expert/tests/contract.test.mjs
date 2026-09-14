@@ -31,7 +31,7 @@ test("V2 is an isolated native Expert without V1 runtime components", () => {
   }
 });
 
-test("main Agent writes V0 and dynamic dimensions are explicit", () => {
+test("main Agent delegates V0 to Writer and dynamic dimensions are explicit", () => {
   const skill = read("skills/research-report-agent-v2/SKILL.md");
   const expert = read("agents/report-agent-v2.md");
   const resolution = read("agents/report-resolution-judge-v2.md");
@@ -41,7 +41,8 @@ test("main Agent writes V0 and dynamic dimensions are explicit", () => {
   assert.match(skill, /按规则写出初稿 V0/u);
   assert.match(skill, /loop-orchestration\.md/u);
   assert.match(skill, /memory-orchestration\.md/u);
-  assert.match(expert, /不要把 V0 委派给 Rewriter/u);
+  assert.match(expert, /委派 `report-writer-v2`/u);
+  assert.match(skill, /writer-orchestration\.md/u);
   assert.match(resolution, /维度数量不固定/u);
   assert.match(resolution, /dimensionCandidate/u);
 });
@@ -153,17 +154,47 @@ test("Memory capture is idempotent and Reflection is due once per day", () => {
   assert.match(orchestration, /重试时必须复用/u);
 });
 
-test("Rewriter always starts from the accepted best version and receives a compact brief", () => {
+test("Writer always starts from the accepted best version and receives a compact brief", () => {
   const loop = read("skills/research-report-agent-v2/references/loop-orchestration.md");
   const state = read("skills/research-report-agent-v2/references/state-and-scoring.md");
-  const rewriter = read("agents/report-rewriter-v2.md");
+  const writer = read("agents/report-writer-v2.md");
 
   assert.match(loop, /只能从历史最佳版本生成新候选/u);
   assert.match(state, /`repair`/u);
   assert.match(state, /`preserve`/u);
   assert.match(state, /`avoid`/u);
-  assert.match(rewriter, /revisionBrief/u);
-  assert.match(rewriter, /不读取或推断未传入的原始 Judge 对话/u);
+  assert.match(writer, /revisionBrief/u);
+  assert.match(writer, /不读取或推断未传入的原始 Judge 对话/u);
+});
+
+test("one Writer owns draft, loop revision and feedback with a resumable conversation", () => {
+  const manifest = JSON.parse(read(".codebuddy-plugin/plugin.json"));
+  assert.ok(manifest.agents.includes("./agents/report-writer-v2.md"));
+  assert.ok(!manifest.agents.some(p => p.includes("rewriter")));
+  assert.ok(!fs.existsSync(path.join(root, "agents/report-rewriter-v2.md")));
+  for (const agent of manifest.agents) assert.ok(fs.existsSync(path.join(root, agent)));
+  const writer = read("agents/report-writer-v2.md");
+  for (const mode of ["draft", "revise", "feedback"]) assert.ok(writer.includes(`mode=${mode}`));
+  const instructionLink = writer.match(/\]\(([^)]+writing-instructions\.md)\)/u)?.[1];
+  assert.ok(instructionLink);
+  assert.equal(path.resolve(root, "agents", instructionLink), path.join(root, "skills/research-report-agent-v2/references/writing-instructions.md"));
+  assert.match(writer, /首次写作前必须完整读取/u);
+  assert.match(writer, /REPORT_WRITE_COMPLETED/u);
+  const orchestration = read("skills/research-report-agent-v2/references/writer-orchestration.md");
+  assert.match(orchestration, /resume=writerAgentId/u);
+  assert.match(orchestration, /taskId.*不得冒充 agentId/u);
+  assert.match(orchestration, /无法恢复该 ID/u);
+  assert.match(orchestration, /重建一次 Writer/u);
+  assert.match(orchestration, /不同报告不复用 writerAgentId/u);
+  assert.match(orchestration, /已有 V0 不重写/u);
+  const state = read("skills/research-report-agent-v2/references/state-and-scoring.md");
+  const sample = JSON.parse(state.match(/```json\n([\s\S]*?)\n```/u)[1]);
+  assert.equal(sample.writerAgentId, null);
+  assert.equal(sample.deadlineAt, null);
+  assert.ok(sample.status.split("|").includes("drafting"));
+  for (const caller of ["SKILL.md", "references/loop-orchestration.md", "references/memory-orchestration.md", "references/evidence-orchestration.md"]) {
+    assert.match(read(`skills/research-report-agent-v2/${caller}`), /writer-orchestration\.md/u);
+  }
 });
 
 test("build emits a self-contained Expert without platform launchers", async () => {

@@ -17,7 +17,7 @@
 
 ## 写作与 Judge
 
-- 写作前不执行面向主 Agent 的 Memory Recall。主 Agent只按本轮用户要求和写作规则完成 V0。
+- 写作前不执行面向主 Agent 的 Memory Recall。Writer 只按本轮用户要求和写作规则完成 V0。
 - Memory 关闭时，Resolution 只使用 Base Rubrics；开启后才读取 L2B 候选。
 - L2B 只维护独立 Memory Rubrics，不修改 Base，也不预先决定 Dimension。
 - Resolution Judge 根据当前任务判断激活、合并或新增哪些维度；只有它明确请求时，才由 Memory Agent 按准确 `sourceL1Ids` 返回 L1 来源，然后冻结本轮标准。
@@ -27,7 +27,7 @@
 
 - 新增资料、数据纠错和论据更新先按 [evidence-orchestration.md](evidence-orchestration.md) 处理，不作为写作偏好 Capture；混合反馈只向 Memory Agent 传递其中的写作要求及必要语境，不把事实清洗结果当成用户长期偏好。
 - 仅在 Memory 已开启，且用户明确评价报告写法、直接修改报告或提出写作要求时触发。Judge 反馈、Judge 分数、Agent 自评和自动改写不得触发。
-- 固定顺序：直接修改当前报告 → 确认文件修改成功 → 委派 `report-memory-agent-v2 operation=capture` → 再交付或总结。反馈修订不重新运行 Report Loop，除非用户明确要求重新评测。
+- 固定顺序：按 [Writer 调用与续写](writer-orchestration.md) 续用 Writer 直接修改当前报告 → 主 Agent 确认文件修改成功 → 委派 `report-memory-agent-v2 operation=capture` → 再交付或总结。反馈修订不重新运行 Report Loop，除非用户明确要求重新评测。
 - 为本次反馈生成一个稳定 `captureId`，重试时必须复用；向 Memory Agent 提供该 ID、当前反馈、task、audience/project、必要的修改前后内容，以及用户正在评价的上一条 Assistant 可见输出至当前反馈的对话窗口；通常 2–6 条、最多 8 条，用户反馈不得截断。
 - 主 Agent 不决定 Layer/Scope，不直接维护 L1/L2B，也不因一次反馈宣称 Rubric 已形成。
 - 普通报告写作反馈一律走 Capture。即使与已有记忆冲突，也由 Memory Agent 在同一次 Capture 中更新、合并或保持不变；Capture 期间不得改走 Manage，也不得先删除旧记忆。
