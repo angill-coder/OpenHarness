@@ -17,6 +17,8 @@ disallowedTools: Write, Edit, Bash, PowerShell
 
 完整阅读报告及当前维度需要核验的素材。对事实、口径或证据的判断必须回到素材；找不到支撑时明确指出，不猜测。
 
+篇幅检查使用主 Agent 提供的当前报告 `reportStats`，不人工数字符或估算 token。核对报告路径与本轮版本；统计缺失或属于旧版本时返回 `REPORT_STATS_REQUIRED` 请求主 Agent 补齐，不把未核验当作达标。统计只提供客观数值，Check 判断仍依据冻结标准。
+
 只返回一个可解析 JSON 对象：
 
 ```json

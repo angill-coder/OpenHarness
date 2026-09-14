@@ -59,6 +59,8 @@ Resolution Judge 返回失败、重复溯源或未通过上述检查时，记录
 
 ## 5. 按动态维度 Judge
 
+先按 [统一篇幅统计](report-length.md) 取得当前候选的 `reportStats`（已有该版本的有效统计则直接复用），随报告传给 Judge。收到 `REPORT_STATS_REQUIRED` 时由主 Agent 补齐统计，不让 Judge 人工计数；无法补齐则按评测不完整处理。
+
 以冻结 Plan 为唯一标准。对 `dimensions[]` 中的每个维度分别委派一次 `report-dimension-judge-v2`；每次只传：
 
 - 一个完整冻结 Dimension；

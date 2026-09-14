@@ -10,6 +10,8 @@
 
 ## 后续修改
 
+每次 Writer 成功落盘后，主 Agent 按 [统一篇幅统计](report-length.md) 运行计数脚本；后续修改传入所选基线的 `reportStats`，不要追加要求 Writer 人工逐字计数的内部循环。
+
 同一篇报告优先通过 Agent 工具的 `resume=writerAgentId` 续用原 Writer，而不是新起同名 Agent；一次只派发一个写作任务，等待完成后再进入下一阶段。
 
 - Loop：传 `mode=revise`、历史最佳版本及新候选路径、冻结 Plan、Revision Brief，并明确上一候选被采纳还是拒绝。候选即使刚由该 Writer 写出，被拒绝后也不能作为下一轮基线。
