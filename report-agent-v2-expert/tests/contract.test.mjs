@@ -68,17 +68,23 @@ test("native orchestration details stay in references rather than crowding the m
   assert.match(memory, /MEMORY_CAPTURE_COMPLETED/u);
 });
 
-test("only Memory Agent has persistent user memory", () => {
+test("Memory is explicitly file-backed and independent of host injection", () => {
   const agents = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".md"));
   for (const agent of agents) {
     const content = read(`agents/${agent}`);
-    if (agent === "report-memory-agent-v2.md") {
-      assert.match(content, /^memory: user$/mu);
-    } else {
-      assert.doesNotMatch(content, /^memory:/mu);
-    }
+    assert.doesNotMatch(content, /^memory:/mu);
     assert.doesNotMatch(content, /mcp__/u);
   }
+  const memory = read("agents/report-memory-agent-v2.md");
+  for (const name of ["memoryRoot", "ReportAgentMemory/", "MEMORY.md", "L0-episodes/", "L1-atoms/", "history/"]) {
+    assert.ok(memory.includes(name), `Missing storage contract: ${name}`);
+  }
+  assert.doesNotMatch(memory, /`(?:episodes|atoms)\//u);
+  const orchestration = read("skills/research-report-agent-v2/references/memory-orchestration.md");
+  assert.match(orchestration, /USERPROFILE/u);
+  assert.match(orchestration, /HOME/u);
+  assert.match(orchestration, /resolve、inspect_sources、capture、manage、reflect 和 settings/u);
+  assert.match(read("skills/research-report-agent-v2/references/loop-orchestration.md"), /memory-orchestration\.md#记忆位置/u);
 });
 
 test("Base Rubrics are present and keep the six stable base dimensions", () => {

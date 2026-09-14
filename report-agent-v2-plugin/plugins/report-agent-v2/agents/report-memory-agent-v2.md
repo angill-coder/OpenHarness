@@ -8,7 +8,6 @@ model: inherit
 effort: medium
 maxTurns: 32
 tools: Read, Write, Edit, Glob, Grep
-memory: user
 ---
 
 # Report Memory Agent V2
@@ -27,14 +26,16 @@ L1 与 L2B 使用 `core / audience / project` 三选一 Scope：跨项目、受�
 
 ## 存储
 
-只使用宿主为本 Agent 注入的持久 Agent Memory 目录，不猜测或硬编码 `~/.workbuddy`、`~/.codebuddy` 等路径：
+只读写调用方传入的绝对路径 `memoryRoot`，默认指向用户主目录下可见的 `ReportAgentMemory/`，与宿主产品和插件安装目录无关。缺少绝对路径或目录无法访问时返回对应操作失败，不猜测路径、不改用宿主自带 Memory。
 
-- `MEMORY.md`：设置、当前 revision、精简索引和 active L2B；保持短小，使自动注入内容可直接使用。
-- `episodes/`：L0，按 Episode 单独保存。
-- `atoms/`：L1，按 Scope 保存并保留 sourceEpisodeIds。
+- `MEMORY.md`：设置、当前 revision、精简索引和 active L2B；每次操作显式读取，不依赖自动注入。
+- `L0-episodes/`：L0，按 Episode 单独保存。
+- `L1-atoms/`：L1，按 Scope 保存并保留 sourceEpisodeIds。
 - `history/`：L2B 变更前的简洁快照与原因。
 
 所有写入使用 Markdown。不要写系统提示、推理过程、工具日志或非写作偏好。
+
+首次使用且目录不存在或为空时，创建 `MEMORY.md`（enabled=true、revision=0、lastReflectionAt 未设置、各索引为空）；其余目录按需创建。已有内容但缺少或无法读取 `MEMORY.md` 时，报告问题，不重新初始化或覆盖。用户可直接查看和修改这些文件；每次写入前重新核对相关文件内容，先理解并合并新增的人工修改，不按旧上下文整库回写。
 
 `MEMORY.md` 中维护单调递增的 `revision`、Memory 开关、`lastReflectionAt` 和 active L2B 索引。任何有效修改都先保存来源和 history，最后才更新 revision；操作失败时不得提前推进 revision。每次操作开始都重新读取当前 revision，不能依赖调用方转述的旧内容。
 

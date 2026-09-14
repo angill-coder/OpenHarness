@@ -1,6 +1,6 @@
 # Report Loop V2 Memory 调度契约
 
-本文件只规定用户反馈如何进入长期写作记忆，不定义报告写法，也不得进入报告正文。
+本文件规定长期写作记忆的位置与调用方式，不定义报告写法，也不得进入报告正文。
 
 ## 系统身份
 
@@ -8,6 +8,12 @@
 - Memory 是持久化用户级功能，默认启用。用户明确要求查询、关闭或重新开启时，主 Agent 委派 `report-memory-agent-v2 operation=settings`；关闭不会删除已有记忆。
 - WorkBuddy 的通用用户 Memory、项目 Memory 和工作日志不属于本 Expert，也不能替代 Capture。
 - Memory 已开启时，用户明确评价报告写法或提出可复用要求即应 Capture，无需用户额外说“记住”。
+
+## 记忆位置
+
+主 Agent 从系统取得当前用户主目录（macOS 使用 `HOME`，Windows 使用 `USERPROFILE`，也可用系统的 home API），将其中的 `ReportAgentMemory` 解析为绝对路径 `memoryRoot`，传给每一次 Memory 调用，包括 resolve、inspect_sources、capture、manage、reflect 和 settings。不传未展开的环境变量或 `~`，不从当前工作区推算主目录。
+
+这是用户可见、跨项目和宿主共用的真实文件夹，不位于 WorkBuddy、插件或报告工作区内。目录的初始化和读写由 Memory Agent 负责；无法确定或访问时说明原因，不静默换一个位置。切换宿主时沿用同一路径，不另建记忆副本。
 
 ## 写作与 Judge
 

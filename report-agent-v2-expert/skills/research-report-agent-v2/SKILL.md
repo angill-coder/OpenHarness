@@ -13,7 +13,7 @@ description: 使用宿主 Agent 撰写并通过 WorkBuddy 原生 Sub-agent 自�
 
 - **资料整理**：写作前先委派资料整理员，将参考资料保存为带来源的结构化论据表；用户补充或纠正资料时更新论据，避免反复解析和混用旧数据。
 - **Report Loop**：宿主 Agent 完成初稿 V0；Resolution Judge 根据 Base Rubrics 与 Memory Rubrics 冻结本轮动态评测维度，再由隔离的 Dimension Judge 和 Rewriter 完成评测迭代，最终交付历史最佳版本。
-- **Report Memory**：默认启用的长期写作记忆。用户反馈会在当前报告修改完成后交给 Memory Agent，形成的 Memory Rubrics 在后续 Report Loop 中参与 Resolution。用户明确要求关闭或重新开启时，由 Memory Agent 更新设置；关闭时只使用 Base Rubrics，已有记忆保留但不读、不写、不整理。
+- **Report Memory**：默认启用的长期写作记忆，独立保存在用户主目录下可见的 `ReportAgentMemory/`。用户反馈会在当前报告修改完成后交给 Memory Agent，形成的 Memory Rubrics 在后续 Report Loop 中参与 Resolution。用户明确要求关闭或重新开启时，按 [Memory 调度契约](references/memory-orchestration.md) 委派 Memory Agent 更新设置；关闭时只使用 Base Rubrics，已有记忆保留但不读、不写、不整理。
 
 ## 执行步骤
 

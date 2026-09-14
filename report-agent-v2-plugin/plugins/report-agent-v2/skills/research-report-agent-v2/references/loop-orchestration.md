@@ -26,7 +26,7 @@
 
 ## 3. 读取 Memory 候选
 
-委派 `report-memory-agent-v2` 执行 `operation=resolve`，传入：
+先按 [Memory 调度契约](memory-orchestration.md#记忆位置) 确定 `memoryRoot`；本轮所有 Memory 调用均携带该绝对路径。委派 `report-memory-agent-v2` 执行 `operation=resolve`，传入：
 
 - 当前 task、audience、project；
 - 已确认的汇报背景、摘要观点假设和重点素材；

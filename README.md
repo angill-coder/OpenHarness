@@ -41,4 +41,4 @@ npm --prefix report-agent-v2-expert run build
 
 Windows / macOS 使用同一组工作流文件，不附带平台二进制。自动化测试覆盖结构、内容一致性和关键契约，不代表所有 WorkBuddy 版本均已完成真实安装及完整报告实验。
 
-新任务将正式报告、历史版本与 `.report-agent/` 内部文件分开保存；既有实验恢复时沿用原路径，不搬迁旧数据。Memory Agent 的 `memory: user` 不变；两种形态可能访问同名 Agent 的已有记忆，不是两套隔离记忆库。仓库不包含真实报告、实验日志或用户记忆。
+新任务将正式报告、历史版本与 `.report-agent/` 内部文件分开保存；既有实验恢复时沿用原路径，不搬迁旧数据。长期记忆独立保存在用户主目录下可见的 `ReportAgentMemory/`，两种形态共用，不依赖 WorkBuddy 原生 Memory；其中 `MEMORY.md` 保存设置、索引与 L2B，`L0-episodes/` 和 `L1-atoms/` 保存来源，`history/` 保存修改历史。仓库不包含真实报告、实验日志或用户记忆。

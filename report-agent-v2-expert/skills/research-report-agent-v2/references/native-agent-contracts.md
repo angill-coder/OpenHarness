@@ -4,7 +4,7 @@
 
 | Sub-agent | 输入 | 输出标记或 Schema | 是否写文件 |
 |---|---|---|---|
-| `report-memory-agent-v2` | operation + task/audience/project + feedback/context/revision | `MEMORY_*` | 只写自己的 Agent Memory |
+| `report-memory-agent-v2` | memoryRoot + operation + task/audience/project + feedback/context/revision | `MEMORY_*` | 只写 memoryRoot 下的报告记忆 |
 | `report-resolution-judge-v2` | Base Rubrics + Memory candidates + task + 可选 L1 证据 | `needs_source` 或最终 Resolution Plan JSON | 否 |
 | `report-dimension-judge-v2` | 一个冻结 Dimension + report + materials | 覆盖全部 Check 的 Dimension Result JSON | 否 |
 | `report-rewriter-v2` | best report + plan + revisionBrief + target path | `REPORT_REWRITE_COMPLETED` | 只写目标候选版本 |
@@ -13,4 +13,4 @@
 
 Resolution 的可选溯源最多一轮：Resolution Judge 返回候选 ID，主 Agent调用 Memory Agent 的 `inspect_sources`，再把准确 L1 证据交回 Resolution Judge。Dimension Judge 不能请求 Memory，也不能给出最终分数。
 
-Memory Agent 的 `memory: user` 是唯一长期状态。其他三个子代理均为无状态认知组件。
+Memory Agent 显式读取 `memoryRoot` 中的长期状态，不使用宿主的原生 Memory 注入。其他三个子代理均为无状态认知组件。
