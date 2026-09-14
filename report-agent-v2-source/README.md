@@ -12,8 +12,6 @@
 | `skills/research-report-agent-v2/` | 主流程、写作指令、评分与状态、目录和交付约定 |
 | `resources/evidence/` | 清洗规则、数据 Schema、增量素材指纹 Python 脚本 |
 | `rubrics/` | 原始 Base Rubrics，保持内容不变 |
-| `evals/` | 人工或模型验收场景，不是已执行的效果评测结果 |
-| `tests/` | 可独立运行的素材版本与目录契约测试 |
 
 入口先读 `skills/research-report-agent-v2/SKILL.md`，再按其链接读取对应执行卡。流程保持：Evidence → 用户确认 → Writer V0 → Memory 候选 → Resolution 冻结标准 → 分维 Judge / Writer 改写 → 主 Agent 判断 Gate 并交付。反馈默认直接修订，再记录记忆；自动 Judge 反馈不进入记忆。
 
@@ -35,6 +33,6 @@
 
 ## 验证与维护
 
-在本目录执行 `npm test`，需 Node.js 20+ 和 Python 3.9+，无需安装 npm 依赖。这些测试不调用模型、不接触用户记忆。
+原始包不分发 tests、evals 或 npm 工程配置。论据指纹脚本只需 Python 3.9+ 标准库；封装方应在目标宿主验证上述完整流程。
 
 本目录是独立可复制的导出快照。当前上游流程仍在 `report-agent-v2-expert/` 维护，仓库根目录执行 `node report-agent-v2-expert/scripts/build-source.mjs` 可刷新导出；该命令会覆盖同名文件，因此同事应在自己的分支或副本做宿主适配，不要重新导出覆盖适配结果。今后若上游删除文件，需要在 review 中同步移除导出中的旧文件。
