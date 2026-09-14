@@ -1,6 +1,6 @@
 # Report Agent V2 · WorkBuddy 普通插件测试版
 
-本包用于对照验证普通插件安装后的子代理可用性。它与 V2 专家使用相同的 2 个 Skill、6 个 Agent 和 Base Rubrics；不包含 MCP、Hook、外部 CLI、平台启动脚本或任何用户记忆。0.3.0 在第 0 步默认委派资料整理员，核验复用或更新素材目录内的 `structured_data.json`，不改变 Judge/Rewrite 流程。
+本包用于对照验证普通插件安装后的子代理可用性。它与 V2 专家使用相同的 1 个 Skill、6 个 Agent 和 Base Rubrics；不包含 MCP、Hook、外部 CLI、平台启动脚本或任何用户记忆。0.3.0 在第 0 步默认委派资料整理员，核验复用或更新素材目录内的 `structured_data.json`，不改变 Judge/Rewrite 流程。
 
 本目录由专家源码的 `scripts/build-plugin.mjs` 生成，请勿单独修改工作流文件。开发时修改 `report-agent-v2-expert/` 后运行 `npm run build:plugin`，同步生成普通插件和发布目录。
 

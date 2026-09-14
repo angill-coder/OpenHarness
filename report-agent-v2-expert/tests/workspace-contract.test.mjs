@@ -11,7 +11,7 @@ const read = name => fs.readFileSync(path.join(root, name), "utf8");
 test("workspace policy is loaded before evidence and all linked references exist", () => {
   const skill = read(`${skillRoot}/SKILL.md`);
   assert.ok(skill.indexOf("references/workspace-and-delivery.md") < skill.indexOf("委派 `report-evidence-agent-v2`"));
-  for (const group of ["agents", "skills"]) {
+  for (const group of ["agents", "skills", "resources"]) {
     for (const name of fs.readdirSync(path.join(root, group), {recursive: true}).filter(p => p.endsWith(".md"))) {
       const filename = path.join(root, group, name);
       for (const match of fs.readFileSync(filename, "utf8").matchAll(/\]\(([^)]+\.md)\)/g)) {
@@ -51,5 +51,5 @@ test("new workspace separates delivery, immutable history and internal state", (
   assert.doesNotMatch(policy, /├── 本轮论据快照/u);
   assert.match(policy, /每次 Writer 成功.*包括用户反馈直接修订/u);
   assert.match(policy, /dataVersion\/dataSha256/u);
-  assert.match(read("skills/report-evidence-v2/references/output-contract.md"), /不在工作区保存.*副本或 previous 备份/u);
+  assert.match(read("resources/evidence/references/output-contract.md"), /不在工作区保存.*副本或 previous 备份/u);
 });

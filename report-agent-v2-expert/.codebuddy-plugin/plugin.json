@@ -22,8 +22,7 @@
     "./agents/report-evidence-agent-v2.md"
   ],
   "skills": [
-    "./skills/research-report-agent-v2",
-    "./skills/report-evidence-v2"
+    "./skills/research-report-agent-v2"
   ],
   "expertType": "agent",
   "agentName": "report-agent-v2",

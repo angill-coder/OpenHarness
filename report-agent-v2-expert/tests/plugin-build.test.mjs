@@ -54,7 +54,7 @@ test("ordinary plugin is installable as a local marketplace with unchanged workf
     for (const entry of [...manifest.agents, ...manifest.skills]) {
       assert.ok(fs.existsSync(path.resolve(plugin, entry)), entry);
     }
-    for (const group of ["agents", "skills", "rubrics"]) {
+    for (const group of ["agents", "skills", "resources", "rubrics"]) {
       const expected = files(path.join(root, group)).filter((name) => !name.split(path.sep).some((part) => part === ".DS_Store" || part === "__MACOSX" || part.startsWith("._")));
       assert.deepEqual(files(path.join(plugin, group)).sort(), expected.sort());
       for (const relative of expected) {

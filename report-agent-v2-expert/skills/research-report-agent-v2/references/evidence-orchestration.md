@@ -1,6 +1,6 @@
 # 主 Agent 如何调用资料整理员
 
-第 0 步默认先委派 `report-evidence-agent-v2`，由它整理结构化论据，主 Agent 读取结果后再确认写作输入。子代理使用同包的 `report-evidence-v2` Skill，不需要主 Agent 重述完整清洗规则或先自行解析全部素材。
+第 0 步默认先委派 `report-evidence-agent-v2`，由它整理结构化论据，主 Agent 读取结果后再确认写作输入。清洗说明在该 Agent Prompt 中，配套规则和脚本在 `resources/evidence/`，不再依赖独立 Evidence Skill；主 Agent 不重述完整规则或先自行解析全部素材。
 
 ## 何时调用
 
@@ -20,7 +20,7 @@
 
 更新另传 `previousPath`（通常等于 `outputPath`）及 `changeRequest`。默认用户不明确指出变化文件，由 Evidence Agent 用素材清单自动比较新增、修改和删除；主 Agent 不先解析整套材料。用户直接提供的数据更正，先把对应用户原文保存为 `workDir/user-update.md`，标明来自用户消息、尚未独立核验，并以绝对路径作为显式来源传入；不得把写作假设或主 Agent 的分析保存成“用户事实”。
 
-收到结果后读取共享文件并核对基本格式、case_id、数量与缺口；按同包 Evidence Skill 的 `source_inventory.py check` 核对返回的 dataVersion/dataSha256，登记到本轮需求与运行状态。后续写作和 Loop 直接引用共享文件，不复制数据；相对 `source_ref` 按原始素材根目录解析。版本未登记或指纹不一致时先修复数据登记，不继续使用旧绑定。完整理解论据后再提出 hypothesis，不只读子代理摘要。
+收到结果后读取共享文件并核对基本格式、case_id、数量与缺口；按 [素材变化识别](../../../resources/evidence/references/source-changes.md) 调用配套脚本 check 核对 dataVersion/dataSha256，登记到本轮需求与运行状态。后续写作和 Loop 直接引用共享文件，不复制数据；相对 `source_ref` 按原始素材根目录解析。版本未登记或指纹不一致时先修复数据登记，不继续使用旧绑定。完整理解论据后再提出 hypothesis，不只读子代理摘要。
 
 - `EVIDENCE_COMPLETED` / `EVIDENCE_UNCHANGED`：使用返回的合法路径。
 - `EVIDENCE_PARTIAL`：向用户说明实质缺口；不影响任务可继续，但不能声称全部素材已清洗。影响关键判断时先确认边界或补资料。

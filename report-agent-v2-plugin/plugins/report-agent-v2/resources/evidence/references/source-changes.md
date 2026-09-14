@@ -4,10 +4,10 @@
 
 ## 扫描
 
-使用宿主已有的 Python 3.9+ 执行同 Skill 的 `scripts/source_inventory.py`；下面路径替换为主 Agent 给出的绝对路径，参数分别传入，中文及空格路径加引号。不安装 Python 或第三方依赖。
+使用宿主已有的 Python 3.9+ 执行配套资源中的 `resources/evidence/scripts/source_inventory.py`；下面资源目录为插件根目录下的 `resources/evidence`，使用实际绝对路径，参数分别传入，中文及空格路径加引号。不安装 Python 或第三方依赖。
 
 ```text
-python "<Skill目录>/scripts/source_inventory.py" scan --root "<素材目录>" --output "<workDir>/素材扫描.json"
+python "<Evidence资源目录>/scripts/source_inventory.py" scan --root "<素材目录>" --output "<workDir>/素材扫描.json"
 ```
 
 `--root` 是本项目完整素材目录，不是用户本次提及的单个文件。默认排除共享 `structured_data.json`、`数据版本说明.md`、旧版 `素材清单.json`、`报告/`、Agent 运行记录及常见工具缓存；用户把产物另存在素材目录内部时，用 `--exclude "<自定义报告总目录>"` 排除，保持跨轮扫描范围一致。素材扫描文件放在排除范围内，不当作原始素材。
@@ -28,7 +28,7 @@ python "<Skill目录>/scripts/source_inventory.py" scan --root "<素材目录>" 
 按输出契约验证并发布论据表，且本次全部变化来源已经成功处理后，再执行：
 
 ```text
-python "<Skill目录>/scripts/source_inventory.py" confirm --scan "<workDir>/素材扫描.json" --evidence-sha256 "<校验候选时由程序计算的SHA-256>" --summary "<本次论据更新摘要>"
+python "<Evidence资源目录>/scripts/source_inventory.py" confirm --scan "<workDir>/素材扫描.json" --evidence-sha256 "<校验候选时由程序计算的SHA-256>" --summary "<本次论据更新摘要>"
 ```
 
 脚本重新核验素材和共享论据的指纹，再一次写入 `素材目录/数据版本说明.md`：上半部是版本、更新时间、更新摘要和数据指纹；下半部是当前素材指纹 JSON，仅供增量核验。清单不含论据原文，不是数据快照。首次登记 D1，共享数据指纹变化才增加到 D2、D3…；无变化只更新当前素材清单，不新增版本记录。不另建素材清单或数据快照文件。
@@ -36,7 +36,7 @@ python "<Skill目录>/scripts/source_inventory.py" confirm --scan "<workDir>/素
 写作和 Judge 前后，用同一脚本核验本轮绑定的数据，防止共享文件已变化但仍沿用旧评分：
 
 ```text
-python "<Skill目录>/scripts/source_inventory.py" check --root "<素材目录>" --version "D2" --sha256 "<本轮dataSha256>"
+python "<Evidence资源目录>/scripts/source_inventory.py" check --root "<素材目录>" --version "D2" --sha256 "<本轮dataSha256>"
 ```
 
 省略 version/sha256 可查询当前合法版本。返回 `DATA_VERSION_CHANGED` 时停止使用当前任务的旧数据绑定，由主 Agent 按素材更新流程处理；不能凭旧版本号还原已被替换的数据。不保存数据副本，也不要求子代理反复解析全量原文。

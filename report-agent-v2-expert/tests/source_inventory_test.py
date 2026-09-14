@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 
-MODULE = runpy.run_path(str(Path(__file__).resolve().parents[1] / "skills/report-evidence-v2/scripts/source_inventory.py"))
+MODULE = runpy.run_path(str(Path(__file__).resolve().parents[1] / "resources/evidence/scripts/source_inventory.py"))
 scan, confirm, digest, check = (MODULE[name] for name in ("scan", "confirm", "digest", "check"))
 
 
@@ -131,7 +131,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(manifest.read_text(encoding="utf-8"), "broken")
 
     def test_cli_handles_unicode_spaces_and_failed_scan_does_not_publish(self):
-        script = Path(__file__).resolve().parents[1] / "skills/report-evidence-v2/scripts/source_inventory.py"
+        script = Path(__file__).resolve().parents[1] / "resources/evidence/scripts/source_inventory.py"
         output = self.root / "报告" / "中文 空格" / "素材扫描.json"
         args = [sys.executable, "-B", str(script), "scan", "--root", str(self.root), "--output", str(output)]
         result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", timeout=10)
@@ -182,7 +182,7 @@ class InventoryTests(unittest.TestCase):
 
     def test_cli_confirm_and_check_version_without_data_copies(self):
         self.run_scan()
-        script = Path(__file__).resolve().parents[1] / "skills/report-evidence-v2/scripts/source_inventory.py"
+        script = Path(__file__).resolve().parents[1] / "resources/evidence/scripts/source_inventory.py"
         prefix = [sys.executable, "-B", str(script)]
         expected = digest(self.evidence)
         result = subprocess.run(prefix + ["confirm", "--scan", str(self.scanned), "--evidence-sha256", expected,

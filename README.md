@@ -9,7 +9,7 @@
 | [report-agent-v2-expert/](report-agent-v2-expert/) | 专家版及完整开发源码，包含 Agents、Skills、Rubrics、构建脚本和测试；后续开发只改这里。 |
 | [report-agent-v2-plugin/](report-agent-v2-plugin/) | 同源生成的普通插件市场，可独立安装，无需依赖专家目录；不在此手动修改工作流。 |
 
-两种形态使用完全相同的 **6 个 Agent、2 个 Skill 和 Base Rubrics**，仅安装清单和入口不同。插件标识均为 `report-agent-v2`，主 Skill 为 `research-report-agent-v2`。选择一种形态使用，避免在同一会话同时加载重复的 Agent。
+两种形态使用完全相同的 **6 个 Agent、1 个 Skill 和 Base Rubrics**，仅安装清单和入口不同。插件标识均为 `report-agent-v2`，主 Skill 为 `research-report-agent-v2`。选择一种形态使用，避免在同一会话同时加载重复的 Agent。
 
 ## 功能流程
 

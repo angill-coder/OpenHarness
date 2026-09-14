@@ -22,7 +22,7 @@ test("V2 is an isolated native Expert without V1 runtime components", () => {
   assert.equal(manifest.name, "report-agent-v2");
   assert.equal(manifest.agentName, "report-agent-v2");
   assert.equal(manifest.expertType, "agent");
-  assert.deepEqual(manifest.skills, ["./skills/research-report-agent-v2", "./skills/report-evidence-v2"]);
+  assert.deepEqual(manifest.skills, ["./skills/research-report-agent-v2"]);
   assert.equal(manifest.agents.length, 6);
   assert.doesNotMatch(serialized, /mcpServers|hooks|commands/u);
 
@@ -209,10 +209,11 @@ test("build emits a self-contained Expert without platform launchers", async () 
   assert.equal(manifest.version, "0.3.0");
   assert.equal(fs.existsSync(path.join(target, "rubrics/base-rubrics.json")), true);
   assert.equal(fs.existsSync(path.join(target, "skills/research-report-agent-v2/SKILL.md")), true);
-  for (const asset of ["agents/report-evidence-agent-v2.md", "skills/report-evidence-v2/SKILL.md", "skills/report-evidence-v2/references/structured_data.schema.json"]) {
+  for (const asset of ["agents/report-evidence-agent-v2.md", "resources/evidence/references/structured_data.schema.json", "resources/evidence/scripts/source_inventory.py"]) {
     assert.equal(fs.readFileSync(path.join(target, asset), "utf8"), read(asset));
   }
   assert.equal(fs.existsSync(path.join(target, "skills/research-report-agent-v2/references/state-and-scoring.md")), true);
   assert.equal(fs.existsSync(path.join(target, "scripts")), false);
   assert.equal(fs.existsSync(path.join(target, "hooks")), false);
+  assert.equal(fs.existsSync(path.join(target, "skills/report-evidence-v2")), false);
 });

@@ -15,7 +15,7 @@ export function buildPlugin(outputDirectory) {
   manifest.description = "原生研究报告 V2：子代理先整理结构化论据，主 Agent 调度 Writer 持续写作，再完成记忆与评测。使用 research-report-agent-v2 Skill 启动。";
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(path.join(pluginRoot, ".codebuddy-plugin"), { recursive: true });
-  for (const entry of ["agents", "skills", "rubrics"]) {
+  for (const entry of ["agents", "skills", "resources", "rubrics"]) {
     fs.cpSync(path.join(root, entry), path.join(pluginRoot, entry), {
       recursive: true,
       filter: (filename) => ![".DS_Store", "__MACOSX"].includes(path.basename(filename)) && !path.basename(filename).startsWith("._"),

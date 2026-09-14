@@ -49,9 +49,9 @@ ReportAgentMemory/
 
 ## 已知待验证项
 
-资料整理采用 [report-evidence-v2](skills/report-evidence-v2/SKILL.md)，复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入外部模型 CLI 或 Human Report 质检。共享论据保存在素材目录的 `structured_data.json`，不另存数据快照；每份历史稿及 Judgment 记录 dataVersion/dataSha256，数据变化时停止沿用旧绑定。原始素材和历史报告不覆盖。两种包包含完全相同的 6 个 Agent 和 2 个 Skill。
+资料整理由 [report-evidence-agent-v2](agents/report-evidence-agent-v2.md) 独立执行，配套规则和脚本位于 `resources/evidence/`，不再注册 Evidence Skill。复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入外部模型 CLI 或 Human Report 质检。共享论据保存在素材目录的 `structured_data.json`，不另存数据快照；每份历史稿及 Judgment 记录 dataVersion/dataSha256，数据变化时停止沿用旧绑定。原始素材和历史报告不覆盖。两种包包含完全相同的 6 个 Agent 和 1 个 Skill。
 
-素材目录的 `数据版本说明.md` 记录 D1、D2…、更新时间、更新内容和当前文件指纹清单，不另建素材清单文件。自带标准库脚本使用宿主已有的 Python 3.9+ 识别新增、删除和内容修改；全部处理并发布成功才登记数据版本。无变化不递增版本；没有可信清单先完整核验。没有 Python 时可逐项检查资料，但不能伪造已完成的版本登记或继续受版本校验保护的 Loop，不自动安装依赖。详见 [素材变化识别](skills/report-evidence-v2/references/source-changes.md)。
+素材目录的 `数据版本说明.md` 记录 D1、D2…、更新时间、更新内容和当前文件指纹清单，不另建素材清单文件。自带标准库脚本使用宿主已有的 Python 3.9+ 识别新增、删除和内容修改；全部处理并发布成功才登记数据版本。无变化不递增版本；没有可信清单先完整核验。没有 Python 时可逐项检查资料，但不能伪造已完成的版本登记或继续受版本校验保护的 Loop，不自动安装依赖。详见 [素材变化识别](resources/evidence/references/source-changes.md)。
 
 1. 可见记忆目录在 Windows / macOS 实际会话中的权限、跨 Session 复用及人工编辑后的读取；
 2. WorkBuddy 实际会话中的 Writer agentId 返回与 resume 续写，以及主 Agent 对同一个 Dimension Judge 的动态 N 次并行调用；

@@ -8,13 +8,17 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
 
-test("both skills and the evidence agent are declared, with no persistent evidence memory", () => {
+test("only the main skill is registered and Evidence is a standalone agent", () => {
   const manifest = JSON.parse(read(".codebuddy-plugin/plugin.json"));
   assert.equal(manifest.version, JSON.parse(read("package.json")).version);
   assert.ok(manifest.agents.includes("./agents/report-evidence-agent-v2.md"));
-  assert.ok(manifest.skills.includes("./skills/report-evidence-v2"));
+  assert.deepEqual(manifest.skills, ["./skills/research-report-agent-v2"]);
   const agent = read("agents/report-evidence-agent-v2.md");
-  assert.match(agent, /^skills: report-evidence-v2$/mu);
+  assert.doesNotMatch(agent, /^skills:/mu);
+  assert.ok(!fs.existsSync(path.join(root, "skills/report-evidence-v2/SKILL.md")));
+  assert.match(agent, /\.\.\/resources\/evidence\/references\/cleaning-rules.md/u);
+  assert.match(agent, /## 输入/u);
+  assert.match(agent, /## 更新判断/u);
   assert.doesNotMatch(agent, /^memory:/mu);
   assert.match(agent, /不调用外部模型 CLI/u);
 });
@@ -39,16 +43,16 @@ test("evidence preparation is delegated by default before confirmation, updates 
 });
 
 test("evidence contract preserves stable IDs, sources and old versions", () => {
-  const skill = read("skills/report-evidence-v2/SKILL.md");
+  const skill = read("agents/report-evidence-agent-v2.md");
   assert.match(skill, /不复用已移除 ID/u);
   assert.match(skill, /未变论据的 ID 与内容不变/u);
   assert.match(skill, /拒绝覆盖/u);
   assert.match(skill, /不创建空版本/u);
-  const rules = read("skills/report-evidence-v2/references/cleaning-rules.md");
+  const rules = read("resources/evidence/references/cleaning-rules.md");
   assert.match(rules, /问题中的数字也不能冒充/u);
   assert.match(rules, /不能.*用户迁移/u);
   assert.match(rules, /百分比、百分点/u);
-  const schema = JSON.parse(read("skills/report-evidence-v2/references/structured_data.schema.json"));
+  const schema = JSON.parse(read("resources/evidence/references/structured_data.schema.json"));
   assert.deepEqual(schema.required, ["schema", "case_id", "items", "unresolved"]);
   assert.deepEqual(schema.properties.items.items.required, ["id", "type", "source_ref", "content"]);
   assert.equal(schema.properties.items.minItems, 1);
@@ -59,8 +63,8 @@ test("evidence contract preserves stable IDs, sources and old versions", () => {
 test("shared evidence is version-bound without workspace data snapshots", () => {
   const main = read("skills/research-report-agent-v2/SKILL.md");
   const orchestration = read("skills/research-report-agent-v2/references/evidence-orchestration.md");
-  const evidence = read("skills/report-evidence-v2/SKILL.md");
-  const output = read("skills/report-evidence-v2/references/output-contract.md");
+  const evidence = read("agents/report-evidence-agent-v2.md");
+  const output = read("resources/evidence/references/output-contract.md");
   const loop = read("skills/research-report-agent-v2/references/loop-orchestration.md");
   assert.ok(main.includes("`structured_data.json`"));
   assert.match(orchestration, /不要只查当前工作区/u);
@@ -83,14 +87,14 @@ test("evidence fixtures and schema remain independent of the OpenHarness checkou
   assert.equal(previous.items.length, 3);
   assert.equal(new Set(previous.items.map((i) => i.id)).size, 3);
   assert.match(read("tests/fixtures/evidence/update.md"), /10小时/u);
-  const hash = crypto.createHash("sha256").update(read("skills/report-evidence-v2/references/structured_data.schema.json")).digest("hex");
+  const hash = crypto.createHash("sha256").update(read("resources/evidence/references/structured_data.schema.json")).digest("hex");
   // Exact copy of OpenHarness's structured_data.schema.json; no source checkout required.
   assert.equal(hash, "7565c93231d101e0b184df284feb31607c9028e9d2266e3daf9583754f025e67");
 });
 
 test("source scanning precedes incremental review and confirmation follows evidence publication", () => {
-  const skill = read("skills/report-evidence-v2/SKILL.md");
-  const contract = read("skills/report-evidence-v2/references/source-changes.md");
+  const skill = read("agents/report-evidence-agent-v2.md");
+  const contract = read("resources/evidence/references/source-changes.md");
   assert.match(skill, /用户无需指出新增/u);
   assert.match(skill, /sourceRoot/u);
   assert.match(contract, /SHA-256/u);
