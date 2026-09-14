@@ -4,7 +4,7 @@
 
 ## 首次写作
 
-需求确认后，先按 [状态约定](state-and-scoring.md#1-单一运行状态) 初始化 drafting 状态，再调用 Writer，传入 `mode=draft`、用户原始请求、三项确认及用户消息原文、篇幅与素材边界，以及 `writing-instructions.md`、`.report-agent/inputs.md`、论据快照、原始素材和 `历史版本/v0-初稿.md` 的绝对路径。Writer 必须先完整读取写作指令，再写 V0；不依赖主 Agent 的完整会话自动传入。
+需求确认后，先按 [状态约定](state-and-scoring.md#1-单一运行状态) 初始化 drafting 状态，再调用 Writer，传入 `mode=draft`、用户原始请求、三项确认及用户消息原文、篇幅与素材边界，以及 `writing-instructions.md`、`Agent运行记录/本轮需求.md`、论据快照、原始素材和 `历史版本/v0-初稿.md` 的绝对路径。Writer 必须先完整读取写作指令，再写 V0；不依赖主 Agent 的完整会话自动传入。
 
 等待 Writer 完成，读取工具返回的真实 `agentId`，保存为现有 `run-state.json` 中的 `writerAgentId`；后台调用的 `taskId` 仅用于等待，不得冒充 agentId。主 Agent 核验 `REPORT_WRITE_COMPLETED`、mode 和输出文件后才进入 Loop。没有可恢复 ID 就保留 null，不编造；后续按下述恢复方式处理。
 

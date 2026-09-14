@@ -42,7 +42,7 @@ Memory 关闭、无候选或 Resolve 失败时，不调用 Resolution Judge；�
 
 若首轮返回 `status=needs_source`，只对 `inspectSourceFor` 中的候选委派 Memory Agent 执行 `operation=inspect_sources`，按其 `sourceL1Ids` 读取准确 L1；然后把证据补给同一个 Resolution Judge 完成第二次、也是最后一次判断。不得预先读取全部 L1，也不得允许第二次溯源请求。
 
-将其返回的完整 JSON 原样保存到 `.report-agent/state/resolution-plan.json`。检查：
+将其返回的完整 JSON 原样保存到 `Agent运行记录/评测与改写记录/resolution-plan.json`。检查：
 
 - `dimensions[]` 非空，ID 唯一；
 - 权重合计为 `1.0`；
@@ -102,4 +102,4 @@ V2 不另设固定 Rewrite 轮数上限；停止条件沿用 V1 的目标分、�
 - stop code 与简短原因；
 - 如有失败，仅记录简短状态。
 
-向用户交付正式报告、`历史版本/` 和简短结果摘要。不要展示 `.report-agent/`、Resolution Plan、Judge JSON、Sub-agent Prompt 或内部调用日志。
+向用户交付正式报告、`历史版本/` 和简短结果摘要。不要展示 `Agent运行记录/`、Resolution Plan、Judge JSON、Sub-agent Prompt 或内部调用日志。

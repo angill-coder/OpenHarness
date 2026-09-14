@@ -4,7 +4,7 @@
 
 ## 1. 单一运行状态
 
-首次委派 Writer 前在本轮工作区创建 `.report-agent/state/run-state.json`，以 `drafting` 记录初稿阶段；V0 核验完成后进入 `resolving`，此时才设置 startedAt 为当前时间、deadlineAt 为 60 分钟后，初稿不占用 Loop 时间预算。下列路径用于新任务，恢复已有任务时沿用已记录的原路径：
+首次委派 Writer 前在本轮工作区创建 `Agent运行记录/评测与改写记录/run-state.json`，以 `drafting` 记录初稿阶段；V0 核验完成后进入 `resolving`，此时才设置 startedAt 为当前时间、deadlineAt 为 60 分钟后，初稿不占用 Loop 时间预算。下列路径用于新任务，恢复已有任务时沿用已记录的原路径：
 
 ```json
 {
@@ -41,7 +41,7 @@
 
 ## 2. Judgment 持久化与校验
 
-每个版本的聚合评测写入 `.report-agent/state/judgments/<version>.json`。每个 Dimension Judge 必须覆盖该冻结 Dimension 的全部 Check，且每个 Check 恰好一次；只允许：
+每个版本的聚合评测写入 `Agent运行记录/评测与改写记录/judgments/<version>.json`。每个 Dimension Judge 必须覆盖该冻结 Dimension 的全部 Check，且每个 Check 恰好一次；只允许：
 
 ```text
 met = 1.0
@@ -67,7 +67,7 @@ dimensionScore = 1 + 4 × average(checkValues)
 
 ## 3. Revision Brief
 
-不要把全部原始 Judge 输出直接塞给 Writer。主 Agent从历史最佳版本的 Judgment 生成 `.report-agent/state/revision-briefs/<version>.json`：
+不要把全部原始 Judge 输出直接塞给 Writer。主 Agent从历史最佳版本的 Judgment 生成 `Agent运行记录/评测与改写记录/revision-briefs/<version>.json`：
 
 - `repair`：所有非 `met` Check 的维度、要求、状态和原因；
 - `preserve`：所有 `met` Check 对应的已达成要求与具体优点；
