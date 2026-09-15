@@ -4,7 +4,7 @@ WorkBuddy Native V2。它与现有 `research-report-loop-memory` V1 并列，不
 
 ## 当前范围
 
-- 主 Agent 在第 0 步先委派资料整理员生成或核验复用结构化论据，再确认输入并委派 Writer 撰写 V0；
+- 主 Agent 在第 0 步先委派资料整理员生成或核验复用结构化论据，再确认输入并委派 Writer 撰写 R0；
 - Memory Agent 在用户主目录的 `ReportAgentMemory/` 管理 L0/L1/L2B，不依赖宿主原生 Memory；
 - Resolution Judge 根据任务动态冻结 N 个评测维度；
 - 参数化 Dimension Judge 按 N 个维度运行；

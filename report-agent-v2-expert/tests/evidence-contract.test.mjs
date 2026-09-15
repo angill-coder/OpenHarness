@@ -127,9 +127,9 @@ test("rejudging updated materials creates fresh state and preserves the previous
   const contract = read("skills/research-report-agent-v2/references/evidence-orchestration.md");
   const writer = read("skills/research-report-agent-v2/references/writer-orchestration.md");
   const prompt = read("agents/report-writer-v2.md");
-  assert.match(contract, /新的报告运行目录.*新的 drafting 状态/u);
+  assert.match(contract, /新的 `loop-序号-日期时间\/`.*新的 drafting 状态/u);
   assert.match(contract, /不继承旧评分、旧采纳结果或停止计数/u);
-  assert.match(contract, /旧运行和历史报告保持不动/u);
+  assert.match(contract, /旧运行和交付报告保持不动/u);
   assert.match(writer, /可续用原 Writer.*mode=draft.*baselineReportPath/u);
   assert.match(writer, /实际 Writer ID 保存到新运行状态/u);
   assert.match(prompt, /baselineReportPath.*按新论据.*不覆盖基线/u);

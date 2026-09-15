@@ -4,12 +4,14 @@
 
 ## 1. 单一运行状态
 
-首次委派 Writer 前在本轮工作区创建 `Agent运行记录/评测与改写记录/run-state.json`，以 `drafting` 记录初稿阶段；V0 核验完成后进入 `resolving`，此时才设置 startedAt 为当前时间、deadlineAt 为 60 分钟后，初稿不占用 Loop 时间预算。下列路径用于新任务，恢复已有任务时沿用已记录的原路径：
+首次委派 Writer 前，在已创建的本轮 `loop-序号-日期时间/` 内创建 `评测与改写记录/run-state.json`，以 `drafting` 记录初稿阶段；R0 核验完成后进入 `resolving`，此时才设置 startedAt 为当前时间、deadlineAt 为 60 分钟后，初稿不占用 Loop 时间预算。下列路径均相对本轮 Loop 目录，恢复已有任务时沿用已记录的原路径：
 
 ```json
 {
   "schemaVersion": 1,
   "runId": "report-agent-v2-<本轮唯一ID>",
+  "reportDirectory": "<报告目录绝对路径>",
+  "loopDirectory": "<本轮 Loop 目录绝对路径>",
   "stateRevision": 0,
   "status": "drafting|resolving|judging|rewriting|completed",
   "writerAgentId": null,
@@ -24,20 +26,21 @@
   "nextVersion": 1,
   "noImprovementStreak": 0,
   "judgedVersions": [],
+  "delivery": null,
   "stopState": {"stopped": false, "code": null, "reason": null}
 }
 ```
 
 每次更新前重新读取状态并核对本阶段开始时的 `stateRevision`；一致才写入并将其加一，不一致说明另一流程已经推进，停止当前写入并从最新状态恢复。每完成一个阶段就先更新状态文件，再进入下一阶段。所有 JSON 使用 UTF-8 完整写入，不在用户交付目录散落状态。恢复会话时先读该文件；已完成 Resolution 的阶段再读取冻结 Plan：
 
-- `drafting`：按 [Writer 调用与续写](writer-orchestration.md) 核验已有 V0 或恢复写作，不重复覆盖初稿；
+- `drafting`：按 [Writer 调用与续写](writer-orchestration.md) 核验已有 R0 或恢复写作，不重复覆盖初稿；
 - `completed`：不得自动继续 Judge 或 Rewrite；用户明确提出的反馈修订可续用 Writer 修改交付稿，但不改写旧 Judgment 或沿用旧评分；
 - `resolving`：从 Resolution 继续；
 - `judging`：只补齐当前版本尚未完成的维度；
 - `rewriting`：核对目标版本不存在后继续 Rewrite；
 - 当前阶段必需的文件缺失、互相矛盾或冻结 Plan 已变化：停止自动循环，交付已完成 Judge 的历史最佳版本并说明状态无法安全恢复。
 
-版本文件一经写入不得覆盖。V0 首次完成有效 Judge 后自动成为历史最佳；后续候选必须经过采纳门槛。若目标版本文件已存在，不得复用同一版本号。
+版本文件一经写入不得覆盖。R0 首次完成有效 Judge 后自动成为历史最佳；后续候选必须经过采纳门槛。若目标版本文件已存在，不得复用同一版本号。`currentBestVersion`、`judgedVersions` 和 Judgment 的 version 均指内部 RN；`nextVersion` 保留整数，1 表示下一候选 R1，不是交付 v1。`delivery` 在成功交付后保存 `{version: "vN", artifactPath: "<绝对路径>", sourceCandidate: "RN"}`；重试发布前同时核验它与报告目录的版本说明，不重复产生用户版本。
 
 `writerAgentId` 只保存宿主工具实际返回的可恢复 ID，更新状态时保留它，不在进入 Loop 时重置。旧状态没有该字段时视为 null，保留其余运行记录；不得用后台 taskId 或 Writer 自报文本代替。
 
@@ -45,7 +48,7 @@ dataVersion/dataSha256 在本轮开始时绑定，不能随共享数据变化而
 
 ## 2. Judgment 持久化与校验
 
-每个版本的聚合评测写入 `Agent运行记录/评测与改写记录/judgments/<version>.json`。每个 Dimension Judge 必须覆盖该冻结 Dimension 的全部 Check，且每个 Check 恰好一次；只允许：
+每个版本的聚合评测写入 `评测与改写记录/judgments/<version>.json`，其中 `<version>` 为 R0、R1 等本轮内部候选标识。每个 Dimension Judge 必须覆盖该冻结 Dimension 的全部 Check，且每个 Check 恰好一次；只允许：
 
 ```text
 met = 1.0
@@ -71,7 +74,7 @@ dimensionScore = 1 + 4 × average(checkValues)
 
 ## 3. Revision Brief
 
-不要把全部原始 Judge 输出直接塞给 Writer。主 Agent从历史最佳版本的 Judgment 生成 `Agent运行记录/评测与改写记录/revision-briefs/<version>.json`：
+不要把全部原始 Judge 输出直接塞给 Writer。主 Agent从历史最佳版本的 Judgment 生成 `评测与改写记录/revision-briefs/<version>.json`，文件名使用待生成候选的 RN（如生成 R1 的要求存为 R1.json）：
 
 - `repair`：所有非 `met` Check 的维度、要求、状态和原因；
 - `preserve`：所有 `met` Check 对应的已达成要求与具体优点；

@@ -31,14 +31,14 @@ test("V2 is an isolated native Expert without V1 runtime components", () => {
   }
 });
 
-test("main Agent delegates V0 to Writer and dynamic dimensions are explicit", () => {
+test("main Agent delegates R0 to Writer and dynamic dimensions are explicit", () => {
   const skill = read("skills/research-report-agent-v2/SKILL.md");
   const expert = read("agents/report-agent-v2.md");
   const resolution = read("agents/report-resolution-judge-v2.md");
 
   assert.match(skill, /第 0 步：盘点并解析素材/u);
   assert.match(skill, /摘要观点假设（hypothesis）/u);
-  assert.match(skill, /按规则写出初稿 V0/u);
+  assert.match(skill, /按规则写出初稿 R0/u);
   assert.match(skill, /loop-orchestration\.md/u);
   assert.match(skill, /memory-orchestration\.md/u);
   assert.match(expert, /委派 `report-writer-v2`/u);
@@ -200,7 +200,7 @@ test("one Writer owns draft, loop revision and feedback with a resumable convers
   assert.match(orchestration, /无法恢复该 ID/u);
   assert.match(orchestration, /重建一次 Writer/u);
   assert.match(orchestration, /不同报告不复用 writerAgentId/u);
-  assert.match(orchestration, /已有 V0 不重写/u);
+  assert.match(orchestration, /已有 R0 不重写/u);
   const state = read("skills/research-report-agent-v2/references/state-and-scoring.md");
   const sample = JSON.parse(state.match(/```json\n([\s\S]*?)\n```/u)[1]);
   assert.equal(sample.writerAgentId, null);

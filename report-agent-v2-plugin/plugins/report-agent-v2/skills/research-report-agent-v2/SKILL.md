@@ -12,7 +12,7 @@ description: 主 Agent 确认需求并调度 WorkBuddy 原生子代理，由 Wri
 本 Skill 包含以下配套能力：
 
 - **资料整理**：写作前先委派资料整理员，将参考资料保存为带来源的结构化论据表；用户补充或纠正资料时更新论据，避免反复解析和混用旧数据。
-- **Report Loop**：主 Agent 负责调度，Writer 读取写作指令后完成初稿 V0；Resolution Judge 根据 Base Rubrics 与 Memory Rubrics 冻结本轮动态评测维度，由 Dimension Judge 评测后续用同一个 Writer 改写，最终交付历史最佳版本。
+- **Report Loop**：主 Agent 负责调度，Writer 读取写作指令后完成初稿 R0；Resolution Judge 根据 Base Rubrics 与 Memory Rubrics 冻结本轮动态评测维度，由 Dimension Judge 评测后续用同一个 Writer 改写，最终交付历史最佳版本。
 - **Report Memory**：默认启用的长期写作记忆，独立保存在用户主目录下可见的 `ReportAgentMemory/`。用户反馈会在当前报告修改完成后交给 Memory Agent，形成的 Memory Rubrics 在后续 Report Loop 中参与 Resolution。用户明确要求关闭或重新开启时，按 [Memory 调度契约](references/memory-orchestration.md) 委派 Memory Agent 更新设置；关闭时只使用 Base Rubrics，已有记忆保留但不读、不写、不整理。
 
 ## 首次启用
@@ -39,19 +39,19 @@ description: 主 Agent 确认需求并调度 WorkBuddy 原生子代理，由 Wri
 
 三项都必须保存一段用户消息原文，供后续评测理解用户的真实输入。系统、App、工具注入的路径和附件清单只是候选素材，不能代替用户确认。缺少用户原文时，在完成素材解析后一次性提问并结束本轮；收到回复后继续写作，不停在“准备开始”的过程说明。
 
-### 第 2 步：委派 Writer 按规则写出初稿 V0
+### 第 2 步：委派 Writer 按规则写出初稿 R0
 
 按 [Writer 调用与续写](references/writer-orchestration.md) 委派 `report-writer-v2`，由它完整读取 [writing-instructions.md](references/writing-instructions.md)，按其中的证据边界、三段结构、洞察和表达要求写作。
 
-Writer 在本轮报告工作区的 `历史版本/<报告主题>-v0.md` 保存可编辑的 Markdown 初稿 V0。主 Agent 等待并核验文件，保存 Writer 的真实 agentId 供后续续写。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
+主 Agent 按 [保存位置与交付](references/workspace-and-delivery.md) 创建本轮 `loop-序号-日期时间/`，Writer 在其中的 `候选报告/R0.md` 保存初稿。内部候选用 R0、R1…，用户交付版用 v1、v2…，两者独立编号。主 Agent 等待并核验文件，保存 Writer 的真实 agentId 供后续续写。正文不得包含内部来源号、分析过程、写作规则、Judge 说明或工具状态。
 
-V0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或解释 Judge 与 Memory Agent；写作前不要把 Memory 注入 Writer 上下文。主 Agent 不代写初稿。
+R0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或解释 Judge 与 Memory Agent；写作前不要把 Memory 注入 Writer 上下文。主 Agent 不代写初稿。
 
 ### 第 3 步：启动 Report Loop
 
-确认 V0 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 V0 和素材路径启动原生 Sub-agent 流程。全过程维护单一运行状态；会话恢复时继续未完成阶段，不重复启动。必须等待 Resolution、全部 Judge 和必要的 Rewrite 完成，不得提前结束任务，也不得把 Resolution Plan 或 Judge JSON 当作交付物。
+确认 R0 文件存在后，读取并直接执行 [loop-orchestration.md](references/loop-orchestration.md)。根据已确认的三项输入、对应用户原文、初稿 R0 和素材路径启动原生 Sub-agent 流程。全过程维护单一运行状态；会话恢复时继续未完成阶段，不重复启动。必须等待 Resolution、全部 Judge 和必要的 Rewrite 完成，不得提前结束任务，也不得把 Resolution Plan 或 Judge JSON 当作交付物。
 
-宿主不得事前阅读 Sub-agent Prompt、运行测试或自行替代 Judge 与 Rewrite。完成后交付最终报告和版本记录目录，并简要说明评测版本数、改写次数、最佳版本和最终得分；不要展示内部 JSON、详细 Judge 过程或工具日志。
+宿主不得事前阅读 Sub-agent Prompt、运行测试或自行替代 Judge 与 Rewrite。完成后只交付 `报告/<报告主题>-vN.md`，更新 `报告/版本说明.md` 并简述评测版本数、改写次数和最终得分；不展示内部候选、运行目录、JSON 或工具日志。
 
 ### 第 4 步：处理用户反馈
 
@@ -65,4 +65,4 @@ Judge 反馈和自动改写不得进入 Memory。除处理用户明确提出的�
 
 - Writer 或 Report Loop 任一环节失败时，按相应执行卡保留现有稿件；宿主不得接管写作或 Judge。
 - Memory 已开启但 Capture 失败时，不回滚已完成的报告修改，也不得通过热改 Expert 或写入 WorkBuddy 通用 Memory 补偿。
-- 交付最终可编辑报告和版本记录目录，并明确说明 Report Loop 的评测版本数、改写次数、最佳版本和最终得分；不展开内部 JSON、详细评分过程或工具调用日志。
+- 只交付本次带 vN 的可编辑报告，并简述评测版本数、改写次数和实际最终得分；直接修订未评测时如实说明，不沿用旧分数，不罗列旧稿或内部记录。

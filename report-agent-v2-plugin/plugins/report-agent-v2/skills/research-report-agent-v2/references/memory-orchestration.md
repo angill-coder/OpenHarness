@@ -19,7 +19,7 @@
 
 ## 写作与 Judge
 
-- 写作前不执行面向主 Agent 的 Memory Recall。Writer 只按本轮用户要求和写作规则完成 V0。
+- 写作前不执行面向主 Agent 的 Memory Recall。Writer 只按本轮用户要求和写作规则完成 R0。
 - Memory 关闭时，Resolution 只使用 Base Rubrics；开启后才读取 L2B 候选。
 - L2B 只维护独立 Memory Rubrics，不修改 Base，也不预先决定 Dimension。
 - Resolution Judge 根据当前任务判断激活、合并或新增哪些维度；只有它明确请求时，才由 Memory Agent 按准确 `sourceL1Ids` 返回 L1 来源，然后冻结本轮标准。
