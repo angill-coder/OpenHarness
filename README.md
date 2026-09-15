@@ -26,6 +26,7 @@
 
 ```bash
 npm --prefix report-agent-v2-expert run build:plugin
+npm --prefix report-agent-v2-expert run build:skillhub
 npm --prefix report-agent-v2-expert test
 npm --prefix report-agent-v2-expert run build
 ```

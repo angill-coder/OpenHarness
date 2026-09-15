@@ -15,6 +15,10 @@ description: 主 Agent 确认需求并调度 WorkBuddy 原生子代理，由 Wri
 - **Report Loop**：主 Agent 负责调度，Writer 读取写作指令后完成初稿 V0；Resolution Judge 根据 Base Rubrics 与 Memory Rubrics 冻结本轮动态评测维度，由 Dimension Judge 评测后续用同一个 Writer 改写，最终交付历史最佳版本。
 - **Report Memory**：默认启用的长期写作记忆，独立保存在用户主目录下可见的 `ReportAgentMemory/`。用户反馈会在当前报告修改完成后交给 Memory Agent，形成的 Memory Rubrics 在后续 Report Loop 中参与 Resolution。用户明确要求关闭或重新开启时，按 [Memory 调度契约](references/memory-orchestration.md) 委派 Memory Agent 更新设置；关闭时只使用 Base Rubrics，已有记忆保留但不读、不写、不整理。
 
+## 首次启用
+
+当前会话已提供配套子代理时直接进入第 0 步，不扫描安装目录。若子代理缺失或调用返回“不可用”，按 [配套子代理启用](references/first-use.md) 检查现有注册；需要配置时先告知用户，再由随包脚本补齐。注册成功后提示新开会话继续，不重复注册、不用主 Agent 代替子代理。
+
 ## 执行步骤
 
 ### 第 0 步：盘点并解析素材

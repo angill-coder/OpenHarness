@@ -20,6 +20,7 @@ V2 不安装平台相关的每日 Automation。Memory Agent 在每日 16:30 后�
 npm test
 npm run build
 npm run build:plugin
+npm run build:skillhub
 ```
 
 构建产物位于 `release/report-agent-v2-expert-0.3.0/`，可作为 WorkBuddy Expert 目录检查或打包。构建不会读取或修改 V1，也不覆盖旧版 0.2.0 包。
@@ -27,6 +28,8 @@ npm run build:plugin
 ## 普通插件对照测试包
 
 运行 `npm run build:plugin` 同步仓库同级目录 `../report-agent-v2-plugin/`，并生成 `release/report-agent-v2-plugin-0.3.0/` 本地插件市场。两个输出目录均为生成物，请只在本源码目录修改后重新构建。此命令不修改或重建专家包；安装与测试方法见 [普通插件说明](packaging/plugin-README.md)。
+
+`npm run build:skillhub` 生成根目录只有一个 `SKILL.md` 入口的 SkillHub 包，配套子代理缺失时支持原地补齐安装、启用记录，不新增市场或复制缓存。详见 [SkillHub 说明](packaging/skillhub-README.md)。
 
 普通插件直接复用本目录的 Agents、Skill 和 Rubrics，仅去掉专家专属的清单元数据，不新增 MCP、Hook 或 CLI，也不修改用户的 WorkBuddy 配置。通过普通会话选择 `research-report-agent-v2` Skill 使用，不设置全局默认 Agent。不要同时加载专家与普通插件的两份 V2。
 

@@ -8,7 +8,7 @@
 
 1. 解压压缩包，在 WorkBuddy 的普通插件管理入口添加本地插件市场目录：选择包含 `.codebuddy-plugin/marketplace.json` 和 `plugins/` 的文件夹，不要选择专家导入入口。
 2. 安装并启用市场 `report-agent-v2-local` 中的 `report-agent-v2`。完整标识为 `report-agent-v2@report-agent-v2-local`。添加市场不等于安装、启用插件。
-3. 新建普通会话，选择 `research-report-agent-v2` Skill，输入：“基于XX文件夹的素材，写一篇‘XX’主题的研究报告，篇幅X页”。初稿仍由当前主 Agent 撰写。
+3. 新建普通会话，选择 `research-report-agent-v2` Skill，输入：“基于XX文件夹的素材，写一篇‘XX’主题的研究报告，篇幅X页”。主 Agent 调度 Writer 完成初稿和后续改写。
 
 如果当前 WorkBuddy 版本没有本地插件市场入口，请保留版本号和界面反馈，不要自行编辑安装注册表或把文件复制进全局 agents 目录。
 

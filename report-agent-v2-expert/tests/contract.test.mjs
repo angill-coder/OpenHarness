@@ -69,6 +69,17 @@ test("native orchestration details stay in references rather than crowding the m
   assert.match(memory, /MEMORY_CAPTURE_COMPLETED/u);
 });
 
+test("Capture delegation preserves user evidence without pre-classifying preferences", () => {
+  const orchestration = read("skills/research-report-agent-v2/references/memory-orchestration.md");
+  const main = read("agents/report-agent-v2.md");
+  assert.match(orchestration, /原问题、选项及实际选择，区分 Agent 建议与用户表达/u);
+  assert.match(orchestration, /不预先概括“用户的长期偏好”/u);
+  assert.match(orchestration, /不建议写入某层、某 Scope 或扩充某条 Rubric/u);
+  assert.match(orchestration, /用户接受本轮建议，不等于认可其为以后默认规则/u);
+  assert.match(main, /写作反馈原文及必要语境/u);
+  assert.doesNotMatch(main, /只把写作偏好交给/u);
+});
+
 test("Memory is explicitly file-backed and independent of host injection", () => {
   const agents = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".md"));
   for (const agent of agents) {
