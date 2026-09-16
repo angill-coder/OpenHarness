@@ -106,25 +106,21 @@ test("source scanning precedes incremental review and confirmation follows evide
   assert.match(read("skills/research-report-agent-v2/references/workspace-and-delivery.md"), /数据版本说明.md/u);
 });
 
-test("follow-up feedback routes by impact while preserving explicit user choices", () => {
+test("follow-up feedback defaults to direct revision without loop confirmation", () => {
   const contract = read("skills/research-report-agent-v2/references/evidence-orchestration.md");
   assert.match(contract, /先在普通回复中简述.*影响哪些内容/u);
-  assert.match(contract, /writer-orchestration\.md#反馈分流/u);
-  assert.match(contract, /改变主要结论或需要整体重写时启动新 Loop/u);
+  assert.match(contract, /默认续用 Writer.*直接修订，不跑 Loop/u);
+  assert.match(contract, /不询问是否重新评测或让用户选择写作方式/u);
   assert.match(contract, /明确要求“只更新论据”.*报告不动，不调用 Writer 或 Judge/u);
+  assert.match(contract, /只有用户明确要求重新评测时.*以旧报告为基础/u);
   assert.match(contract, /不重问开场问题/u);
   assert.match(contract, /不为重新确认 hypothesis 常规暂停/u);
   assert.match(contract, /且没有其他修改或重评要求.*结束/u);
   assert.doesNotMatch(contract, /AskUserQuestion|简短确认以下选择|意图不明确时简短确认/u);
   const skill = read("skills/research-report-agent-v2/SKILL.md");
-  assert.match(skill, /重大修改.*启动新一轮 Report Loop，小型修改直接 Rewrite/u);
-  const writer = read("skills/research-report-agent-v2/references/writer-orchestration.md");
-  assert.match(writer, /重大修改 → 新 Loop.*通篇改写.*分析方向/u);
-  assert.match(writer, /小型修改 → 直接 Rewrite.*局部措辞.*不影响主要结论/u);
-  assert.match(writer, /重新评测或“只修改、不评测”时按其要求/u);
-  assert.match(writer, /直接建立新 Loop，不先另做一次 feedback 改写/u);
-  assert.match(read("agents/report-agent-v2.md"), /重大修改启动新 Loop，小型修改直接 Rewrite/u);
-  assert.match(read("skills/research-report-agent-v2/references/memory-orchestration.md"), /只针对本次用户反馈 Capture 一次/u);
+  assert.match(skill, /默认续用 Writer 直接修改当前报告，不询问是否启动 Report Loop/u);
+  assert.match(skill, /不重新运行 Report Loop，也不询问是否启动/u);
+  assert.match(read("agents/report-agent-v2.md"), /后续反馈默认由 Writer 直接修订/u);
 });
 
 test("rejudging updated materials creates fresh state and preserves the previous report", () => {
@@ -136,5 +132,5 @@ test("rejudging updated materials creates fresh state and preserves the previous
   assert.match(contract, /旧运行和交付报告保持不动/u);
   assert.match(writer, /可续用原 Writer.*mode=draft.*baselineReportPath/u);
   assert.match(writer, /实际 Writer ID 保存到新运行状态/u);
-  assert.match(prompt, /baselineReportPath.*本轮用户要求及有效论据.*不覆盖基线/u);
+  assert.match(prompt, /baselineReportPath.*按新论据.*不覆盖基线/u);
 });

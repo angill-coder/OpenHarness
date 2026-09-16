@@ -14,7 +14,7 @@
 | `resources/report/` | 统一报告篇幅统计 Python 脚本 |
 | `rubrics/` | 原始 Base Rubrics，保持内容不变 |
 
-入口先读 `skills/research-report-agent-v2/SKILL.md`，再按其链接读取对应执行卡。流程保持：Evidence → 用户确认 → Writer R0 → Memory 候选 → Resolution 冻结标准 → 分维 Judge / Writer 改写 → 主 Agent 判断 Gate 并交付。用户反馈的重大修改启动新 Loop，小型修改直接修订，完成后再记录记忆；自动 Judge 反馈不进入记忆。
+入口先读 `skills/research-report-agent-v2/SKILL.md`，再按其链接读取对应执行卡。流程保持：Evidence → 用户确认 → Writer R0 → Memory 候选 → Resolution 冻结标准 → 分维 Judge / Writer 改写 → 主 Agent 判断 Gate 并交付。反馈默认直接修订，再记录记忆；自动 Judge 反馈不进入记忆。
 
 ## 封装时需要适配的边界
 

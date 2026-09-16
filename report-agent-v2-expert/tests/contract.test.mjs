@@ -62,7 +62,7 @@ test("native orchestration details stay in references rather than crowding the m
   assert.match(state, /下降不超过 `0\.15`/u);
   assert.match(loop, /运行约一小时/u);
   assert.doesNotMatch(loop, /三轮 Rewrite/u);
-  assert.match(memory, /完成直接 Rewrite 或新 Loop/u);
+  assert.match(memory, /直接修改当前报告/u);
   assert.match(memory, /普通报告写作反馈一律走 Capture/u);
   assert.match(memory, /不得改走 Manage/u);
   assert.match(memory, /明确要求忘记/u);
