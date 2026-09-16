@@ -2,8 +2,8 @@
 name: report-team-evidence-v2
 description: Prepare, verify and incrementally update source-linked structured evidence for research reports.
 displayName:
-  en: "Lin"
-  zh: "林知源"
+  en: "Evidence Analyst"
+  zh: "资料整理员"
 profession:
   en: "Evidence Analyst"
   zh: "论据分析师"

@@ -2,8 +2,8 @@
 name: report-team-memory-v2
 description: Resolve, capture, review and manage source-backed writing memory without editing reports or base rubrics.
 displayName:
-  en: "Ji"
-  zh: "纪知新"
+  en: "Memory Curator"
+  zh: "记忆管理员"
 profession:
   en: "Writing Memory Curator"
   zh: "写作记忆管理员"
