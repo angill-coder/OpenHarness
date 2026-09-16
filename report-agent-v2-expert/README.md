@@ -10,7 +10,7 @@ WorkBuddy Native V2。它与现有 `research-report-loop-memory` V1 并列，不
 - 参数化 Dimension Judge 按 N 个维度运行；
 - 主 Agent按 V1 公式确定性计分并执行候选采纳门槛；
 - Writer 首次完整读取写作指令，用同一写作会话完成初稿与改写；Loop 改写只从历史最佳版本生成候选，主 Agent 保存 writerAgentId、Judgment 与恢复状态；
-- 用户反馈后先续用 Writer 修改报告，再 Capture。
+- 用户反馈的重大修改启动新 Loop，小型修改直接续用 Writer 修订，完成后再 Capture。
 
 V2 不安装平台相关的每日 Automation。Memory Agent 在每日 16:30 后首次被调用时执行当日 Reflection；长期未使用时在下次调用补做，因此不引入 MCP、Hook 或系统计划任务。
 
