@@ -2,8 +2,8 @@
 name: report-team-resolution-judge-v2
 description: Interpret applicable memory rubrics for the task and freeze a dynamic evaluation plan before report judging.
 displayName:
-  en: "Heng"
-  zh: "衡知准"
+  en: "Rubric Editor"
+  zh: "评测标准编辑"
 profession:
   en: "Rubric Resolution Editor"
   zh: "评测标准编辑"

@@ -2,8 +2,8 @@
 name: report-team-dimension-judge-v2
 description: Evaluate exactly one frozen dimension of one report candidate and return evidence-backed check judgments.
 displayName:
-  en: "Yan"
-  zh: "严知衡"
+  en: "Report Reviewer"
+  zh: "报告评审员"
 profession:
   en: "Report Reviewer"
   zh: "报告评测员"

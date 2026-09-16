@@ -2,8 +2,8 @@
 name: report-team-writer-v2
 description: Draft and revise one research report in a persistent writing conversation, using supplied evidence and writing instructions.
 displayName:
-  en: "Wen"
-  zh: "文知行"
+  en: "Report Writer"
+  zh: "报告写作员"
 profession:
   en: "Report Writer"
   zh: "报告撰稿人"
