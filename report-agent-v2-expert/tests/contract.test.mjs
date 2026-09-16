@@ -54,7 +54,7 @@ test("native orchestration details stay in references rather than crowding the m
   const memory = read("skills/research-report-agent-v2/references/memory-orchestration.md");
 
   assert.doesNotMatch(skill, /Σ\(score × weight\)/u);
-  assert.match(loop, /有 N 个维度就调用 N 次/u);
+  assert.match(loop, /每轮评测全部 N 个维度/u);
   assert.match(loop, /并发上限为 6/u);
   assert.match(state, /overall = Σ\(dimensionScore × weight\)/u);
   assert.match(loop, /三项确认各自对应的一段用户消息原文/u);

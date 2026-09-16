@@ -1,5 +1,7 @@
 # Native Sub-agent 调用契约
 
+同一 Loop 内，Dimension Judge 通过 `resume=judgeAgentIds[dimensionId]` 延续同维度评测上下文，不跨维度或新 Loop 复用；调用与恢复按 [Loop 执行卡](loop-orchestration.md) 执行。
+
 本文件用于开发和调试 V2；正常写作只需按 `SKILL.md` 的步骤调用。
 
 | Sub-agent | 输入 | 输出标记或 Schema | 是否写文件 |
