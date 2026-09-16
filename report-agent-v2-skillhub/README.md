@@ -8,4 +8,4 @@
 
 注册只针对 WorkBuddy。macOS / Windows 使用同一 Python 脚本，无第三方依赖；当前版本的两处注册方式已在本机验证，仍需在对应 WorkBuddy 版本验证实际子代理调用。SkillHub 删除本包后，插件注册记录可能残留，可通过 WorkBuddy 插件管理解除；不要手动删除其他插件记录。
 
-开发时运行 `npm run build:skillhub` 生成本包，不在发布目录单独修改工作流。
+本目录是直接提交、可用于 SkillHub 分发的完整包体，不包含构建脚本。开发以 `report-agent-v2-expert/` 为准，修改后同步四份包体；本包只调整根 Skill 入口和相对路径，不单独修改工作流。版本与一致性检查见仓库根目录 README。

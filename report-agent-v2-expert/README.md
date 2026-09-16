@@ -20,7 +20,6 @@ V2 不安装平台相关的每日 Automation。Memory Agent 在每日 16:30 后�
 npm test
 npm run build
 npm run build:plugin
-npm run build:skillhub
 ```
 
 构建产物位于 `release/report-agent-v2-expert-0.3.0/`，可作为 WorkBuddy Expert 目录检查或打包。构建不会读取或修改 V1，也不覆盖旧版 0.2.0 包。
@@ -29,7 +28,7 @@ npm run build:skillhub
 
 运行 `npm run build:plugin` 同步仓库同级目录 `../report-agent-v2-plugin/`，并生成 `release/report-agent-v2-plugin-0.3.0/` 本地插件市场。两个输出目录均为生成物，请只在本源码目录修改后重新构建。此命令不修改或重建专家包；安装与测试方法见 [普通插件说明](packaging/plugin-README.md)。
 
-`npm run build:skillhub` 生成根目录只有一个 `SKILL.md` 入口的 SkillHub 包，配套子代理缺失时支持原地补齐安装、启用记录，不新增市场或复制缓存。详见 [SkillHub 说明](packaging/skillhub-README.md)。
+仓库同级 `report-agent-v2-skillhub/` 直接保存可分发的 SkillHub 包，根目录只有一个主 `SKILL.md`。配套子代理缺失时支持原地补齐安装、启用记录，不新增市场或复制缓存。该包不使用专用构建脚本；内容与版本随本源码同步，`npm test` 检查四份包体一致性。
 
 普通插件直接复用本目录的 Agents、Skill 和 Rubrics，仅去掉专家专属的清单元数据，不新增 MCP、Hook 或 CLI，也不修改用户的 WorkBuddy 配置。通过普通会话选择 `research-report-agent-v2` Skill 使用，不设置全局默认 Agent。不要同时加载专家与普通插件的两份 V2。
 
@@ -52,7 +51,7 @@ ReportAgentMemory/
 
 ## 已知待验证项
 
-资料整理由 [report-evidence-agent-v2](agents/report-evidence-agent-v2.md) 独立执行，配套规则和脚本位于 `resources/evidence/`，不再注册 Evidence Skill。复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入外部模型 CLI 或 Human Report 质检。共享论据保存在素材目录的 `structured_data.json`，不另存数据快照；每份历史稿及 Judgment 记录 dataVersion/dataSha256，数据变化时停止沿用旧绑定。原始素材和历史报告不覆盖。两种包包含完全相同的 6 个 Agent 和 1 个 Skill。
+资料整理由 [report-evidence-agent-v2](agents/report-evidence-agent-v2.md) 独立执行，配套规则和脚本位于 `resources/evidence/`，不再注册 Evidence Skill。复用 OpenHarness 的清洗原则和原始 Evidence Schema，不搬入外部模型 CLI 或 Human Report 质检。共享论据保存在素材目录的 `structured_data.json`，不另存数据快照；每份历史稿及 Judgment 记录 dataVersion/dataSha256，数据变化时停止沿用旧绑定。原始素材和历史报告不覆盖。四份包体共用 6 个 Agent 和 1 个 Skill 的工作流，仅安装封装与入口路径不同。
 
 素材目录的 `数据版本说明.md` 记录 D1、D2…、更新时间、更新内容和当前文件指纹清单，不另建素材清单文件。自带标准库脚本使用宿主已有的 Python 3.9+ 识别新增、删除和内容修改；全部处理并发布成功才登记数据版本。无变化不递增版本；没有可信清单先完整核验。没有 Python 时可逐项检查资料，但不能伪造已完成的版本登记或继续受版本校验保护的 Loop，不自动安装依赖。详见 [素材变化识别](resources/evidence/references/source-changes.md)。
 
