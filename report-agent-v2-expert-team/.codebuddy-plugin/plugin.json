@@ -1,0 +1,183 @@
+{
+  "name": "report-agent-v2-expert-team",
+  "version": "0.1.0",
+  "author": {
+    "name": "angill-coder/OpenHarness"
+  },
+  "homepage": "https://github.com/angill-coder/OpenHarness/tree/report-memory-loop-V2/report-agent-v2-source",
+  "description": "A native WorkBuddy team for evidence preparation, persistent report writing, dynamic rubric evaluation and writing memory.",
+  "expertType": "team",
+  "agentName": "report-agent-v2-expert-team-lead",
+  "teamInfo": {
+    "leadAgent": "report-agent-v2-expert-team-lead",
+    "memberAgents": [
+      "report-team-evidence-v2",
+      "report-team-writer-v2",
+      "report-team-memory-v2",
+      "report-team-resolution-judge-v2",
+      "report-team-dimension-judge-v2"
+    ]
+  },
+  "agents": [
+    "./agents/report-agent-v2-expert-team-lead.md",
+    "./agents/report-team-evidence-v2.md",
+    "./agents/report-team-writer-v2.md",
+    "./agents/report-team-memory-v2.md",
+    "./agents/report-team-resolution-judge-v2.md",
+    "./agents/report-team-dimension-judge-v2.md"
+  ],
+  "skills": [
+    "./skills/research-report-team-v2"
+  ],
+  "displayName": {
+    "en": "Report Research Team V2",
+    "zh": "报告专家团 V2"
+  },
+  "profession": {
+    "en": "Report Research Team V2",
+    "zh": "报告专家团 V2"
+  },
+  "displayDescription": {
+    "en": "A coordinated team turns source materials into evidence-backed reports, evaluates dynamic dimensions, revises drafts and learns writing preferences.",
+    "zh": "协同整理素材、持续撰写报告，按动态维度并行评测与改写，并从用户反馈中审慎积累长期写作记忆。"
+  },
+  "avatar": "avatars/team.png",
+  "categoryId": "12-IndustryConsultant",
+  "defaultInitPrompt": {
+    "en": "Write a research report on \"XX\" using materials in the XX folder, within X pages.",
+    "zh": "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页"
+  },
+  "plugin": "report-agent-v2-expert-team",
+  "tags": [
+    {
+      "en": "Research Reports",
+      "zh": "研究报告"
+    },
+    {
+      "en": "Evidence-based Evaluation",
+      "zh": "证据评测"
+    },
+    {
+      "en": "Writing Memory",
+      "zh": "写作记忆"
+    }
+  ],
+  "quickPrompts": [
+    {
+      "en": "Write a research report on \"XX\" using materials in the XX folder, within X pages.",
+      "zh": "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页"
+    },
+    {
+      "en": "Revise this report using my feedback.",
+      "zh": "根据我的反馈修改这份报告。"
+    },
+    {
+      "en": "Review and organize my long-term writing preferences.",
+      "zh": "查看并整理我的长期写作偏好。"
+    }
+  ],
+  "members": [
+    {
+      "id": "report-agent-v2-expert-team-lead",
+      "name": {
+        "en": "Gu",
+        "zh": "顾全之"
+      },
+      "displayName": {
+        "en": "Gu",
+        "zh": "顾全之"
+      },
+      "profession": {
+        "en": "Research Editor",
+        "zh": "研究主编"
+      },
+      "avatar": "avatars/lead.png",
+      "role": "lead"
+    },
+    {
+      "id": "report-team-evidence-v2",
+      "name": {
+        "en": "Lin",
+        "zh": "林知源"
+      },
+      "displayName": {
+        "en": "Lin",
+        "zh": "林知源"
+      },
+      "profession": {
+        "en": "Evidence Analyst",
+        "zh": "论据分析师"
+      },
+      "avatar": "avatars/evidence.png",
+      "role": "member"
+    },
+    {
+      "id": "report-team-writer-v2",
+      "name": {
+        "en": "Wen",
+        "zh": "文知行"
+      },
+      "displayName": {
+        "en": "Wen",
+        "zh": "文知行"
+      },
+      "profession": {
+        "en": "Report Writer",
+        "zh": "报告撰稿人"
+      },
+      "avatar": "avatars/writer.png",
+      "role": "member"
+    },
+    {
+      "id": "report-team-memory-v2",
+      "name": {
+        "en": "Ji",
+        "zh": "纪知新"
+      },
+      "displayName": {
+        "en": "Ji",
+        "zh": "纪知新"
+      },
+      "profession": {
+        "en": "Writing Memory Curator",
+        "zh": "写作记忆管理员"
+      },
+      "avatar": "avatars/memory.png",
+      "role": "member"
+    },
+    {
+      "id": "report-team-resolution-judge-v2",
+      "name": {
+        "en": "Heng",
+        "zh": "衡知准"
+      },
+      "displayName": {
+        "en": "Heng",
+        "zh": "衡知准"
+      },
+      "profession": {
+        "en": "Rubric Resolution Editor",
+        "zh": "评测标准编辑"
+      },
+      "avatar": "avatars/resolution.png",
+      "role": "member"
+    },
+    {
+      "id": "report-team-dimension-judge-v2",
+      "name": {
+        "en": "Yan",
+        "zh": "严知衡"
+      },
+      "displayName": {
+        "en": "Yan",
+        "zh": "严知衡"
+      },
+      "profession": {
+        "en": "Report Reviewer",
+        "zh": "报告评测员"
+      },
+      "avatar": "avatars/judge.png",
+      "role": "member"
+    }
+  ]
+}
