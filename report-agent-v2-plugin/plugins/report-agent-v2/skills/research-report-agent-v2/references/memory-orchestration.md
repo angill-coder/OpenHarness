@@ -15,7 +15,7 @@
 
 这是用户可见、跨项目和宿主共用的真实文件夹，不位于 WorkBuddy、插件或报告工作区内。目录的初始化和读写由 Memory Agent 负责；无法确定或访问时说明原因，不静默换一个位置。切换宿主时沿用同一路径，不另建记忆副本。
 
-目录仅包含 `MEMORY.md`（顶部 revision 版本号、开关、索引及当前 L2B）、`L0-episodes/` 和 `L1-atoms/`；不生成 history 或历史 MEMORY 副本。旧目录不自动删除，版本号不代表可回滚。
+目录包含 `MEMORY.md`（设置、revision 及生效 L2B）、`memory-history.md`（实际变更记录）、`L0-episodes/` 和 `L1-atoms/`。不维护全量索引；历史仅按需查阅，不进入常规评测，不提供自动回滚。旧目录不自动删除。
 
 ## 写作与 Judge
 
