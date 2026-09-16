@@ -68,7 +68,9 @@ Resolution Judge 返回失败、重复溯源或未通过上述检查时，记录
 - 当前任务、受众和篇幅；
 - 该维度核验所需的素材或 `structured_data.json` 路径。
 
-有 N 个维度就调用 N 次；并发上限为 6，超过时分批执行。每个 Judge 只评一维，不允许重新解释 Memory 或增加维度。
+每轮评测全部 N 个维度，并发上限为 6，超过时分批执行。R0 为每个维度创建独立 Judge，将宿主返回的真实 agentId 保存到 `run-state.json` 的 `judgeAgentIds[dimensionId]`；R1/R2 通过 `resume=judgeAgentIds[dimensionId]` 续用同一 Judge，传入本轮报告路径、reportStats 和冻结维度。不同维度不共用上下文，上一轮完成后才续评；不重新解释 Memory 或增加维度。
+
+仅原 Judge 确认不可恢复时，才为该维度重建并更新 ID，补充冻结维度、上一轮该维结果及必要任务背景；历史结果只供对照，不计入本轮聚合。普通评测错误先在原 Judge 中重试，仍遵循下述重试与停止上限。新 Loop 不复用旧 Loop 的 Judge。
 
 Dimension Judge 只返回各 Check 的 `met / partial / miss` 判断，不拥有分数决定权。全部返回后，严格按 [state-and-scoring.md](state-and-scoring.md) 统一计算维度分和 overall，并持久化该版本 Judgment。Judge 缺失、重复或增加 Check，或返回无法解析的结果时最多重试 3 次；仍失败则停止循环，交付完成 Judge 的历史最佳版本并说明评测不完整，不由主 Agent补造判断。
 

@@ -2,7 +2,7 @@
 
 面向 WorkBuddy 的研究报告助手：先整理结构化论据，由主 Agent 调度 Writer 撰写初稿、续用同一写作会话改写，再由原生子代理完成评测和写作记忆。V2 不依赖 V1 的 MCP、Hook、Python Runner 或外部模型 CLI。
 
-## 四份包体
+## 包体与专家团
 
 | 目录 | 用途 |
 | --- | --- |
@@ -10,8 +10,9 @@
 | [report-agent-v2-expert/](report-agent-v2-expert/) | 专家版及完整开发源码，包含 Agents、Skills、Rubrics、构建脚本和测试；后续开发只改这里。 |
 | [report-agent-v2-plugin/](report-agent-v2-plugin/) | 同源生成的普通插件市场，可独立安装，无需依赖专家目录；不在此手动修改工作流。 |
 | [report-agent-v2-skillhub/](report-agent-v2-skillhub/) | 可直接用于 SkillHub 分发的完整包体，原主 Skill 放在根目录 `SKILL.md`，无需额外入口或构建脚本。 |
+| [report-agent-v2-expert-team/](report-agent-v2-expert-team/) | 独立专家团开发源码，通过 TeamCreate / SendMessage 协作；在此目录执行 `npm test`、`npm run build`，压缩包生成于 `dist/`。 |
 
-四份包体共用 **6 个 Agent、1 个 Skill 和 Base Rubrics** 的工作流。Source 去除宿主安装逻辑，其余仅安装清单和入口路径不同。插件标识均为 `report-agent-v2`，主 Skill 为 `research-report-agent-v2`。选择一种安装形态使用，避免在同一会话同时加载重复的 Agent。
+前四份包体共用 **6 个 Agent、1 个 Skill 和 Base Rubrics** 的工作流。Source 去除宿主安装逻辑，其余仅安装清单和入口路径不同。插件标识均为 `report-agent-v2`，主 Skill 为 `research-report-agent-v2`。专家团独立维护，标识为 `report-agent-v2-expert-team`；其反馈流程以自身执行卡为准。选择一种安装形态使用，避免在同一会话同时加载重复的 Agent。
 
 ## 功能流程
 

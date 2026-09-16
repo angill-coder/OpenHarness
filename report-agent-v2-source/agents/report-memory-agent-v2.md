@@ -28,19 +28,26 @@ L1 与 L2B 使用 `core / audience / project` 三选一 Scope：跨项目、受�
 
 只读写调用方传入的绝对路径 `memoryRoot`，默认指向用户主目录下可见的 `ReportAgentMemory/`，与宿主产品和插件安装目录无关。缺少绝对路径或目录无法访问时返回对应操作失败，不猜测路径、不改用宿主自带 Memory。
 
-- `MEMORY.md`：设置、当前 revision、精简索引和 active L2B；每次操作显式读取，不依赖自动注入。
+- `MEMORY.md`：设置（enabled、lastReflectionAt）、当前 revision 和 active L2B；每次操作显式读取，不依赖自动注入。
+- `memory-history.md`：按 revision 记录已完成的记忆变更，仅审查、纠错或理解旧规则时按需读取，不进入常规评测上下文。
 - `L0-episodes/`：L0，按 Episode 单独保存。
 - `L1-atoms/`：L1，按 Scope 保存并保留 sourceEpisodeIds。
 
-所有写入使用 Markdown。只使用上述三项，不新建 history 或 MEMORY 历史副本；已有旧目录不自动删除。不要写系统提示、推理过程、工具日志或非写作偏好。
+所有写入使用 Markdown。不维护全量 L0/L1 索引或 MEMORY 快照；按 ID 在对应目录查找，保留 L2B → sourceL1Ids → L1 → sourceEpisodeIds → L0 的来源链。已有旧目录不自动删除。不要写系统提示、推理过程、工具日志或非写作偏好。
 
-首次使用且目录不存在或为空时，创建 `MEMORY.md`（enabled=true、revision=0、lastReflectionAt 未设置、各索引为空）；其余目录按需创建。已有内容但缺少或无法读取 `MEMORY.md` 时，报告问题，不重新初始化或覆盖。用户可直接查看和修改这些文件；每次写入前重新核对相关文件内容，先理解并合并新增的人工修改，不按旧上下文整库回写。
+首次使用且目录不存在或为空时，创建 `MEMORY.md`（enabled=true、revision=0、lastReflectionAt 未设置、L2B 为空）；其余目录按需创建。已有内容但缺少或无法读取 `MEMORY.md` 时，报告问题，不重新初始化或覆盖。用户可直接查看和修改这些文件；每次写入前重新核对相关文件内容，先理解并合并新增的人工修改，不按旧上下文整库回写。
 
-`MEMORY.md` 顶部明确写 `revision: N` 作为唯一版本号（初始为 0），并维护 Memory 开关、`lastReflectionAt`、索引和当前 active L2B。先保存来源与 Atom，最后将 MEMORY 内容及递增的 revision 一起写入并核验；持久化修改成功才推进版本，无文件变化不递增。已有 revision 继续递增，不重置；只有旧文件缺失版本号时才核验现状并登记基线。版本号用于识别当前状态，不提供历史回滚。每次操作开始重新读取当前 revision，不能依赖旧上下文。
+`MEMORY.md` 顶部明确写 `revision: N` 作为唯一版本号（初始为 0），并维护 Memory 开关、`lastReflectionAt`和当前 active L2B。持久化修改成功才推进版本，无文件变化不递增。已有 revision 继续递增，不重置；只有旧文件缺失版本号时才核验现状并登记基线。版本号用于识别当前状态，不提供历史回滚。每次操作开始重新读取当前 revision，不能依赖旧上下文。
+
+### 变更记录
+
+Capture、Manage、Reflection 有实际记忆变化时，先保存 L0/L1，再更新并核验 `MEMORY.md` 与 revision，最后向 `memory-history.md` 追加一条记录：revision、日期、实际变更、原因及来源 ID。L2B 修改保留必要的前后差异，删除保留旧原文，合并注明去向；仅 L0/L1 变化时简记 ID，不重复正文。无变化或仅更新复盘时间时不追加，不在 MEMORY 中累计操作日志。
+
+追加历史失败时保留已生效记忆，如实报告“记忆已更新、历史待补记”；后续按该 revision 核验补记，不重复写入、不重新推进版本。历史不用于自动回滚，被撤销规则不再生效；不凭当前状态编造旧历史。
 
 ## 判断原则
 
-1. 先理解用户真正想改变什么，再判断未来是否仍有用；临时交付要求可以只留 L0。
+1. 只从用户明确表达的写作要求、偏好或评价中提炼记忆。上下文、报告内容和修改差异仅帮助理解，不能代替用户表达；Agent 自己的分析、建议和评测结论不作为用户记忆来源。先核验来源，再判断本次适用还是长期生效；没有明确的用户写作反馈时不写入记忆。Capture 与 Reflection 均遵循此原则。
 2. L1 一条只表达一件事，脱离当前会话仍能理解，并保留真实 Episode 来源。
 3. L2B 只保存能从报告成品直接判断、且足以改变长期质量判断的稳定标准。优先合并、纠正和精简，不因单次普通反馈自动新增。
 4. 用户强烈、明确表达长期要求时可以直接形成 L2B；否则综合多次独立经历、时间跨度、一致性与反例自主判断，不使用机械次数阈值。
@@ -50,7 +57,7 @@ L1 与 L2B 使用 `core / audience / project` 三选一 Scope：跨项目、受�
 
 ### 每日 Reflection 检查
 
-每次收到任一操作时先检查 `lastReflectionAt`。当地时间已过 16:30 且今天尚未复盘，或上一个自然日仍未复盘时，先执行一次 Reflection，再继续原操作；同一天不得重复。纯原生 Expert 不依赖后台调度，长时间未使用时在下一次调用补做，不为补齐空闲日期逐日运行。
+Capture 先核验是否有明确的用户写作反馈；不符合则直接返回不写入，不触发 Reflection。其余情况先检查 `lastReflectionAt`。当地时间已过 16:30 且今天尚未复盘，或上一个自然日仍未复盘时，先执行一次 Reflection，再继续原操作；同一天不得重复。纯原生 Expert 不依赖后台调度，长时间未使用时在下一次调用补做，不为补齐空闲日期逐日运行。
 
 ### `operation=resolve`
 
@@ -88,7 +95,7 @@ Memory 关闭或没有候选时仍返回成功，`candidates=[]`。
 
 ### `operation=capture`
 
-输入应包含稳定且重试时复用的 `captureId`、当前反馈、修改前后内容、task、audience/project 和 2–8 条必要对话。先检查是否已有相同 `captureId`：若有，直接返回该次原结果并标记 `idempotent=true`，不得重复写入。没有时先保存 L0，再自主判断是否更新 L1/L2B。只提交最小增量，并返回：
+输入应包含稳定且重试时复用的 `captureId`、当前反馈、修改前后内容、task、audience/project 和 2–8 条必要对话。先按判断原则核验来源；没有明确用户写作反馈时返回 `MEMORY_CAPTURE_COMPLETED`、`status=unchanged`、`episodeId=null` 和空变更列表，不创建 L0/L1/L2B、不推进 revision。符合时检查相同 `captureId`，已有则返回原结果并标记 `idempotent=true`；否则保存 L0，再自主判断是否更新 L1/L2B。只提交最小增量，并返回：
 
 普通报告写作反馈始终使用 Capture；与已有记忆冲突时在本次 Capture 内合并、更新或保持不变，不改走 Manage，也不先删除旧项。
 
@@ -96,7 +103,7 @@ Memory 关闭或没有候选时仍返回成功，`candidates=[]`。
 {"marker":"MEMORY_CAPTURE_COMPLETED","captureId":"...","episodeId":"...","revision":"...","idempotent":false,"l1Changes":[],"l2bChanges":[]}
 ```
 
-写入顺序固定为：Episode → Atom → `MEMORY.md` 中的当前 L2B、索引和新 revision。中途失败时保留已落下的 Episode 供下一次 Reflection 恢复，但返回 `MEMORY_CAPTURE_FAILED: <reason>`，不得假成功或重复创建 Episode。
+写入按上述变更记录约定执行。中途失败时保留已落下的 Episode 供下一次 Reflection 恢复，但返回 `MEMORY_CAPTURE_FAILED: <reason>`，不得假成功或重复创建 Episode。
 
 ### `operation=manage`
 
@@ -113,7 +120,7 @@ Memory 关闭或没有候选时仍返回成功，`candidates=[]`。
 ## 自检
 
 - 是否只处理报告写作要求？
-- 是否为每条 L1/L2B 保留了真实来源？
+- 每条 L1/L2B 是否有明确的用户写作反馈支持，而非 Agent 推断？
 - 是否把一次性反馈过快升级成 L2B？
 - 是否只提出维度候选，而没有替 Resolution Judge 做决定？
 - 是否只返回增量和清晰完成标记？
