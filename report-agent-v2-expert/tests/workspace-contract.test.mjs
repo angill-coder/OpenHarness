@@ -21,7 +21,7 @@ test("workspace policy is loaded before evidence and all linked references exist
   }
 });
 
-test("new workspace separates delivery, immutable history and internal state", () => {
+test("flat delivery versions and hidden per-loop candidates use distinct paths", () => {
   const policy = read(`${skillRoot}/references/workspace-and-delivery.md`);
   const loop = read(`${skillRoot}/references/loop-orchestration.md`);
   const state = read(`${skillRoot}/references/state-and-scoring.md`);
@@ -30,26 +30,36 @@ test("new workspace separates delivery, immutable history and internal state", (
   assert.match(policy, /目标不可写时，先确认/u);
   assert.match(policy, /恢复已有任务沿用已记录的原路径/u);
   assert.match(policy, /不改变记忆目录/u);
-  assert.ok(policy.includes("Agent运行记录/本轮需求.md"));
-  assert.ok(read(`${skillRoot}/references/writer-orchestration.md`).includes("Agent运行记录/本轮需求.md"));
-  assert.ok(read(`${skillRoot}/references/evidence-orchestration.md`).includes("Agent运行记录/评测与改写记录/素材处理/r001"));
-  assert.match(policy, /可见的过程记录目录/u);
-  for (const artifact of ["历史版本/<报告主题>-v0.md", "历史版本/<报告主题>-v1.md", "历史版本/版本说明.md", "报告主题.md"]) {
+  assert.ok(read(`${skillRoot}/references/writer-orchestration.md`).includes("`本轮需求.md`"));
+  assert.ok(read(`${skillRoot}/references/evidence-orchestration.md`).includes("报告目录/.report-agent/<报告标识>/素材处理/r001"));
+  for (const artifact of ["候选报告/R0.md", "候选报告/R1.md", "<报告主题>-vN.md", "版本说明.md"]) {
     assert.ok(loop.includes(artifact), artifact);
   }
   for (const artifact of ["run-state.json", "judgments/<version>.json", "revision-briefs/<version>.json"]) {
-    assert.ok(state.includes(`Agent运行记录/评测与改写记录/${artifact}`), artifact);
+    assert.ok(state.includes(`评测与改写记录/${artifact}`), artifact);
   }
-  assert.ok(loop.includes("Agent运行记录/评测与改写记录/resolution-plan.json"));
+  assert.ok(loop.includes("评测与改写记录/resolution-plan.json"));
   for (const group of ["agents", "skills"]) {
     for (const name of fs.readdirSync(path.join(root, group), {recursive: true}).filter(p => p.endsWith(".md"))) {
-      assert.doesNotMatch(read(`${group}/${name}`), /source\/structured_data\.json|\.report-loop-v2\/|\.report-agent\/|inputs\.md|`versions\/|`summary\.md`/u, name);
+      assert.doesNotMatch(read(`${group}/${name}`), /source\/structured_data\.json|\.report-loop-v2\/|Agent运行记录\/|历史版本\/|<报告主题>-v0\.md|\bV0\b|inputs\.md|`versions\/|`summary\.md`/u, name);
     }
   }
   assert.match(policy, /日期时间在本轮开始时确定/u);
   assert.match(policy, /数据版本说明.md/u);
   assert.doesNotMatch(policy, /├── 本轮论据快照/u);
-  assert.match(policy, /每次 Writer 成功.*包括用户反馈直接修订/u);
   assert.match(policy, /dataVersion\/dataSha256/u);
+  assert.match(policy, /Windows.*Hidden/u);
+  assert.match(policy, /不新建 Loop 或反馈修订记录目录/u);
+  assert.match(policy, /正文未变.*不复制新报告/u);
+  assert.match(policy, /同一报告.*最大序号加一/u);
+  assert.match(policy, /每轮 Loop 独立从 `R0`/u);
+  assert.match(policy, /RN 与 vN 没有数字对应关系/u);
+  const example = policy.match(/```text\n([\s\S]*?)\n```/u)[1];
+  for (const v of [1, 2, 3]) assert.match(example, new RegExp(`<报告主题>-v${v}\\.md +如`, 'u'));
+  assert.doesNotMatch(example, /历史版本|反馈修订记录|<报告主题>\.md/u);
+  const stateExample = JSON.parse(state.match(/```json\n([\s\S]*?)\n```/u)[1]);
+  assert.equal(stateExample.nextVersion, 1);
+  assert.equal(stateExample.delivery, null);
+  assert.ok(stateExample.reportDirectory && stateExample.loopDirectory);
   assert.match(read("resources/evidence/references/output-contract.md"), /不在工作区保存.*副本或 previous 备份/u);
 });

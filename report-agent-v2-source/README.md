@@ -1,6 +1,6 @@
 # Report Agent V2 原始源码
 
-用于二次开发和封装，不是可直接安装的 Codex、Claude Code 或 WorkBuddy 插件。初始导出基线为 `7f7f598`；未包含同期其他任务尚未提交的篇幅与 Writer 修改。
+用于二次开发和封装，不是可直接安装的 Codex、Claude Code 或 WorkBuddy 插件。由同仓库 Expert 源码导出，与当前写作、评测和记忆流程同步；不包含 WorkBuddy 首次安装注册步骤及其脚本。
 
 这是一套以 Prompt 和文件契约驱动的工作流，不是独立运行的 Agent 框架。保留原始文件和相对路径，便于与已验证的 WorkBuddy 版本比较；没有附带安装清单、市场注册、头像、MCP、Hook 或外部模型 Runner。原 Prompt 中的 WorkBuddy 表述和工具调用语法仍属于待适配内容，不代表其他宿主已支持。
 
@@ -11,9 +11,10 @@
 | `agents/` | 主调度、Evidence、Writer、Memory、Resolution Judge、Dimension Judge，共六个角色 |
 | `skills/research-report-agent-v2/` | 主流程、写作指令、评分与状态、目录和交付约定 |
 | `resources/evidence/` | 清洗规则、数据 Schema、增量素材指纹 Python 脚本 |
+| `resources/report/` | 统一报告篇幅统计 Python 脚本 |
 | `rubrics/` | 原始 Base Rubrics，保持内容不变 |
 
-入口先读 `skills/research-report-agent-v2/SKILL.md`，再按其链接读取对应执行卡。流程保持：Evidence → 用户确认 → Writer V0 → Memory 候选 → Resolution 冻结标准 → 分维 Judge / Writer 改写 → 主 Agent 判断 Gate 并交付。反馈默认直接修订，再记录记忆；自动 Judge 反馈不进入记忆。
+入口先读 `skills/research-report-agent-v2/SKILL.md`，再按其链接读取对应执行卡。流程保持：Evidence → 用户确认 → Writer R0 → Memory 候选 → Resolution 冻结标准 → 分维 Judge / Writer 改写 → 主 Agent 判断 Gate 并交付。反馈默认直接修订，再记录记忆；自动 Judge 反馈不进入记忆。
 
 ## 封装时需要适配的边界
 

@@ -31,14 +31,14 @@ test("V2 is an isolated native Expert without V1 runtime components", () => {
   }
 });
 
-test("main Agent delegates V0 to Writer and dynamic dimensions are explicit", () => {
+test("main Agent delegates R0 to Writer and dynamic dimensions are explicit", () => {
   const skill = read("skills/research-report-agent-v2/SKILL.md");
   const expert = read("agents/report-agent-v2.md");
   const resolution = read("agents/report-resolution-judge-v2.md");
 
   assert.match(skill, /第 0 步：盘点并解析素材/u);
   assert.match(skill, /摘要观点假设（hypothesis）/u);
-  assert.match(skill, /按规则写出初稿 V0/u);
+  assert.match(skill, /按规则写出初稿 R0/u);
   assert.match(skill, /loop-orchestration\.md/u);
   assert.match(skill, /memory-orchestration\.md/u);
   assert.match(expert, /委派 `report-writer-v2`/u);
@@ -67,6 +67,17 @@ test("native orchestration details stay in references rather than crowding the m
   assert.match(memory, /不得改走 Manage/u);
   assert.match(memory, /明确要求忘记/u);
   assert.match(memory, /MEMORY_CAPTURE_COMPLETED/u);
+});
+
+test("Capture delegation preserves user evidence without pre-classifying preferences", () => {
+  const orchestration = read("skills/research-report-agent-v2/references/memory-orchestration.md");
+  const main = read("agents/report-agent-v2.md");
+  assert.match(orchestration, /原问题、选项及实际选择，区分 Agent 建议与用户表达/u);
+  assert.match(orchestration, /不预先概括“用户的长期偏好”/u);
+  assert.match(orchestration, /不建议写入某层、某 Scope 或扩充某条 Rubric/u);
+  assert.match(orchestration, /用户接受本轮建议，不等于认可其为以后默认规则/u);
+  assert.match(main, /写作反馈原文及必要语境/u);
+  assert.doesNotMatch(main, /只把写作偏好交给/u);
 });
 
 test("Memory is explicitly file-backed and independent of host injection", () => {
@@ -189,7 +200,7 @@ test("one Writer owns draft, loop revision and feedback with a resumable convers
   assert.match(orchestration, /无法恢复该 ID/u);
   assert.match(orchestration, /重建一次 Writer/u);
   assert.match(orchestration, /不同报告不复用 writerAgentId/u);
-  assert.match(orchestration, /已有 V0 不重写/u);
+  assert.match(orchestration, /已有 R0 不重写/u);
   const state = read("skills/research-report-agent-v2/references/state-and-scoring.md");
   const sample = JSON.parse(state.match(/```json\n([\s\S]*?)\n```/u)[1]);
   assert.equal(sample.writerAgentId, null);

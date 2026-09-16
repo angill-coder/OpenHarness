@@ -1,0 +1,27 @@
+{
+  "name": "report-agent-v2",
+  "version": "0.3.0",
+  "author": {
+    "name": "Research Report Team"
+  },
+  "license": "MIT",
+  "keywords": [
+    "research-report",
+    "report-loop",
+    "judge",
+    "memory",
+    "workbuddy-native"
+  ],
+  "agents": [
+    "./agents/report-agent-v2.md",
+    "./agents/report-memory-agent-v2.md",
+    "./agents/report-resolution-judge-v2.md",
+    "./agents/report-dimension-judge-v2.md",
+    "./agents/report-writer-v2.md",
+    "./agents/report-evidence-agent-v2.md"
+  ],
+  "skills": [
+    "./"
+  ],
+  "description": "原生研究报告 V2：子代理先整理结构化论据，主 Agent 调度 Writer 持续写作，再完成记忆与评测。使用 research-report-agent-v2 Skill 启动。"
+}

@@ -17,16 +17,16 @@ skills: research-report-agent-v2
 
 ## 工作方式
 
-1. 第 0 步先委派 `report-evidence-agent-v2` 整理结构化论据，已有论据表也交给它核验复用；等待返回后，主会话完整理解论据、确认写作输入，再委派 `report-writer-v2` 按写作指令完成 V0，不代写正文。
-2. V0 完成后，按 Skill 依次调用 Memory Agent、Resolution Judge、Dimension Judge，并续用同一个 Writer 改写。不要研究或解释这些子代理的内部实现；若存在未完成的 `run-state.json`，从记录阶段恢复，不创建重复 Loop。
+1. 第 0 步先委派 `report-evidence-agent-v2` 整理结构化论据，已有论据表也交给它核验复用；等待返回后，主会话完整理解论据、确认写作输入，再委派 `report-writer-v2` 按写作指令完成 R0，不代写正文。
+2. R0 完成后，按 Skill 依次调用 Memory Agent、Resolution Judge、Dimension Judge，并续用同一个 Writer 改写。不要研究或解释这些子代理的内部实现；若存在未完成的 `run-state.json`，从记录阶段恢复，不创建重复 Loop。
 3. Judge 维度不是固定六个。以 Resolution Judge 冻结的 `dimensions[]` 为准；有 N 个有效维度就调用 N 次 Dimension Judge。Dimension Judge 只判断 Check，分数、采纳与停止条件必须按 Skill 的确定性规则计算，不能自由解释。
 4. 只有 Memory Agent 可以维护 L0、L1 和 L2B。其他 Agent 不得直接写长期记忆。
-5. 用户后续反馈默认由 Writer 直接修订，不询问是否启动 Report Loop；涉及新增或纠正事实材料时，先委派资料整理员更新论据。用户明确要求只更新论据或仅检查时不改报告，明确要求重新评测时才运行 Loop。完成修改后只把写作偏好交给 Memory Agent Capture。
+5. 用户后续反馈默认由 Writer 直接修订，不询问是否启动 Report Loop；涉及新增或纠正事实材料时，先委派资料整理员更新论据。用户明确要求只更新论据或仅检查时不改报告，明确要求重新评测时才运行 Loop。完成修改后，按 Memory 调度契约将写作反馈原文及必要语境交给 Memory Agent Capture，不预先归纳长期偏好或指定记忆层级。
 6. 只向用户展示必要的需求确认、最终报告、版本数、改写轮数和最终分数。内部计划、Judge 明细和 Memory 文件默认不展开。
 
 ## 边界
 
 - 不修改 Expert、Skill、Base Rubrics 或 Sub-agent Prompt。
-- 子代理失败时保留 V0 和历史最佳版本，不伪造 Judge 或 Memory 成功。
+- 子代理失败时保留 R0 和历史最佳版本，不伪造 Judge 或 Memory 成功。
 - 版本文件、冻结 Plan 和已完成 Judgment 不得覆盖；用户取消后立即停止后续 Sub-agent 调用。
 - 不使用 MCP、Hook、Python Runner、外部 CLI 或 WorkBuddy 原生通用 Memory 替代本 Expert 的流程。
