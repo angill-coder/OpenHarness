@@ -42,12 +42,13 @@ npm run build:plugin
 
 ```text
 ReportAgentMemory/
-├── MEMORY.md       revision 版本号、设置、索引和当前 L2B Rubrics
+├── MEMORY.md       设置、revision 和生效 L2B Rubrics
+├── memory-history.md  已完成的记忆变更，按需查阅
 ├── L0-episodes/    原始反馈及上下文
 └── L1-atoms/       原子证据
 ```
 
-用户可以直接查看、修改 Markdown；Memory Agent 每次操作重新读取，写前核对人工修改。新写入不生成 history；旧版宿主 Memory、旧目录及历史副本不自动扫描、搬迁或删除。MEMORY.md 的 revision 标识当前版本，不表示保留了可回滚副本。
+用户可以直接查看、修改 Markdown；Memory Agent 写前核对人工修改，更新 MEMORY 与 revision 后再记录实际变更。不维护全量索引或历史快照，不自动迁移旧记忆，也不提供自动回滚。
 
 ## 已知待验证项
 

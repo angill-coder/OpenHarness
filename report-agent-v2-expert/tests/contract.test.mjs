@@ -88,13 +88,13 @@ test("Memory is explicitly file-backed and independent of host injection", () =>
     assert.doesNotMatch(content, /mcp__/u);
   }
   const memory = read("agents/report-memory-agent-v2.md");
-  for (const name of ["memoryRoot", "ReportAgentMemory/", "MEMORY.md", "L0-episodes/", "L1-atoms/"]) {
+  for (const name of ["memoryRoot", "ReportAgentMemory/", "MEMORY.md", "memory-history.md", "L0-episodes/", "L1-atoms/"]) {
     assert.ok(memory.includes(name), `Missing storage contract: ${name}`);
   }
   assert.doesNotMatch(memory, /`(?:episodes|atoms)\//u);
   assert.doesNotMatch(memory, /`history\/`|保留 history/u);
   assert.match(memory, /顶部明确写 `revision: N` 作为唯一版本号/u);
-  assert.match(memory, /不新建 history 或 MEMORY 历史副本/u);
+  assert.match(memory, /不维护全量 L0\/L1 索引或 MEMORY 快照/u);
   const orchestration = read("skills/research-report-agent-v2/references/memory-orchestration.md");
   assert.match(orchestration, /USERPROFILE/u);
   assert.match(orchestration, /HOME/u);
@@ -163,7 +163,7 @@ test("Memory capture is idempotent and Reflection is due once per day", () => {
 
   assert.match(memory, /稳定且重试时复用的 `captureId`/u);
   assert.match(memory, /idempotent=true/u);
-  assert.match(memory, /Episode → Atom → `MEMORY\.md`/u);
+  assert.match(memory, /先保存 L0\/L1，再更新并核验 `MEMORY\.md` 与 revision，最后向 `memory-history\.md` 追加/u);
   assert.match(memory, /当地时间已过 16:30/u);
   assert.match(orchestration, /重试时必须复用/u);
 });
