@@ -28,10 +28,10 @@
 ## 用户反馈后 Capture
 
 - 新增资料、数据纠错和论据更新先按 [evidence-orchestration.md](evidence-orchestration.md) 处理，不作为写作偏好 Capture；混合反馈只向 Memory Agent 传递其中的写作要求及必要语境，不把事实清洗结果当成用户长期偏好。
-- 仅在 Memory 已开启，且用户明确评价报告写法、直接修改报告或提出写作要求时触发。Judge 反馈、Judge 分数、Agent 自评和自动改写不得触发。
+- 仅在 Memory 已开启，且用户明确表达写作要求、偏好或评价时触发。上下文、报告内容和修改差异仅用于理解用户表达，不能代替用户表达；Agent 自己的分析、建议和评测结论不作为用户记忆来源。没有明确的用户写作反馈时，不调用 Capture。
 - 固定顺序：按 [Writer 反馈分流](writer-orchestration.md#反馈分流) 完成直接 Rewrite 或新 Loop → 主 Agent 核验报告 → 委派 `report-memory-agent-v2 operation=capture` → 再交付或总结。重大修改也只针对本次用户反馈 Capture 一次，不把 Loop 的自动改写或 Judge 意见当成新反馈。
 - 为本次反馈生成一个稳定 `captureId`，重试时必须复用；向 Memory Agent 提供该 ID、用户反馈原文、task、audience/project、必要的修改前后内容，以及用户正在评价的上一条 Assistant 可见输出至当前反馈的对话窗口；通常 2–6 条、最多 8 条，用户反馈不得截断。用户通过选项回答时，同时传递原问题、选项及实际选择，区分 Agent 建议与用户表达。
-- 委派只传事实和语境，不预先概括“用户的长期偏好”，不建议写入某层、某 Scope 或扩充某条 Rubric；这些判断交给 Memory Agent。用户接受本轮建议，不等于认可其为以后默认规则。例如，选择“本次放宽到约 4000 字”就如实转交，不改述成“新增素材时优先放宽篇幅”。主 Agent 不直接维护 L1/L2B，也不因一次反馈宣称 Rubric 已形成。
+- 委派只传用户原文与必要语境，不预先概括长期偏好或指定 Layer、Scope、Rubric。Memory Agent 先核验要求是否来自用户，再判断是本次适用还是值得长期生效；主 Agent 按实际结果汇报，不把系统推断称为用户要求。
 - 普通报告写作反馈一律走 Capture。即使与已有记忆冲突，也由 Memory Agent 在同一次 Capture 中更新、合并或保持不变；Capture 期间不得改走 Manage，也不得先删除旧记忆。
 - 成功结束标记为 `MEMORY_CAPTURE_COMPLETED`；相同 `captureId` 的幂等返回也视为同一次成功。失败标记为 `MEMORY_CAPTURE_FAILED: <reason>`。失败时如实说明，不得把 L0 保存描述成 L2B 已更新，也不得更换 `captureId` 反复提交。
 
