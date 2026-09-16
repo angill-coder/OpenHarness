@@ -1,0 +1,75 @@
+{
+  "baseline": "fefcef3308d11102ef0282965d2ec7dc5cf67eda",
+  "entries": [
+    {
+      "file": "rubrics/base-rubrics.json",
+      "start": null,
+      "sha256": "41c84485be4c7991ea6068494e208eddffa3163755c91472d968e8d7a4f4829e"
+    },
+    {
+      "file": "skills/research-report-agent-v2/references/writing-instructions.md",
+      "start": null,
+      "sha256": "34d08ecd42b934716afcda29807aafe289f6ac1410bc904137e5d9dfe92b4269"
+    },
+    {
+      "file": "skills/research-report-agent-v2/references/workspace-and-delivery.md",
+      "start": null,
+      "sha256": "aa00a1688cf1a6497041723e292c37b38ffbbe417ecf8dc5fec150c213ae8e95"
+    },
+    {
+      "file": "skills/research-report-agent-v2/references/state-and-scoring.md",
+      "start": "## 2. Judgment",
+      "sha256": "ec33b1ec87371b596cf320fb31853c2f81b03c82bf7c1d8165381ecc10ee0e45"
+    },
+    {
+      "file": "agents/report-writer-v2.md",
+      "start": "你负责初稿",
+      "sha256": "94fd2adccc37c074e92d85fe24e171cfda5e92241880af563d5681e55d3a8fdb"
+    },
+    {
+      "file": "agents/report-evidence-agent-v2.md",
+      "start": "你负责资料整理",
+      "sha256": "a209c8151f87b8b751dfeb847b5392238c86dd6a379328126910efb102aad8c3"
+    },
+    {
+      "file": "agents/report-dimension-judge-v2.md",
+      "start": "完整阅读报告",
+      "sha256": "774bfbcdaddde81617a8e79ac1bb225a21483f18b1f6bd02c541e91ca058f56b"
+    },
+    {
+      "file": "agents/report-resolution-judge-v2.md",
+      "start": "输入包括当前任务",
+      "sha256": "0c18f345910b9f5fd02c94d80f418c521c6a36add436f9c9d6142e13b86996d3"
+    },
+    {
+      "file": "resources/evidence/references/cleaning-rules.md",
+      "start": null,
+      "sha256": "7f46eaca6117d1fbb8b8fb1018ba80ac4687f66c39f7f63615023cd788a63c7b"
+    },
+    {
+      "file": "resources/evidence/references/output-contract.md",
+      "start": null,
+      "sha256": "58d18907531a79fffd197d258e330978101c30ea7c6df071d1c0d5c540e21fb6"
+    },
+    {
+      "file": "resources/evidence/references/source-changes.md",
+      "start": null,
+      "sha256": "5a21d65e062c53bd51c8349b386de543e4495986ad1d7c3facff3887416e45b8"
+    },
+    {
+      "file": "resources/evidence/references/structured_data.schema.json",
+      "start": null,
+      "sha256": "7565c93231d101e0b184df284feb31607c9028e9d2266e3daf9583754f025e67"
+    },
+    {
+      "file": "resources/evidence/scripts/source_inventory.py",
+      "start": null,
+      "sha256": "ea2ef16cbcc59c430f344f9c004159d79395d4d731171e5a2914f1196c3eee2a"
+    },
+    {
+      "file": "resources/report/report_stats.py",
+      "start": null,
+      "sha256": "c1a4adfc105ffc74d99499396c518f7a80cb56e6e4254524483243f6eac821b6"
+    }
+  ]
+}
