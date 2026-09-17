@@ -1,0 +1,16 @@
+{
+  "name": "report-agent-v3-local",
+  "description": "report-agent-v3 本地市场：研究报告专家团",
+  "owner": {
+    "name": "Research Report Team"
+  },
+  "plugins": [
+    {
+      "name": "report-agent-v3",
+      "description": "A four-member expert team that turns source materials into an automatically evaluated and iteratively rewritten research report, with long-term writing memory",
+      "version": "1.0.0",
+      "source": "./plugins/report-agent-v3",
+      "license": "MIT"
+    }
+  ]
+}

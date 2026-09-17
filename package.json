@@ -1,0 +1,30 @@
+{
+  "name": "report-agent-v3",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "report-agent-v3: WorkBuddy Team expert for research report writing, rubric evaluation, and markdown writing memory",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "start:loop": "sh scripts/run-python.sh report_loop/runner.py",
+    "build:release": "node scripts/build-release.mjs",
+    "build:release:macos": "node scripts/build-release.mjs --target-platform darwin --target-arch arm64",
+    "build:release:windows": "node scripts/build-release.mjs --target-platform win32 --target-arch x64",
+    "build:team": "node scripts/build-team.mjs",
+    "install:local": "sh scripts/install-local-expert.sh",
+    "test": "npm run test:hooks && npm run test:loop",
+    "test:hooks": "node --import tsx --test hooks/test/relevance.test.ts hooks/test/report-loop-launcher.test.ts hooks/test/capture-hook.test.ts hooks/test/skill-contract.test.ts hooks/test/integrated-contract.test.ts hooks/test/team-package.test.ts hooks/test/windows-package.test.ts",
+    "test:loop": "node scripts/run-python-command.mjs -m unittest discover -s tests -p test_*.py",
+    "syntaxcheck": "tsc --noEmit --noCheck && node --check hooks/capture-checkpoint.mjs && node scripts/run-python-command.mjs -m compileall -q report_loop"
+  },
+  "dependencies": {
+    "tsx": "^4.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^6.0.0"
+  }
+}

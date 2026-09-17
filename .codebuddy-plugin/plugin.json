@@ -1,0 +1,153 @@
+{
+  "name": "report-agent-v3",
+  "version": "1.0.0",
+  "description": "A four-member expert team that turns source materials into an automatically evaluated and iteratively rewritten research report, with long-term writing memory",
+  "author": {
+    "name": "Research Report Team",
+    "email": "report-agent-v3@example.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "research-report",
+    "report-loop",
+    "judge",
+    "memory",
+    "rubrics"
+  ],
+  "agents": [
+    "./agents/report-team-lead.md",
+    "./agents/report-evidence-agent.md",
+    "./agents/report-writer.md",
+    "./agents/report-reviewer.md",
+    "./agents/report-memory-agent.md"
+  ],
+  "skills": [
+    "./skills/research-report-loop"
+  ],
+  "hooks": "./hooks/hooks.json",
+  "expertType": "team",
+  "agentName": "report-team-lead",
+  "teamInfo": {
+    "leadAgent": "report-team-lead",
+    "memberAgents": [
+      "report-evidence-agent",
+      "report-writer",
+      "report-reviewer",
+      "report-memory-agent"
+    ]
+  },
+  "displayName": {
+    "en": "Research Report Team",
+    "zh": "研究报告专家团"
+  },
+  "profession": {
+    "en": "Research Report Team",
+    "zh": "研究报告专家团"
+  },
+  "displayDescription": {
+    "en": "Four specialists collaborate to produce research reports: evidence curation, drafting, automated six-dimension rubric evaluation with iterative rewriting, delivery review, and writing memory distilled from your feedback",
+    "zh": "4位成员协作：资料清洗、初稿撰写、自动评测迭代改写、交付审校，并从反馈沉淀长期写作记忆"
+  },
+  "avatar": "avatars/team.png",
+  "categoryId": "12-IndustryConsultant",
+  "defaultInitPrompt": {
+    "zh": "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页",
+    "en": "Based on the materials in the XX folder, write an X-page research report on “XX”."
+  },
+  "plugin": "report-agent-v3",
+  "tags": [
+    {
+      "en": "Research Report",
+      "zh": "研究报告"
+    },
+    {
+      "en": "Auto Evaluation",
+      "zh": "自动评测"
+    },
+    {
+      "en": "Writing Memory",
+      "zh": "写作记忆"
+    }
+  ],
+  "quickPrompts": [
+    {
+      "zh": "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页",
+      "en": "Based on the materials in the XX folder, write an X-page research report on “XX”."
+    },
+    {
+      "zh": "把这些访谈和问卷结果整理成一份面向管理层的研究报告。",
+      "en": "Turn these interviews and survey results into a management research report."
+    },
+    {
+      "zh": "根据我的反馈修改这份报告，并将可复用的写作要求沉淀到报告记忆中。",
+      "en": "Revise this report based on my feedback and preserve reusable writing preferences in report memory."
+    }
+  ],
+  "members": [
+    {
+      "id": "report-team-lead",
+      "name": {
+        "en": "Ruth",
+        "zh": "芮淑"
+      },
+      "profession": {
+        "en": "Chief Report Strategist",
+        "zh": "首席报告策略官"
+      },
+      "avatar": "avatars/team-lead.png",
+      "role": "lead"
+    },
+    {
+      "id": "report-evidence-agent",
+      "name": {
+        "en": "Evan",
+        "zh": "Evan"
+      },
+      "profession": {
+        "en": "Evidence Curator",
+        "zh": "资料清洗与论据整理员"
+      },
+      "avatar": "avatars/report-evidence-agent.png",
+      "role": "member"
+    },
+    {
+      "id": "report-writer",
+      "name": {
+        "en": "Wesley",
+        "zh": "Wesley"
+      },
+      "profession": {
+        "en": "Report Writer",
+        "zh": "报告撰写师"
+      },
+      "avatar": "avatars/report-writer.png",
+      "role": "member"
+    },
+    {
+      "id": "report-reviewer",
+      "name": {
+        "en": "Rena",
+        "zh": "Rena"
+      },
+      "profession": {
+        "en": "Delivery Reviewer",
+        "zh": "交付审校师"
+      },
+      "avatar": "avatars/report-reviewer.png",
+      "role": "member"
+    },
+    {
+      "id": "report-memory-agent",
+      "name": {
+        "en": "Mnemo",
+        "zh": "Mnemo"
+      },
+      "profession": {
+        "en": "Writing Memory Manager",
+        "zh": "报告写作记忆管理员"
+      },
+      "avatar": "avatars/report-memory-agent.png",
+      "role": "member"
+    }
+  ]
+}
