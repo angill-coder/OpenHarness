@@ -4,7 +4,7 @@
 
 ## 1. 单一运行状态
 
-首次委派 Writer 前，在已创建的本轮 `loop-序号-日期时间/` 内创建 `评测与改写记录/run-state.json`，以 `drafting` 记录初稿阶段；R0 核验完成后进入 `resolving`，此时才设置 startedAt 为当前时间、deadlineAt 为 60 分钟后，初稿不占用 Loop 时间预算。下列路径均相对本轮 Loop 目录，恢复已有任务时沿用已记录的原路径：
+首次委派 Writer 前，在已创建的本轮 `loop-序号-日期时间/` 内创建 `评测与改写记录/run-state.json`，以 `drafting` 记录初稿阶段；R0 核验完成后进入 `resolving`，此时才设置 startedAt 为当前时间、deadlineAt 为 120 分钟后，初稿不占用 Loop 时间预算。下列路径均相对本轮 Loop 目录，恢复已有任务时沿用已记录的原路径：
 
 ```json
 {
@@ -35,7 +35,7 @@
 每次更新前重新读取状态并核对本阶段开始时的 `stateRevision`；一致才写入并将其加一，不一致说明另一流程已经推进，停止当前写入并从最新状态恢复。每完成一个阶段就先更新状态文件，再进入下一阶段。所有 JSON 使用 UTF-8 完整写入，不在用户交付目录散落状态。恢复会话时先读该文件；已完成 Resolution 的阶段再读取冻结 Plan：
 
 - `drafting`：按 [Writer 调用与续写](writer-orchestration.md) 核验已有 R0 或恢复写作，不重复覆盖初稿；
-- `completed`：不得自动继续 Judge 或 Rewrite；用户明确提出的反馈修订可续用 Writer 修改交付稿，但不改写旧 Judgment 或沿用旧评分；
+- `completed`：不恢复旧 Loop 的 Judge 或 Rewrite；收到用户新反馈时按 [反馈分流](writer-orchestration.md#反馈分流) 直接修订或新建 Loop，不改写旧 Judgment 或沿用旧评分；
 - `resolving`：从 Resolution 继续；
 - `judging`：只补齐当前版本尚未完成的维度；
 - `rewriting`：核对目标版本不存在后继续 Rewrite；

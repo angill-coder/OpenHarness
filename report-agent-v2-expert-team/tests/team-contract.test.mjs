@@ -57,17 +57,70 @@ test('team manifest, settings and six role definitions agree', () => {
   }
 });
 
-// Memory prompts intentionally diverge from PR51: explicit user feedback is required.
+// Memory and major-feedback routing intentionally diverge from PR51.
 // Behavioral acceptance cases live in team-scenarios.md; other baseline assets stay fixed.
 test('PR51 writing, evidence, judging and scoring invariants unchanged', () => {
   for(const entry of JSON.parse(read('tests/pr51-baseline.json')).entries){
     let body=original(read(translate(entry.file)));
+    if(entry.file==='agents/report-writer-v2.md'){
+      assert.match(body,/重大修改或重新评测.*本轮用户要求及有效论据.*必要时整体重写/u);
+      // Allow only the approved draft-input change; verify the remaining PR51 prompt.
+      body=body.replace(
+        '这是同一报告重大修改或重新评测：以旧报告为基础按本轮用户要求及有效论据生成新 R0，必要时整体重写；不把旧评分或旧 Judge 反馈当成本轮冻结标准',
+        '这是同一报告更新资料后重新评测：以旧报告为基础按新论据及确认需求生成新 R0，不默认从零重写，不把旧评分或反馈当成本轮冻结标准');
+    }
+    if(entry.file.endsWith('/workspace-and-delivery.md')){
+      const start=body.indexOf('## 目录位置');
+      const end=body.indexOf('- **数据**：',start);
+      assert.ok(start>=0 && end>start,'directory precedence clarification exists');
+      const clarification=body.slice(start,end);
+      assert.match(clarification,/1\. 用户明确指定的文件夹。[\s\S]*2\. 用户提供的报告素材文件夹。[\s\S]*3\. 宿主系统/);
+      assert.match(clarification,/不覆盖宿主的强制限制或文件访问权限/);
+      // Only the approved precedence clarification is new; preserve the PR51 layout.
+      body=body.slice(0,start)+body.slice(end);
+      body=body.replace(
+        '- **报告目录**：用户明确指定报告输出文件夹时直接使用；否则在上述选定位置下创建 `报告/`。',
+        '- **报告目录**：用户指定位置优先，否则使用 `素材目录/报告/`，不默认使用 WorkBuddy 会话目录。多处素材没有明确保存位置，或目标不可写时，先确认，不静默换目录。');
+    }
     if(entry.start){
       assert.ok(body.includes(entry.start),entry.file);
       body=body.slice(body.indexOf(entry.start));
     }
     assert.equal(createHash('sha256').update(body).digest('hex'),entry.sha256,entry.file);
   }
+});
+
+test('feedback routing follows report impact; budget is two hours', () => {
+  const refs='skills/research-report-team-v2/references/';
+  const writer=read(refs+'writer-orchestration.md');
+  assert.match(writer,/根据修改对报告核心观点、分析方向和整体结构的影响选择路径/u);
+  assert.match(writer,/重大修改 → 新 Loop.*通篇改写.*分析方向/u);
+  assert.match(writer,/小型修改 → 直接 Rewrite/u);
+  assert.match(writer,/重新评测或“只修改、不评测”时按其要求/u);
+  assert.match(writer,/直接建立新 Loop，不先另做一次 feedback 改写/u);
+  assert.match(writer,/通过 SendMessage 向 team.writerName/u);
+  assert.match(read(refs+'state-and-scoring.md'),/deadlineAt 为 120 分钟后/u);
+  assert.match(read(refs+'loop-orchestration.md'),/从进入 resolving 起 120 分钟/u);
+  const flow=[
+    read('skills/research-report-team-v2/SKILL.md'),
+    read('agents/report-agent-v2-expert-team-lead.md'),
+    ...['writer-orchestration.md','evidence-orchestration.md','memory-orchestration.md','loop-orchestration.md'].map(f=>read(refs+f))
+  ].join('\n');
+  assert.doesNotMatch(flow,/只有用户明确要求重新评测|明确要求重新评测时才|不为反馈新建 Loop|一小时时间预算/u);
+  assert.match(read(refs+'memory-orchestration.md'),/只针对本次用户反馈 Capture 一次/u);
+});
+
+test('data updates require report-revision confirmation before dispatch', () => {
+  const refs='skills/research-report-team-v2/references/';
+  const evidence=read(refs+'evidence-orchestration.md');
+  assert.match(evidence,/使用 `AskUserQuestion` 确认是否据此修改报告/u);
+  assert.match(evidence,/等待用户同意后，再按/u);
+  assert.match(evidence,/确认前不派发 Writer\/Judge/u);
+  assert.match(evidence,/不同意则保留新数据、报告不动/u);
+  assert.match(evidence,/纯写作反馈仍直接按整体影响分流/u);
+  assert.match(read(refs+'writer-orchestration.md'),/数据更新引起的报告修改.*取得用户确认/u);
+  assert.match(read('skills/research-report-team-v2/SKILL.md'),/向用户确认是否据此修改报告/u);
+  assert.match(read('agents/report-agent-v2-expert-team-lead.md'),/确认是否修改报告，用户同意后再分流/u);
 });
 
 test('every local Markdown reference resolves inside the team package', () => {

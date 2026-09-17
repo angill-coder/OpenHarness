@@ -25,9 +25,9 @@ test("flat delivery versions and hidden per-loop candidates use distinct paths",
   const policy = read(`${skillRoot}/references/workspace-and-delivery.md`);
   const loop = read(`${skillRoot}/references/loop-orchestration.md`);
   const state = read(`${skillRoot}/references/state-and-scoring.md`);
-  assert.match(policy, /用户指定位置优先/u);
-  assert.match(policy, /不默认使用 WorkBuddy 会话目录/u);
-  assert.match(policy, /目标不可写时，先确认/u);
+  assert.match(policy, /1\. 用户明确指定的文件夹。[\s\S]*2\. 用户提供的报告素材文件夹。[\s\S]*3\. 宿主系统/u);
+  assert.match(policy, /不覆盖宿主的强制限制或文件访问权限/u);
+  assert.match(policy, /目标不可写.*先说明并确认可用位置，不静默换目录/u);
   assert.match(policy, /恢复已有任务沿用已记录的原路径/u);
   assert.match(policy, /不改变记忆目录/u);
   assert.ok(read(`${skillRoot}/references/writer-orchestration.md`).includes("`本轮需求.md`"));

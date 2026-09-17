@@ -7,7 +7,6 @@ displayName:
 profession:
   en: "Evidence Analyst"
   zh: "论据分析师"
-model: inherit
 effort: medium
 maxTurns: 48
 ---

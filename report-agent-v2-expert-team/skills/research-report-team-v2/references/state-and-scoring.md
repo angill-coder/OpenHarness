@@ -4,7 +4,7 @@
 
 ## 1. 单一运行状态
 
-首次委派 Writer 前，在已创建的本轮 `loop-序号-日期时间/` 内创建 `评测与改写记录/run-state.json`，以 `drafting` 记录初稿阶段；R0 核验完成后进入 `resolving`，此时才设置 startedAt 为当前时间、deadlineAt 为 60 分钟后，初稿不占用 Loop 时间预算。下列路径均相对本轮 Loop 目录，恢复已有任务时沿用已记录的原路径：
+首次委派 Writer 前，在已创建的本轮 `loop-序号-日期时间/` 内创建 `评测与改写记录/run-state.json`，以 `drafting` 记录初稿阶段；R0 核验完成后进入 `resolving`，此时才设置 startedAt 为当前时间、deadlineAt 为 120 分钟后，初稿不占用 Loop 时间预算。下列路径均相对本轮 Loop 目录，恢复已有任务时沿用已记录的原路径：
 
 ```json
 {
