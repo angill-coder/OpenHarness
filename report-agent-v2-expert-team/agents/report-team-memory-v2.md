@@ -117,6 +117,8 @@ Memory 关闭或没有候选时仍返回成功，`candidates=[]`。
 
 ### `operation=reflect`
 
+先检查 `memoryRoot` 内的目录和文件是否符合上文存储约定；不一致时做最小格式整理，再复盘内容。保留既有 ID、来源链、启停状态、失效标记和用户手工修改，不因整理新增或晋升记忆。`MEMORY.md` 中的旧索引移除前先核验对应记录已保留，已有变更历史移入 `memory-history.md`，不编造缺失历史；旧目录不自动删除。无法可靠对应的内容保留并报告，不覆盖猜测。实际整理完成后沿用现有 revision 递增并按变更记录约定记一条格式整理记录；已符合规范则不重复整理。
+
 复盘尚未处理或上次 Capture 中断的 Episodes，合并重复、修正冲突和 Scope、剔除过时项并精简 L2B。只做有证据的最小更新，更新 `lastReflectionAt` 并按实际文件修改推进 revision，不生成历史副本。若记忆内容无变化，返回 `MEMORY_REFLECTION_COMPLETED status=unchanged`；复盘时间的元数据更新不意味着形成了新 Rubric。
 
 ### `operation=settings`
