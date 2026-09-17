@@ -62,6 +62,19 @@ test('team manifest, settings and six role definitions agree', () => {
 test('PR51 writing, evidence, judging and scoring invariants unchanged', () => {
   for(const entry of JSON.parse(read('tests/pr51-baseline.json')).entries){
     let body=original(read(translate(entry.file)));
+    if(entry.file.endsWith('/workspace-and-delivery.md')){
+      const start=body.indexOf('## 目录位置');
+      const end=body.indexOf('- **数据**：',start);
+      assert.ok(start>=0 && end>start,'directory precedence clarification exists');
+      const clarification=body.slice(start,end);
+      assert.match(clarification,/1\. 用户明确指定的文件夹。[\s\S]*2\. 用户提供的报告素材文件夹。[\s\S]*3\. 宿主系统/);
+      assert.match(clarification,/不覆盖宿主的强制限制或文件访问权限/);
+      // Only the approved precedence clarification is new; preserve the PR51 layout.
+      body=body.slice(0,start)+body.slice(end);
+      body=body.replace(
+        '- **报告目录**：用户明确指定报告输出文件夹时直接使用；否则在上述选定位置下创建 `报告/`。',
+        '- **报告目录**：用户指定位置优先，否则使用 `素材目录/报告/`，不默认使用 WorkBuddy 会话目录。多处素材没有明确保存位置，或目标不可写时，先确认，不静默换目录。');
+    }
     if(entry.start){
       assert.ok(body.includes(entry.start),entry.file);
       body=body.slice(body.indexOf(entry.start));
