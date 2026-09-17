@@ -60,7 +60,8 @@ test("native orchestration details stay in references rather than crowding the m
   assert.match(loop, /三项确认各自对应的一段用户消息原文/u);
   assert.match(loop, /单个文件，也可以指向整个素材目录/u);
   assert.match(state, /下降不超过 `0\.15`/u);
-  assert.match(loop, /运行约一小时/u);
+  assert.match(loop, /从进入 resolving 起 120 分钟/u);
+  assert.match(state, /deadlineAt 为 120 分钟后/u);
   assert.doesNotMatch(loop, /三轮 Rewrite/u);
   assert.match(memory, /完成直接 Rewrite 或新 Loop/u);
   assert.match(memory, /普通报告写作反馈一律走 Capture/u);

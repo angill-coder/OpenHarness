@@ -6,7 +6,7 @@
 
 沿用初稿阶段按 [保存位置与交付](workspace-and-delivery.md) 确定的本轮 `loop-序号-日期时间/`，不在 WorkBuddy 会话目录另起一套。初稿为 `候选报告/R0.md`，后续候选为 `候选报告/R1.md`、`候选报告/R2.md`……下文相对路径均以该轮 Loop 目录为基准，不覆盖 R0 或历史最佳版本。对外报告 vN 在交付时另行编号。
 
-完整执行并持续维护 [state-and-scoring.md](state-and-scoring.md) 中的单一状态、确定性评分、候选采纳和停止规则。沿用初稿阶段的 `run-state.json` 和 `writerAgentId`，R0 核验完成后进入 resolving 并开始一小时时间预算，不重新初始化状态；会话恢复时先按状态继续，不重新启动另一轮 Loop。
+完整执行并持续维护 [state-and-scoring.md](state-and-scoring.md) 中的单一状态、确定性评分、候选采纳和停止规则。沿用初稿阶段的 `run-state.json` 和 `writerAgentId`，R0 核验完成后进入 resolving 并开始两小时时间预算，不重新初始化状态；会话恢复时先按状态继续，不重新启动另一轮 Loop。
 
 ## 2. 整理本轮评测输入
 
@@ -88,12 +88,12 @@ Writer 只能从历史最佳版本生成新候选。生成后按同一冻结 Pla
 
 - 达到 5.0 且无门槛失败；
 - 连续两个候选没有改善；
-- 从 R0 首次 Judge 开始已运行约一小时；
+- 当前时间达到 `deadlineAt`（从进入 resolving 起 120 分钟）；
 - Writer 返回 `REPORT_WRITE_FAILED: <reason>`。
 - 数据或来源变化导致绑定失效：`data_version_changed`，不采纳本次未验证输出。
 - 用户明确要求停止。
 
-V2 不另设固定 Rewrite 轮数上限；停止条件沿用 V1 的目标分、连续无改善、一小时时间预算及用户取消语义。
+V2 不另设固定 Rewrite 轮数上限；停止条件为目标分、连续无改善、两小时时间预算及用户取消。
 
 ## 7. 交付
 

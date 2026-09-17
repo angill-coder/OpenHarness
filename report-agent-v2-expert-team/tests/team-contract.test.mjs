@@ -57,11 +57,18 @@ test('team manifest, settings and six role definitions agree', () => {
   }
 });
 
-// Memory prompts intentionally diverge from PR51: explicit user feedback is required.
+// Memory and major-feedback routing intentionally diverge from PR51.
 // Behavioral acceptance cases live in team-scenarios.md; other baseline assets stay fixed.
 test('PR51 writing, evidence, judging and scoring invariants unchanged', () => {
   for(const entry of JSON.parse(read('tests/pr51-baseline.json')).entries){
     let body=original(read(translate(entry.file)));
+    if(entry.file==='agents/report-writer-v2.md'){
+      assert.match(body,/重大修改或重新评测.*本轮用户要求及有效论据.*必要时整体重写/u);
+      // Allow only the approved draft-input change; verify the remaining PR51 prompt.
+      body=body.replace(
+        '这是同一报告重大修改或重新评测：以旧报告为基础按本轮用户要求及有效论据生成新 R0，必要时整体重写；不把旧评分或旧 Judge 反馈当成本轮冻结标准',
+        '这是同一报告更新资料后重新评测：以旧报告为基础按新论据及确认需求生成新 R0，不默认从零重写，不把旧评分或反馈当成本轮冻结标准');
+    }
     if(entry.file.endsWith('/workspace-and-delivery.md')){
       const start=body.indexOf('## 目录位置');
       const end=body.indexOf('- **数据**：',start);
@@ -81,6 +88,26 @@ test('PR51 writing, evidence, judging and scoring invariants unchanged', () => {
     }
     assert.equal(createHash('sha256').update(body).digest('hex'),entry.sha256,entry.file);
   }
+});
+
+test('feedback routing follows report impact; budget is two hours', () => {
+  const refs='skills/research-report-team-v2/references/';
+  const writer=read(refs+'writer-orchestration.md');
+  assert.match(writer,/根据修改对报告核心观点、分析方向和整体结构的影响选择路径/u);
+  assert.match(writer,/重大修改 → 新 Loop.*通篇改写.*分析方向/u);
+  assert.match(writer,/小型修改 → 直接 Rewrite/u);
+  assert.match(writer,/重新评测或“只修改、不评测”时按其要求/u);
+  assert.match(writer,/直接建立新 Loop，不先另做一次 feedback 改写/u);
+  assert.match(writer,/通过 SendMessage 向 team.writerName/u);
+  assert.match(read(refs+'state-and-scoring.md'),/deadlineAt 为 120 分钟后/u);
+  assert.match(read(refs+'loop-orchestration.md'),/从进入 resolving 起 120 分钟/u);
+  const flow=[
+    read('skills/research-report-team-v2/SKILL.md'),
+    read('agents/report-agent-v2-expert-team-lead.md'),
+    ...['writer-orchestration.md','evidence-orchestration.md','memory-orchestration.md','loop-orchestration.md'].map(f=>read(refs+f))
+  ].join('\n');
+  assert.doesNotMatch(flow,/只有用户明确要求重新评测|明确要求重新评测时才|不为反馈新建 Loop|一小时时间预算/u);
+  assert.match(read(refs+'memory-orchestration.md'),/只针对本次用户反馈 Capture 一次/u);
 });
 
 test('every local Markdown reference resolves inside the team package', () => {

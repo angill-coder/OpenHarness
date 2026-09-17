@@ -120,6 +120,7 @@ test("follow-up feedback routes by impact while preserving explicit user choices
   assert.match(skill, /重大修改.*启动新一轮 Report Loop，小型修改直接 Rewrite/u);
   const writer = read("skills/research-report-agent-v2/references/writer-orchestration.md");
   assert.match(writer, /重大修改 → 新 Loop.*通篇改写.*分析方向/u);
+  assert.match(writer, /根据修改对报告核心观点、分析方向和整体结构的影响选择路径/u);
   assert.match(writer, /小型修改 → 直接 Rewrite.*局部措辞.*不影响主要结论/u);
   assert.match(writer, /重新评测或“只修改、不评测”时按其要求/u);
   assert.match(writer, /直接建立新 Loop，不先另做一次 feedback 改写/u);
