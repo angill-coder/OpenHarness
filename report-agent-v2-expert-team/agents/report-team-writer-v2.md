@@ -7,7 +7,6 @@ displayName:
 profession:
   en: "Report Writer"
   zh: "报告撰稿人"
-model: inherit
 effort: medium
 maxTurns: 28
 ---

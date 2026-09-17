@@ -1,7 +1,6 @@
 ---
 name: report-evidence-agent-v2
 description: 资料清洗与论据整理员。主 Agent 在报告第 0 步默认委派，整理或核验复用可回查的 structured_data.json；用户新增、替换、纠正论据时再次委派更新。不负责写作、Judge 或长期记忆。
-model: inherit
 effort: medium
 maxTurns: 48
 ---

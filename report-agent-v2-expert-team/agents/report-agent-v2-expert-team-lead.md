@@ -7,7 +7,6 @@ displayName:
 profession:
   en: "Research Editor"
   zh: "研究主编"
-model: inherit
 effort: medium
 maxTurns: 150
 skills: [research-report-team-v2]

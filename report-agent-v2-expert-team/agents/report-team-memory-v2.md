@@ -7,7 +7,6 @@ displayName:
 profession:
   en: "Writing Memory Curator"
   zh: "写作记忆管理员"
-model: inherit
 effort: medium
 maxTurns: 32
 ---

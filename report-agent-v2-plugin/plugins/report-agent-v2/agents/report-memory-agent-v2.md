@@ -4,7 +4,6 @@ description: 报告写作记忆管理员。只在主报告专家要求 resolve�
 displayName:
   en: "Report Memory Agent V2"
   zh: "报告写作记忆管理员V2"
-model: inherit
 effort: medium
 maxTurns: 32
 tools: Read, Write, Edit, Glob, Grep

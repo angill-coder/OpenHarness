@@ -4,7 +4,6 @@ description: 报告写作员。需求确认后撰写初稿，随后在同一写�
 displayName:
   en: "Report Writer V2"
   zh: "报告写作员V2"
-model: inherit
 effort: medium
 maxTurns: 28
 tools: Read, Write, Edit, Glob, Grep
