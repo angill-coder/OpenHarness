@@ -110,6 +110,19 @@ test('feedback routing follows report impact; budget is two hours', () => {
   assert.match(read(refs+'memory-orchestration.md'),/只针对本次用户反馈 Capture 一次/u);
 });
 
+test('data updates require report-revision confirmation before dispatch', () => {
+  const refs='skills/research-report-team-v2/references/';
+  const evidence=read(refs+'evidence-orchestration.md');
+  assert.match(evidence,/使用 `AskUserQuestion` 确认是否据此修改报告/u);
+  assert.match(evidence,/等待用户同意后，再按/u);
+  assert.match(evidence,/确认前不派发 Writer\/Judge/u);
+  assert.match(evidence,/不同意则保留新数据、报告不动/u);
+  assert.match(evidence,/纯写作反馈仍直接按整体影响分流/u);
+  assert.match(read(refs+'writer-orchestration.md'),/数据更新引起的报告修改.*取得用户确认/u);
+  assert.match(read('skills/research-report-team-v2/SKILL.md'),/向用户确认是否据此修改报告/u);
+  assert.match(read('agents/report-agent-v2-expert-team-lead.md'),/确认是否修改报告，用户同意后再分流/u);
+});
+
 test('every local Markdown reference resolves inside the team package', () => {
   for(const dir of ['agents','skills','resources']){
     for(const file of filesAt(path.join(root,dir)).filter(p=>p.endsWith('.md'))){
