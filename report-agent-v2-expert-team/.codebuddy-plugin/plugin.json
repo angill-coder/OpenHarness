@@ -80,12 +80,12 @@
     {
       "id": "report-agent-v2-expert-team-lead",
       "name": {
-        "en": "Gu",
-        "zh": "顾全之"
+        "en": "Report Coordinator",
+        "zh": "报告主理人"
       },
       "displayName": {
-        "en": "Gu",
-        "zh": "顾全之"
+        "en": "Report Coordinator",
+        "zh": "报告主理人"
       },
       "profession": {
         "en": "Research Editor",
@@ -97,12 +97,12 @@
     {
       "id": "report-team-evidence-v2",
       "name": {
-        "en": "Lin",
-        "zh": "林知源"
+        "en": "Evidence Analyst",
+        "zh": "资料整理员"
       },
       "displayName": {
-        "en": "Lin",
-        "zh": "林知源"
+        "en": "Evidence Analyst",
+        "zh": "资料整理员"
       },
       "profession": {
         "en": "Evidence Analyst",
@@ -114,12 +114,12 @@
     {
       "id": "report-team-writer-v2",
       "name": {
-        "en": "Wen",
-        "zh": "文知行"
+        "en": "Report Writer",
+        "zh": "报告写作员"
       },
       "displayName": {
-        "en": "Wen",
-        "zh": "文知行"
+        "en": "Report Writer",
+        "zh": "报告写作员"
       },
       "profession": {
         "en": "Report Writer",
@@ -131,12 +131,12 @@
     {
       "id": "report-team-memory-v2",
       "name": {
-        "en": "Ji",
-        "zh": "纪知新"
+        "en": "Memory Curator",
+        "zh": "记忆管理员"
       },
       "displayName": {
-        "en": "Ji",
-        "zh": "纪知新"
+        "en": "Memory Curator",
+        "zh": "记忆管理员"
       },
       "profession": {
         "en": "Writing Memory Curator",
@@ -148,12 +148,12 @@
     {
       "id": "report-team-resolution-judge-v2",
       "name": {
-        "en": "Heng",
-        "zh": "衡知准"
+        "en": "Rubric Editor",
+        "zh": "评测标准编辑"
       },
       "displayName": {
-        "en": "Heng",
-        "zh": "衡知准"
+        "en": "Rubric Editor",
+        "zh": "评测标准编辑"
       },
       "profession": {
         "en": "Rubric Resolution Editor",
@@ -165,12 +165,12 @@
     {
       "id": "report-team-dimension-judge-v2",
       "name": {
-        "en": "Yan",
-        "zh": "严知衡"
+        "en": "Report Reviewer",
+        "zh": "报告评审员"
       },
       "displayName": {
-        "en": "Yan",
-        "zh": "严知衡"
+        "en": "Report Reviewer",
+        "zh": "报告评审员"
       },
       "profession": {
         "en": "Report Reviewer",
