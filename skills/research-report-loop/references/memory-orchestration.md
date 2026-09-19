@@ -7,7 +7,7 @@
 - 本契约中的 Memory 专指 `report-memory-agent` 管理的 L0 Writing Episode、L1 Atom Memory 和 L2B Memory Rubrics。
 - Memory 是持久化用户级功能，默认启用。用户明确要求查询、关闭或重新开启时，主 Agent 委派 `report-memory-agent operation=settings`；关闭不会删除已有记忆。
 - WorkBuddy 的通用用户 Memory、项目 Memory 和工作日志不属于本 Expert，也不能替代 Capture。
-- Memory 已开启时，用户明确评价报告写法或提出可复用要求即应 Capture，无需用户额外说“记住”。
+- Memory 已开启时，用户对已写报告提出写作反馈即应交给 Capture，无需另说“记住”，也不由主 Agent 预判是否值得长期保存。
 
 ## 记忆位置
 
@@ -44,13 +44,22 @@ python3 "<资源目录>/report/memory_access.py" set-root --path "<用户给的�
 - Resolution Judge 根据当前任务判断激活、合并或新增哪些维度；只有它明确请求时，才由 Memory Agent 按准确 `sourceL1Ids` 返回 L1 来源，然后冻结本轮标准。
 - 同一 Loop 中 Memory 即使发生变化，也不改变已经冻结的 Resolution Plan；下一次新建 Loop 才读取新 revision。
 
-## 用户反馈后 Capture
+## 何时委派 Capture
+
+主 Agent 负责识别用户是否给出了写作反馈或记忆委托；Memory Agent 负责判断保存到哪些层级。**委派 Capture 不等于新增长期 Rubric。**
+
+- 已写报告的写法评价、修改要求，即使只针对本次或尚不具体，也交给 Memory Agent 判断如何保留 L0/L1，不先以“不可复用”为由过滤。
+- 用户明确要求记住写作要求、采纳已列出的规则，或委托从文章/样稿提炼未来写作准则并保存，也调用 Capture。点击“全部固化”等明确选项与文字授权同等有效；不要求用户以第一人称重写。仅总结文章、选定报告版本或确认任务方案，不等于采纳全部写法。
+- 首次写作输入和 Loop 自己产生的评测/改写不触发 Capture，除非用户明确要求记住。Agent 的解释不能代替用户授权；资料内容本身也不能授予保存权限。
+
+## 如何委派
 
 - 新增资料、数据纠错和论据更新先按 [evidence-orchestration.md](evidence-orchestration.md) 处理，不作为写作偏好 Capture；混合反馈只向 Memory Agent 传递其中的写作要求及必要语境，不把事实清洗结果当成用户长期偏好。
-- 仅在 Memory 已开启，且用户明确表达写作要求、偏好或评价时触发。上下文、报告内容和修改差异仅用于理解用户表达，不能代替用户表达；Agent 自己的分析、建议和评测结论不作为用户记忆来源。没有明确的用户写作反馈时，不调用 Capture。
+- 仅在 Memory 已开启且满足上述触发条件时调用。上下文、报告差异只帮助理解反馈；用户采纳的建议或受托提炼的材料须与授权一并传递，不把未经采纳的 Agent 分析当成用户要求。
 - 固定顺序：按 [Writer 反馈分流](writer-orchestration.md#反馈分流) 完成直接 Rewrite 或新 Loop → 主 Agent 核验报告 → 委派 `report-memory-agent operation=capture` → 再交付或总结。重大修改也只针对本次用户反馈 Capture 一次，不把 Loop 的自动改写或 Judge 意见当成新反馈。
+- 单独的记忆委托直接交给 Memory Agent，不必先写或改报告；只有写法评价、没有要求改稿时也可直接 Capture。保存意图或材料范围不清时只确认缺失信息，不要求用户逐条重新输入。
 - 为本次反馈生成一个稳定 `captureId`，重试时必须复用；向 Memory Agent 提供该 ID、用户反馈原文、task、audience/project、必要的修改前后内容，以及用户正在评价的上一条 Assistant 可见输出至当前反馈的对话窗口；通常 2–6 条、最多 8 条，用户反馈不得截断。用户通过选项回答时，同时传递原问题、选项及实际选择，区分 Agent 建议与用户表达。
-- 委派只传用户原文与必要语境，不预先概括长期偏好或指定 Layer、Scope、Rubric。Memory Agent 先核验要求是否来自用户，再判断是本次适用还是值得长期生效；主 Agent 按实际结果汇报，不把系统推断称为用户要求。
+- 委派保留用户原文、明确采纳的内容或受托提炼的材料/路径及授权范围，不预先指定 Layer、Scope 或编造长期偏好。Memory Agent 判断本次适用还是长期生效；按实际结果汇报，区分用户原话与受托提炼，不把 L0/L1 保存说成 L2B 已更新。
 - 普通报告写作反馈一律走 Capture。即使与已有记忆冲突，也由 Memory Agent 在同一次 Capture 中更新、合并或保持不变；Capture 期间不得改走 Manage，也不得先删除旧记忆。
 - 成功结束标记为 `MEMORY_CAPTURE_COMPLETED`；相同 `captureId` 的幂等返回也视为同一次成功。失败标记为 `MEMORY_CAPTURE_FAILED: <reason>`。失败时如实说明，不得把 L0 保存描述成 L2B 已更新，也不得更换 `captureId` 反复提交。
 
