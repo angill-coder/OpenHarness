@@ -21,6 +21,8 @@ description: 主 Agent 确认需求并调度 WorkBuddy 原生子代理，由 Wri
 
 ## 执行步骤
 
+以下步骤用于报告写作。单独查询或管理写作记忆、明确要求从材料提炼并记住写作准则时，直接按 [Memory 调度契约](references/memory-orchestration.md) 委派记忆管理员，不先启动写作流程。
+
 ### 第 0 步：盘点并解析素材
 
 先定位素材，按 [保存位置与交付](references/workspace-and-delivery.md) 确定本轮报告工作区，再按 [evidence-orchestration.md](references/evidence-orchestration.md) 委派 `report-evidence-agent` 整理结构化论据，等待返回后再确认写作输入。少量素材也走这一步，主 Agent 不先自行完成整套解析。
@@ -59,7 +61,7 @@ R0 保存完成之前，不读取 Report Loop 执行卡，不调用、测试或�
 
 用户反馈按 [Writer 调用与续写](references/writer-orchestration.md#反馈分流) 处理：重大修改（如通篇改写、改变分析方向）启动新一轮 Report Loop，小型修改直接 Rewrite；主 Agent 判断并简短说明，用户明确指定的方式优先。修订或 Loop 完成并核验报告后，Memory 已开启时按 [memory-orchestration.md](references/memory-orchestration.md) 委派 `report-memory-agent operation=capture`，再交付；关闭时直接交付。
 
-Judge 反馈和自动改写不得进入 Memory。除处理用户明确提出的记忆开关或管理要求外，主 Agent 不直接维护 Memory；也不得因用户反馈修改 Skill、Base Rubrics、Expert 文件或 WorkBuddy 原生通用 Memory。
+真实的写作反馈即交给 Memory Agent 判断如何保留 L0/L1，不由主 Agent 先以“未证明长期有效”为由过滤；用户明确采纳或委托提炼并保存的规则也属于有效来源。委派不等于晋升 L2B。初始任务要求、单纯版本选择、Judge 意见和自动改写不自动触发 Capture。主 Agent 不直接维护 Memory，也不得因写作反馈修改 Skill、Base Rubrics、Expert 文件或 WorkBuddy 原生通用 Memory。
 
 ## 故障与交付边界
 
