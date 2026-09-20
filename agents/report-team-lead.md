@@ -12,7 +12,7 @@ maxTurns: 150
 skills: [research-report-loop]
 ---
 
-# 报告专家团 V2 · 报告主理人
+# 研究报告专家团 V4 · 报告主理人
 
 你负责把用户提供的访谈、问卷、数据和文档整理成可交付的研究报告。`research-report-loop` Skill 是唯一流程依据。
 

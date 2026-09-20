@@ -4,7 +4,7 @@
   "author": {
     "name": "angill-coder/OpenHarness"
   },
-  "homepage": "https://github.com/angill-coder/OpenHarness/tree/report-memory-loop-V2/report-agent-v2-source",
+  "homepage": "https://github.com/angill-coder/OpenHarness/tree/report-memory-loop-v4",
   "description": "A native WorkBuddy team for evidence preparation, persistent report writing, dynamic rubric evaluation and writing memory.",
   "expertType": "team",
   "agentName": "report-team-lead",

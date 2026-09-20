@@ -291,3 +291,88 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlanSchemaCompatibilityTests(unittest.TestCase):
+    """冻结 Plan 用 statement 承载评判要求，不是 desc。
+
+    这是一处真实出过的 bug：脚本只读 desc/requirement，而
+    report-resolution-judge 的输出 Schema 里 check 只有 id/statement/redline。
+    字段对不上时 requirement 会是空字符串、brief 结构完整、脚本成功退出——
+    Writer 却不知道要改成什么。所以这里既测能读到 statement，也测读不到
+    任何要求时必须报错而不是静默产出空 brief。
+    """
+
+    def plan_with(self, check: dict) -> dict:
+        return {"dimensions": [
+            {"id": "traceability", "weight": 1.0, "checks": [check]}
+        ]}
+
+    def test_statement_is_read_as_requirement(self):
+        """Resolution Judge 的真实输出形态。"""
+        plan = self.plan_with(
+            {"id": "T1", "statement": "不得出现素材外的事实", "redline": True}
+        )
+
+        brief = build_brief(
+            plan=plan,
+            best={"T1": {"status": "miss", "evidence": "第三段有编造"}},
+            best_version="R1",
+        )
+
+        self.assertEqual(brief["repair"][0]["requirement"], "不得出现素材外的事实")
+
+    def test_desc_still_works_for_base_rubrics(self):
+        plan = self.plan_with({"id": "T1", "desc": "引用与素材一致"})
+
+        brief = build_brief(
+            plan=plan,
+            best={"T1": {"status": "partial", "evidence": "缺页码"}},
+            best_version="R1",
+        )
+
+        self.assertEqual(brief["repair"][0]["requirement"], "引用与素材一致")
+
+    def test_statement_wins_when_both_present(self):
+        plan = self.plan_with(
+            {"id": "T1", "statement": "本轮冻结要求", "desc": "Base 原文"}
+        )
+
+        brief = build_brief(
+            plan=plan,
+            best={"T1": {"status": "miss", "evidence": "x"}},
+            best_version="R1",
+        )
+
+        self.assertEqual(brief["repair"][0]["requirement"], "本轮冻结要求")
+
+    def test_check_without_any_requirement_is_rejected(self):
+        """字段名对不上时必须报错，不能产出 requirement 为空的 brief。"""
+        plan = self.plan_with({"id": "T1", "redline": True})
+
+        with self.assertRaises(BriefError) as caught:
+            build_brief(
+                plan=plan,
+                best={"T1": {"status": "miss", "evidence": "x"}},
+                best_version="R1",
+            )
+
+        self.assertIn("T1", str(caught.exception))
+        self.assertIn("评判要求", str(caught.exception))
+
+    def test_preserve_entries_also_carry_the_requirement(self):
+        plan = self.plan_with({"id": "T1", "statement": "不得出现素材外的事实"})
+
+        brief = build_brief(
+            plan=plan,
+            best={"T1": {"status": "met", "evidence": "未发现编造"}},
+            best_version="R1",
+        )
+
+        self.assertEqual(brief["preserve"][0]["requirement"], "不得出现素材外的事实")
+
+    def test_resolution_judge_schema_documents_statement(self):
+        """脚本读的字段必须与 Resolution Judge 声明的输出一致。"""
+        schema = (ROOT / "agents/report-resolution-judge.md").read_text(encoding="utf-8")
+
+        self.assertIn('"checks": [{"id":"...","statement":"...","redline":false}]', schema)

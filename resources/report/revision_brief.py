@@ -102,10 +102,26 @@ def plan_definitions(plan: dict[str, Any]) -> dict[str, dict[str, str]]:
                 "checkId": check_id,
                 "dimension": dimension_id,
                 "label": str(check.get("label") or check_id),
-                "requirement": str(check.get("desc") or check.get("requirement") or ""),
+                # 冻结 Plan 的 Check 用 statement 承载评判要求（见
+                # report-resolution-judge 的输出 Schema）；desc / requirement
+                # 是 Base Rubrics 与聚合 Judgment 里的别名，一并接受。
+                "requirement": str(
+                    check.get("statement")
+                    or check.get("desc")
+                    or check.get("requirement")
+                    or ""
+                ),
             }
     if not definitions:
         raise BriefError("冻结 Plan 的 dimensions[] 未包含任何 Check")
+    # requirement 是 Writer 唯一能看到的"要改成什么"。字段名对不上时它会是空
+    # 字符串，brief 结构仍然完整、脚本仍然成功——这种静默失效比报错更糟。
+    missing = sorted(k for k, v in definitions.items() if not v["requirement"])
+    if missing:
+        raise BriefError(
+            "冻结 Plan 中以下 Check 缺少评判要求（statement/desc/requirement 均为空）："
+            + "、".join(missing)
+        )
     return definitions
 
 
