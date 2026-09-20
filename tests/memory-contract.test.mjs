@@ -26,6 +26,10 @@ test('lead forwards feedback without deciding promotion, preserves negative boun
  assert.match(p,/单独的记忆委托直接交给 Memory Agent/);
  assert.match(p,/首次写作输入和 Loop 自己产生的评测\/改写不触发 Capture/);
  assert.match(p,/不预先指定 Layer、Scope/);
+ assert.match(p,/不限制消息条数/);
+ assert.doesNotMatch(p,/最多\s*8\s*条|通常\s*2–6\s*条/);
+ for(const file of ['agents/report-team-lead.md','agents/report-memory-agent.md'])assert.match(read(file),/主 Agent 负责转交证据，不负责提炼偏好/);
+ assert.match(read('agents/report-memory-agent.md'),/不把主 Agent 的总结当作用户表达/);
  const cases=JSON.parse(read('tests/memory-cases.json'));
  assert.equal(new Set(cases.map(c=>c.id)).size,cases.length);
  assert.ok(cases.filter(c=>c.route).length>=8);

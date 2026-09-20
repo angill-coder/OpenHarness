@@ -58,8 +58,8 @@ python3 "<资源目录>/report/memory_access.py" set-root --path "<用户给的�
 - 仅在 Memory 已开启且满足上述触发条件时调用。上下文、报告差异只帮助理解反馈；用户采纳的建议或受托提炼的材料须与授权一并传递，不把未经采纳的 Agent 分析当成用户要求。
 - 固定顺序：按 [Writer 反馈分流](writer-orchestration.md#反馈分流) 完成直接 Rewrite 或新 Loop → 主 Agent 核验报告 → 委派 `report-memory-agent operation=capture` → 再交付或总结。重大修改也只针对本次用户反馈 Capture 一次，不把 Loop 的自动改写或 Judge 意见当成新反馈。
 - 单独的记忆委托直接交给 Memory Agent，不必先写或改报告；只有写法评价、没有要求改稿时也可直接 Capture。保存意图或材料范围不清时只确认缺失信息，不要求用户逐条重新输入。
-- 为本次反馈生成一个稳定 `captureId`，重试时必须复用；向 Memory Agent 提供该 ID、用户反馈原文、task、audience/project、必要的修改前后内容，以及用户正在评价的上一条 Assistant 可见输出至当前反馈的对话窗口；通常 2–6 条、最多 8 条，用户反馈不得截断。用户通过选项回答时，同时传递原问题、选项及实际选择，区分 Agent 建议与用户表达。
-- 委派保留用户原文、明确采纳的内容或受托提炼的材料/路径及授权范围，不预先指定 Layer、Scope 或编造长期偏好。Memory Agent 判断本次适用还是长期生效；按实际结果汇报，区分用户原话与受托提炼，不把 L0/L1 保存说成 L2B 已更新。
+- 为本次反馈生成一个稳定 `captureId`，重试时必须复用；提供该 ID、task、audience/project、必要的修改前后内容，以及足以理解本次反馈和授权范围的相关原始对话。标明用户与 Assistant，不限制消息条数，不截断用户原话或关键确认语境。用户通过选项回答时，附原问题、选项及实际选择；委托提炼时，附材料/路径和授权范围。
+- 主 Agent 负责转交证据，不负责提炼偏好，不用总结替代原话，不预先指定 Layer、Scope。Memory Agent 根据原始对话判断，不把主 Agent 的总结当作用户表达；关键语境缺失时先向主 Agent 索取，原对话未说明时再由主 Agent 向用户确认。按实际结果汇报，区分用户原话与受托提炼，不把 L0/L1 保存说成 L2B 已更新。
 - 普通报告写作反馈一律走 Capture。即使与已有记忆冲突，也由 Memory Agent 在同一次 Capture 中更新、合并或保持不变；Capture 期间不得改走 Manage，也不得先删除旧记忆。
 - 成功结束标记为 `MEMORY_CAPTURE_COMPLETED`；相同 `captureId` 的幂等返回也视为同一次成功。失败标记为 `MEMORY_CAPTURE_FAILED: <reason>`。失败时如实说明，不得把 L0 保存描述成 L2B 已更新，也不得更换 `captureId` 反复提交。
 
