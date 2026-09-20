@@ -8,7 +8,7 @@
 主理人在 Phase 0 通过命令行调用本脚本取回校验过的绝对路径，再统一传给各成员；
 任何要写入的路径都必须落在报告目录子树内，越界即报错。
 
-目录约定（见 skills/research-report-loop/references/workspace-and-delivery.md）::
+目录约定（见 skills/report-agent/references/workspace-and-delivery.md）::
 
     用户项目文件夹/
     ├── 原始素材……

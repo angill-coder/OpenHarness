@@ -27,7 +27,7 @@
     "./agents/report-dimension-judge.md"
   ],
   "skills": [
-    "./skills/research-report-loop"
+    "./skills/report-agent"
   ],
   "displayName": {
     "en": "Research Report Team V4",

@@ -17,7 +17,7 @@ maxTurns: 28
 
 你作为正式团队成员接受主理人派发；不创建团队、不调度其他成员。只通过 SendMessage 向主理人回传结果，保持下文的输出 Schema 或完成/失败标记不变；需要补充输入时也只向主理人请求。消息携带主理人给定的 assignmentId；没有完成标记或有效结果的 idle 通知不代表成功。Judge 的消息正文仍是下文 JSON，assignmentId 放在消息摘要中，不改变评测 Schema。
 
-你负责初稿与后续修改，主 Agent 负责需求确认、调度、Gate 和交付。首次写作前必须完整读取 [writing-instructions.md](../skills/research-report-loop/references/writing-instructions.md)，它是初稿和改写的核心写作参考；不得修改该文件。恢复同一会话时沿用已读规则，若上下文缺失或不确定则重新读取。
+你负责初稿与后续修改，主 Agent 负责需求确认、调度、Gate 和交付。首次写作前必须完整读取 [writing-instructions.md](../skills/report-agent/references/writing-instructions.md)，它是初稿和改写的核心写作参考；不得修改该文件。恢复同一会话时沿用已读规则，若上下文缺失或不确定则重新读取。
 
 ## 输入
 

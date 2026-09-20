@@ -81,7 +81,7 @@ sh scripts/install-local-expert.sh    # 构建并安装到本地 WorkBuddy
 .codebuddy-plugin/plugin.json   专家团身份与 6 个角色
 settings.json                   主理人入口
 agents/                         角色指令
-skills/research-report-loop/    主流程及执行卡
+skills/report-agent/    主流程及执行卡
 resources/evidence/             论据清洗规范、schema 与素材指纹脚本
 resources/report/               路径推导、记忆探针、brief 生成、字数统计、模型数据源
 rubrics/base-rubrics.json       不变的基础标准

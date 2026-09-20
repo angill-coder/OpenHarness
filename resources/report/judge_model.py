@@ -33,7 +33,7 @@ JUDGE_AGENTS = (
 CONSISTENCY_TARGETS = (
     "agents/report-resolution-judge.md",
     "agents/report-dimension-judge.md",
-    "skills/research-report-loop/references/native-agent-contracts.md",
+    "skills/report-agent/references/native-agent-contracts.md",
     "README.md",
 )
 

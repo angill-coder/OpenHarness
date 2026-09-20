@@ -10,7 +10,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const manifest = JSON.parse(read('.codebuddy-plugin/plugin.json'));
 const mapping = {
-  'research-report-agent-v2': 'research-report-loop',
+  // 必须带 skills/ 前缀。Skill 目录改名为 report-agent 后，裸写
+  // 'report-agent' 会和正文里的 `.report-agent/`（内部记录目录）撞名，
+  // original() 反向替换时把正文一起改掉，导致基线 SHA 校验假失败。
+  'skills/research-report-agent-v2': 'skills/report-agent',
   'report-dimension-judge-v2': 'report-dimension-judge',
   'report-resolution-judge-v2': 'report-resolution-judge',
   'report-evidence-agent-v2': 'report-evidence-agent',
@@ -112,7 +115,7 @@ test('PR51 writing, evidence, judging and scoring invariants unchanged', () => {
 });
 
 test('feedback routing follows report impact; budget is two hours', () => {
-  const refs='skills/research-report-loop/references/';
+  const refs='skills/report-agent/references/';
   const writer=read(refs+'writer-orchestration.md');
   assert.match(writer,/根据修改对报告核心观点、分析方向和整体结构的影响选择路径/u);
   assert.match(writer,/重大修改 → 新 Loop.*通篇改写.*分析方向/u);
@@ -123,7 +126,7 @@ test('feedback routing follows report impact; budget is two hours', () => {
   assert.match(read(refs+'state-and-scoring.md'),/deadlineAt 为 120 分钟后/u);
   assert.match(read(refs+'loop-orchestration.md'),/从进入 resolving 起 120 分钟/u);
   const flow=[
-    read('skills/research-report-loop/SKILL.md'),
+    read('skills/report-agent/SKILL.md'),
     read('agents/report-team-lead.md'),
     ...['writer-orchestration.md','evidence-orchestration.md','memory-orchestration.md','loop-orchestration.md'].map(f=>read(refs+f))
   ].join('\n');
@@ -132,7 +135,7 @@ test('feedback routing follows report impact; budget is two hours', () => {
 });
 
 test('data updates require report-revision confirmation before dispatch', () => {
-  const refs='skills/research-report-loop/references/';
+  const refs='skills/report-agent/references/';
   const evidence=read(refs+'evidence-orchestration.md');
   assert.match(evidence,/使用 `AskUserQuestion` 确认是否据此修改报告/u);
   assert.match(evidence,/等待用户同意后，再按/u);
@@ -140,7 +143,7 @@ test('data updates require report-revision confirmation before dispatch', () => 
   assert.match(evidence,/不同意则保留新数据、报告不动/u);
   assert.match(evidence,/纯写作反馈仍直接按整体影响分流/u);
   assert.match(read(refs+'writer-orchestration.md'),/数据更新引起的报告修改.*取得用户确认/u);
-  assert.match(read('skills/research-report-loop/SKILL.md'),/向用户确认是否据此修改报告/u);
+  assert.match(read('skills/report-agent/SKILL.md'),/向用户确认是否据此修改报告/u);
   assert.match(read('agents/report-team-lead.md'),/确认是否修改报告，用户同意后再分流/u);
 });
 
@@ -170,8 +173,8 @@ test('avatars exist, are 512px square PNGs and below 500KB', () => {
 });
 
 test('team contract removes legacy registration and anonymous resume dispatch', () => {
-  const skill=read('skills/research-report-loop/SKILL.md');
-  const team=read('skills/research-report-loop/references/native-agent-contracts.md');
+  const skill=read('skills/report-agent/SKILL.md');
+  const team=read('skills/report-agent/references/native-agent-contracts.md');
   assert.doesNotMatch(skill,/first-use.md|register_agents.py/);
   assert.equal(fs.existsSync(path.join(root,'resources/workbuddy')),false);
   assert.match(team,/dimensions\[\]/);
@@ -207,5 +210,5 @@ test('build contains runtime only and every registered resource', () => {
     assert.ok(names.includes(manifest.name+'/'+registered.replace(/^\.\//,'')),registered);
   }
   assert.ok(names.includes(manifest.name+'/settings.json'));
-  assert.ok(names.includes(manifest.name+'/skills/research-report-loop/SKILL.md'));
+  assert.ok(names.includes(manifest.name+'/skills/report-agent/SKILL.md'));
 });

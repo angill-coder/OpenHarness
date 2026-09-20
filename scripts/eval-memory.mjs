@@ -13,8 +13,8 @@ const cases=JSON.parse(fs.readFileSync(path.join(repo,'tests/memory-cases.json')
 const strip=s=>s.replace(/^---\n[\s\S]*?\n---\n/,'');
 function prompt(variant,role){
  const r=variant==='baseline'?baseline:repo;
- const refs=variant==='baseline'?'references':'skills/research-report-loop/references';
- const files=role==='curator'?['agents/report-memory-agent.md']:['agents/report-team-lead.md',variant==='baseline'?'SKILL.md':'skills/research-report-loop/SKILL.md',refs+'/memory-orchestration.md'];
+ const refs=variant==='baseline'?'references':'skills/report-agent/references';
+ const files=role==='curator'?['agents/report-memory-agent.md']:['agents/report-team-lead.md',variant==='baseline'?'SKILL.md':'skills/report-agent/SKILL.md',refs+'/memory-orchestration.md'];
  return files.map(f=>strip(fs.readFileSync(path.join(r,f),'utf8'))).join('\n\n');
 }
 const contract={

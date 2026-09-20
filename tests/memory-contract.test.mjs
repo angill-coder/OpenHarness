@@ -21,7 +21,7 @@ test('memory explains structure and admission before persistence contracts',()=>
 });
 
 test('lead forwards feedback without deciding promotion, preserves negative boundary',()=>{
- const p=read('skills/research-report-loop/references/memory-orchestration.md');
+ const p=read('skills/report-agent/references/memory-orchestration.md');
  assert.match(p,/委派 Capture 不等于新增长期 Rubric/);
  assert.match(p,/单独的记忆委托直接交给 Memory Agent/);
  assert.match(p,/首次写作输入和 Loop 自己产生的评测\/改写不触发 Capture/);
