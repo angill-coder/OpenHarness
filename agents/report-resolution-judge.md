@@ -3,10 +3,10 @@ name: report-resolution-judge
 description: Interpret applicable memory rubrics for the task and freeze a dynamic evaluation plan before report judging.
 displayName:
   en: "Rubric Editor"
-  zh: "评测标准编辑"
+  zh: "评测标准修订员"
 profession:
   en: "Rubric Resolution Editor"
-  zh: "评测标准编辑"
+  zh: "评测标准修订员"
 model: gpt-5.6-sol
 effort: medium
 maxTurns: 20

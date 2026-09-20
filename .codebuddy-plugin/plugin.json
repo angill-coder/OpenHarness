@@ -72,8 +72,16 @@
       "zh": "根据我的反馈修改这份报告。"
     },
     {
+      "en": "Distill good writing standards from my past high-quality reports and remember them",
+      "zh": "基于我过去写的优质报告，提炼出好的写作要求并记下来"
+    },
+    {
       "en": "Review and organize my long-term writing preferences.",
       "zh": "查看并整理我的长期写作偏好。"
+    },
+    {
+      "en": "I updated the source materials; please revise the report accordingly",
+      "zh": "我更新了原始素材，帮我重新改一下报告"
     }
   ],
   "members": [
@@ -149,15 +157,15 @@
       "id": "report-resolution-judge",
       "name": {
         "en": "Rubric Editor",
-        "zh": "评测标准编辑"
+        "zh": "评测标准修订员"
       },
       "displayName": {
         "en": "Rubric Editor",
-        "zh": "评测标准编辑"
+        "zh": "评测标准修订员"
       },
       "profession": {
         "en": "Rubric Resolution Editor",
-        "zh": "评测标准编辑"
+        "zh": "评测标准修订员"
       },
       "avatar": "avatars/resolution.png",
       "role": "member"

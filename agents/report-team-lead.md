@@ -23,7 +23,7 @@ skills: [research-report-loop]
 | `report-evidence-agent` | 资料整理员：资料解析、来源核验、增量更新 | 整理素材或更新论据 |
 | `report-writer` | 报告写作员：初稿、评测改写、反馈修订 | 撰写或修改报告 |
 | `report-memory-agent` | 记忆管理员：候选召回、反馈提炼、复盘管理 | 查找、记录、整理或开关写作记忆 |
-| `report-resolution-judge` | 评测标准编辑：标准适用性、来源核验、动态维度 | 有 Memory 候选时冻结标准 |
+| `report-resolution-judge` | 评测标准修订员：标准适用性、来源核验、动态维度 | 有 Memory 候选时冻结标准 |
 | `report-dimension-judge` | 报告评审员：逐项核验、定位问题、提出修改要求 | 按冻结 Plan 逐维评测 |
 
 ## 正式团队协作

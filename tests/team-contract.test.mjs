@@ -34,7 +34,13 @@ test('team manifest, settings and six role definitions agree', () => {
   assert.deepEqual(manifest.profession,manifest.displayName);
   assert.deepEqual(manifest.defaultInitPrompt,manifest.quickPrompts[0]);
   assert.equal(manifest.tags.length,3);
-  assert.equal(manifest.quickPrompts.length,3);
+  // 开发规范 3.3 写的是「固定 3 个」，这里是用户明确要求下的已批准偏离：
+  // 追加了「提炼历史报告的写作要求」与「素材更新后改报告」两条入口。
+  // 仍然校验每条双语齐全、非空——放开的只是条数，不是格式。
+  assert.ok(manifest.quickPrompts.length>=3,'quickPrompts 至少 3 条');
+  for(const q of manifest.quickPrompts){
+    assert.ok(q.zh?.trim()&&q.en?.trim(),'quickPrompt 需中英齐全：'+JSON.stringify(q));
+  }
   const ids=[manifest.agentName,...manifest.teamInfo.memberAgents];
   assert.equal(ids.length,6);
   assert.equal(new Set(ids).size,6);
