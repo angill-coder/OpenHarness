@@ -44,6 +44,37 @@ class MemoryStatsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.sync(self.root, {"revision": 1})
 
+    def test_size_boundary_and_single_giant_rubric(self):
+        base = self.memory.read_bytes()
+        self.memory.write_bytes(base + b"x" * (m.MAX_MEMORY_BYTES - len(base)))
+        self.assertEqual(m.check(self.root, self.memory)["marker"], "MEMORY_CAPACITY_OK")
+        with self.memory.open("ab") as stream:
+            stream.write("中".encode("utf-8"))
+        result = m.check(self.root, self.memory)
+        self.assertEqual(result["marker"], "MEMORY_CAPACITY_EXCEEDED")
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["excess"], 0)
+        self.assertEqual(result["excessBytes"], 3)
+        with self.assertRaisesRegex(ValueError, "2 MiB"):
+            m.sync(self.root, {"revision": 1})
+        self.assertFalse((self.root / "memory-stats.json").exists())
+
+    def test_size_preview_and_whole_file_metadata(self):
+        proposal = self.root / "proposal.md"
+        proposal.write_text("x" * m.MAX_MEMORY_BYTES + "\n" + self.memory.read_text(encoding="utf-8"), encoding="utf-8")
+        result = m.check(self.root, proposal)
+        self.assertEqual(result["marker"], "MEMORY_CAPACITY_EXCEEDED")
+        self.assertEqual(result["bytes"], proposal.stat().st_size)
+        self.assertEqual(m.check(self.root, self.memory)["marker"], "MEMORY_CAPACITY_OK")
+
+    def test_size_cli_exit_code(self):
+        with self.memory.open("ab") as stream:
+            stream.write(b"x" * m.MAX_MEMORY_BYTES)
+        result = subprocess.run([sys.executable, str(ROOT / "resources/report/memory_stats.py"),
+                                 "--root", str(self.root), "check"], capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertGreater(json.loads(result.stdout)["excessBytes"], 0)
+
     def test_legacy_and_unknown_statistics(self):
         self.write_memory(["MR-1"], title="Active L2B Index")
         row = m.check(self.root, self.memory)["rubrics"][0]

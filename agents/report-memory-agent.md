@@ -76,7 +76,7 @@ L2 只维护 Memory Rubrics。可选 `dimensionCandidate` 供 Resolution Judge �
 
 ### 4. L2 容量与压缩
 
-生效 L2 全库合计最多 **1,000 条**，不含 Base、L0/L1 和失效项。Capture、Manage 修改 L2 前后及每次 Reflection，按 [容量与使用统计](../skills/report-agent/references/memory-capacity.md) 调用脚本检查；预计超限时先整理再保存，不靠模型估算条数。
+生效 L2 全库合计最多 **1,000 条**，不含 Base、L0/L1 和失效项；整个 `MEMORY.md` 文件另有 **2 MiB（2,097,152 字节）**上限，防止少数巨型规则撑大文件。任一超限都需整理。Capture、Manage 修改 L2 前后及每次 Reflection，按 [容量与使用统计](../skills/report-agent/references/memory-capacity.md) 调用脚本检查；预计超限时先整理再保存，不靠模型估算条数或文件大小。
 
 - 先处理重复、矛盾和确认过时的内容，优先修改、合并已有规则，保留适用范围、必要例外和来源。
 - **可以参考 `memory-stats.json` 的新鲜度（`updatedAt`）和热度（`useCount`、`lastUsedAt`），优先保留最新、最热的要求**；优先审查既旧又少用的规则。使用次数少不一定代表规则不重要：新规则可能还没机会使用，特定场景的规则可能只在少数任务中适用；没有历史统计的旧规则，也不能视为从未使用。不要仅凭这些情况删除规则。

@@ -4,6 +4,10 @@
 
 ## Memory Agent：检查与整理
 
+双上限：生效 L2 最多 1,000 条，整个 `MEMORY.md` 最多 2 MiB（2,097,152 字节，含设置、字段与正文，按 UTF-8 文件实际字节计算）。任一超限返回 `MEMORY_CAPACITY_EXCEEDED`；条数未超也要检查大小。输出 `bytes`、`byteLimit`、`excessBytes`，草稿检查与保存后同步使用同一上限。
+
+这是较宽松的存储兜底，不是上下文预算：按每条 100–300 个中文字加约 106 字节标题/Scope/来源字段估算，1,000 条约为 0.4–1.0 MiB；2 MiB 留出额外空间，但避免合并到 1,000 条后仍无限膨胀。不限制单条固定字数，不允许以巨型 Rubric 或搬到其他生效文件绕过限制。
+
 ```text
 "<Python>" "<脚本>" --root "<memoryRoot>" check
 "<Python>" "<脚本>" --root "<memoryRoot>" check --memory "<待写入的MEMORY草稿>"

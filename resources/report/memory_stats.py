@@ -14,6 +14,7 @@ import sys
 import tempfile
 
 LIMIT = 1000
+MAX_MEMORY_BYTES = 2 * 1024 * 1024
 ID = re.compile(r"MR-[A-Za-z0-9_-]+")
 
 
@@ -118,6 +119,7 @@ def recount(entry):
 
 def check(root, memory):
     ids = active_ids(memory)
+    size = Path(memory).stat().st_size
     exists = (root / "memory-stats.json").exists()
     stats = load_stats(root)
     rows = []
@@ -125,8 +127,9 @@ def check(root, memory):
         entry = stats["rubrics"].get(key)
         rows.append({"id": key, **{field: entry[field] if entry else None
                     for field in ("createdAt", "updatedAt", "useCount", "lastUsedAt")}})
-    return {"marker": "MEMORY_CAPACITY_EXCEEDED" if len(ids) > LIMIT else "MEMORY_CAPACITY_OK",
+    return {"marker": "MEMORY_CAPACITY_EXCEEDED" if len(ids) > LIMIT or size > MAX_MEMORY_BYTES else "MEMORY_CAPACITY_OK",
             "count": len(ids), "limit": LIMIT, "excess": max(0, len(ids) - LIMIT),
+            "bytes": size, "byteLimit": MAX_MEMORY_BYTES, "excessBytes": max(0, size - MAX_MEMORY_BYTES),
             "trackingSince": stats["trackingSince"] if exists else None, "rubrics": rows}
 
 
@@ -134,6 +137,8 @@ def sync(root, changes):
     ids = set(active_ids(root / "MEMORY.md"))
     if len(ids) > LIMIT:
         raise ValueError("Active L2 exceeds 1000; compress before completing the write")
+    if (root / "MEMORY.md").stat().st_size > MAX_MEMORY_BYTES:
+        raise ValueError("MEMORY.md exceeds 2 MiB; compress before completing the write")
     revision = str(changes["revision"])
     memory = (root / "MEMORY.md").read_text(encoding="utf-8-sig")
     if not re.search(r"^revision:\s*" + re.escape(revision) + r"\s*$", memory, re.M):
