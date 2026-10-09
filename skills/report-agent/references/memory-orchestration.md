@@ -38,6 +38,8 @@ python3 "<资源目录>/report/memory_access.py" set-root --path "<用户给的�
 
 ## 写作与 Judge
 
+L2 生效标准全库最多 1,000 条；容量、时间及按 Loop 去重的使用统计见 [容量与使用统计](memory-capacity.md)。`memory-stats.json` 只供整理参考，不传入常规 Judge，也不当作 L0 反馈。
+
 - 写作前不执行面向主 Agent 的 Memory Recall。Writer 只按本轮用户要求和写作规则完成 R0。
 - Memory 关闭时，Resolution 只使用 Base Rubrics；开启后才读取 L2 候选。
 - L2 只维护独立 Memory Rubrics，不修改 Base，也不预先决定 Dimension。

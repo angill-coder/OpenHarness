@@ -21,12 +21,13 @@
 
 ## V4 相对基线的增量
 
-四个脚本，都在解决「规范写了但没有代码兜底」的问题。
+配套脚本解决「规范写了但没有代码兜底」的问题。
 
 | 脚本 | 解决什么 |
 |---|---|
 | `resources/report/workspace.py` | 产物路径推导与边界校验。报告标识、loop 序号、vN 编号要跨会话一致，手工推导容易在第二次进来时出偏差；越界路径返回 `WORKSPACE_FAILED` |
 | `resources/report/memory_access.py` | Phase 0 探测记忆目录可写性。记忆在工作区之外，若等到 capture 才发现写不了，那轮用户反馈就已丢失 |
+| `resources/report/memory_stats.py` | 检查生效 L2 最多 1,000 条、整个 MEMORY.md 最多 0.5 MiB；记录实质更新时间与按 Loop 去重的实际评测次数，供 Memory Agent 压缩参考，不自动删除规则 |
 | `resources/report/revision_brief.py` | 确定性生成 Revision Brief。brief 是 Writer 能看到的全部评测信息，手工提炼会让同一份 Judgment 得到宽严不一的改写指令 |
 | `resources/report/judge_model.py` | Judge 模型唯一数据源。模型字面量原先散落在两个 Judge 的 frontmatter、契约文档与 README 中共 5 处，升级漏改一处会让两个 Judge 用不同模型打分且不报错 |
 
@@ -63,9 +64,9 @@
 
 同一报告的多次 Loop 共用一个报告标识：用户大改时沿用已有标识、新建 `loop-002`，旧轮完整保留。`RN` 是内部候选，`vN` 是对外交付版本，两者无数字对应关系。
 
-**写作记忆在工作区之外**：用户主目录下的 `ReportAgentMemory/`，跨项目与宿主共用，纯 Markdown，用户可直接编辑。它可能落在宿主可写范围之外，因此 Phase 0 用 `memory_access.py probe` 先确认可写——不可写时由主理人询问用户授权、改用其他位置，或本轮不启用记忆。用户选定的位置会被记下，后续会话不再重复询问。
+**写作记忆在工作区之外**：用户主目录下的 `ReportAgentMemory/`，跨项目与宿主共用，记忆正文为 Markdown，用户可直接编辑。它可能落在宿主可写范围之外，因此 Phase 0 用 `memory_access.py probe` 先确认可写——不可写时由主理人询问用户授权、改用其他位置，或本轮不启用记忆。用户选定的位置会被记下，后续会话不再重复询问。
 
-Reflection 是调用时检查并补做，不提供无人使用时也运行的后台定时任务。
+统计另存 `memory-stats.json`，不进入常规 Judge 上下文；Memory Agent 参考新鲜度和热度优先保留最新、最热的要求，不能将多条规则塞进巨型 Rubric 规避上限。Reflection 是调用时检查并补做，不提供无人使用时也运行的后台定时任务。
 
 不要让旧版专家与本专家团同时修改同一份报告或记忆。测试需要干净记忆时应明确隔离路径，不自动清空用户内容。
 
