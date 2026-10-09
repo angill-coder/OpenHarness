@@ -29,8 +29,8 @@ class MemoryStatsTest(unittest.TestCase):
         self.write_memory(["MR-1"])
 
     def write_memory(self, ids, revision=1, title="Active L2"):
-        self.memory.write_text(f"revision: {revision}\n## {title}\n" + "".join(
-            f"### {key} 要求\nscope: core\nsourceL1Ids: [L1-1]\n规则正文\n" for key in ids), encoding="utf-8")
+        self.memory.write_text(f"# 写作记忆\nrevision: {revision}\nenabled: true\nlastReflectionAt: null\n\n## {title}\n" + "".join(
+            f"### {key} 要求\n- scope: core\n- sourceL1Ids: [L1-1]\n规则正文\n" for key in ids), encoding="utf-8")
 
     def stats(self):
         return m.load_stats(self.root)
@@ -62,7 +62,8 @@ class MemoryStatsTest(unittest.TestCase):
 
     def test_size_preview_and_whole_file_metadata(self):
         proposal = self.root / "proposal.md"
-        proposal.write_text("x" * m.MAX_MEMORY_BYTES + "\n" + self.memory.read_text(encoding="utf-8"), encoding="utf-8")
+        proposal.write_text(self.memory.read_text(encoding="utf-8").replace(
+            "# 写作记忆", "# " + "x" * m.MAX_MEMORY_BYTES, 1), encoding="utf-8")
         result = m.check(self.root, proposal)
         self.assertEqual(result["marker"], "MEMORY_CAPACITY_EXCEEDED")
         self.assertEqual(result["bytes"], proposal.stat().st_size)
@@ -78,6 +79,9 @@ class MemoryStatsTest(unittest.TestCase):
 
     def test_legacy_and_unknown_statistics(self):
         self.write_memory(["MR-1"], title="Active L2B Index")
+        self.assertEqual(m.active_ids(self.memory), ["MR-1"])
+        self.assertEqual(m.check(self.root, self.memory)["marker"], "MEMORY_FORMAT_NEEDS_REVIEW")
+        self.write_memory(["MR-1"])
         row = m.check(self.root, self.memory)["rubrics"][0]
         self.assertIsNone(row["updatedAt"])
         self.assertIsNone(row["useCount"])
@@ -161,7 +165,7 @@ class MemoryStatsTest(unittest.TestCase):
 
     def test_preview_checks_proposal_not_live_file(self):
         proposal = self.root / "proposal.md"
-        proposal.write_text("## Active L2\n" + "".join(f"### MR-{i}\n规则\n" for i in range(1001)), encoding="utf-8")
+        proposal.write_text("# 写作记忆\nrevision: 1\nenabled: true\nlastReflectionAt: null\n\n## Active L2\n" + "".join(f"### MR-{i} 标准\n- scope: core\n- sourceL1Ids: [L1-1]\n规则\n" for i in range(1001)), encoding="utf-8")
         self.assertEqual(m.check(self.root, proposal)["excess"], 1)
         self.assertEqual(m.active_ids(self.memory), ["MR-1"])
 

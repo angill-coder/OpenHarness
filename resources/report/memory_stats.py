@@ -57,6 +57,86 @@ def empty_entry():
             "lastUsedAt": None, "runs": {}}
 
 
+def validate(memory):
+    """Read-only shape validation, not a semantic admission or source-existence judge."""
+    text = Path(memory).read_text(encoding="utf-8-sig")
+    issues = []
+    parts = text.split("\n## Active L2\n")
+    if len(parts) != 2:
+        return {"marker": "MEMORY_FORMAT_NEEDS_REVIEW", "issues": ["Use one canonical ## Active L2 section; preserve legacy contents when migrating"]}
+    header, body = parts
+    lines = [line.strip() for line in header.splitlines() if line.strip()]
+    if not lines or not re.fullmatch(r"# [^#].*", lines[0]):
+        issues.append("One document title is required")
+    metadata = {}
+    for line in lines[1:]:
+        match = re.fullmatch(r"(revision|enabled|lastReflectionAt):\s*(.+)", line)
+        if not match or match[1] in metadata:
+            issues.append("Only revision, enabled and lastReflectionAt belong above Active L2")
+        else:
+            metadata[match[1]] = match[2]
+    if not re.fullmatch(r"\d+", metadata.get("revision", "")):
+        issues.append("revision must be a non-negative integer; new libraries start at 1")
+    if metadata.get("enabled") not in ("true", "false"):
+        issues.append("enabled must be true or false")
+    stamp = metadata.get("lastReflectionAt", "")
+    if stamp != "null":
+        try:
+            datetime.fromisoformat(stamp)
+            if "T" not in stamp and " " not in stamp:
+                raise ValueError("time missing")
+        except ValueError:
+            issues.append("lastReflectionAt must be null or an ISO date-time")
+    if re.search(r"^#{1,2} |^#{4,} |^```|^~~~", body, re.M):
+        issues.append("No other sections, nested headings or code fences in MEMORY.md")
+    blocks = re.split(r"^### ", body, flags=re.M)
+    if blocks[0].strip():
+        issues.append("No indexes, summaries or counts before active rubric entries")
+    ids = []
+    for block in blocks[1:]:
+        heading, _, content = block.partition("\n")
+        match = re.fullmatch(r"(MR-[A-Za-z0-9_-]+)\s+\S.*", heading)
+        if not match:
+            issues.append("Rubric heading must contain stable MR-id and a title")
+            continue
+        key = match[1]
+        ids.append(key)
+        fields, prose = {}, []
+        for line in content.splitlines():
+            field = re.match(r"^- ([A-Za-z][A-Za-z0-9]*):\s*(.*)$", line)
+            if field:
+                if field[1] not in ("scope", "scopeValue", "sourceL1Ids", "dimensionCandidate") or field[1] in fields:
+                    issues.append(f"{key}: unknown or duplicate metadata field {field[1]}")
+                fields[field[1]] = field[2]
+            elif line.strip():
+                prose.append(line)
+        scope = fields.get("scope")
+        if scope not in ("core", "audience", "project"):
+            issues.append(f"{key}: invalid scope")
+        if scope in ("audience", "project") and not fields.get("scopeValue", "").strip():
+            issues.append(f"{key}: scopeValue is required")
+        if scope == "core" and "scopeValue" in fields:
+            issues.append(f"{key}: core does not use scopeValue")
+        sources = fields.get("sourceL1Ids", "")
+        if not re.fullmatch(r"\[\s*L1-[A-Za-z0-9_-]+(?:\s*,\s*L1-[A-Za-z0-9_-]+)*\s*\]", sources):
+            issues.append(f"{key}: sourceL1Ids must be a non-empty list of L1 IDs")
+        candidate = fields.get("dimensionCandidate")
+        if candidate is not None:
+            try:
+                obj = json.loads(candidate)
+                if not isinstance(obj, dict) or set(obj) != {"name", "label", "reason"} or not all(isinstance(v, str) and v.strip() for v in obj.values()):
+                    raise ValueError("invalid candidate")
+            except ValueError:
+                issues.append(f"{key}: invalid dimensionCandidate")
+        if not prose:
+            issues.append(f"{key}: rule statement is empty")
+    if len(ids) != len(set(ids)):
+        issues.append("Duplicate rubric IDs")
+    return {"marker": "MEMORY_FORMAT_NEEDS_REVIEW" if issues else "MEMORY_FORMAT_OK",
+            "issues": issues, "count": len(ids),
+            "note": "Structure only; Curator must verify sources and durable applicability"}
+
+
 def valid_time(value):
     if value is not None:
         if not isinstance(value, str) or datetime.fromisoformat(value).tzinfo is None:
@@ -118,6 +198,9 @@ def recount(entry):
 
 
 def check(root, memory):
+    structure = validate(memory)
+    if structure["issues"]:
+        return structure
     ids = active_ids(memory)
     size = Path(memory).stat().st_size
     exists = (root / "memory-stats.json").exists()
@@ -134,6 +217,9 @@ def check(root, memory):
 
 
 def sync(root, changes):
+    structure = validate(root / "MEMORY.md")
+    if structure["issues"]:
+        raise ValueError("MEMORY format needs review: " + "; ".join(structure["issues"]))
     ids = set(active_ids(root / "MEMORY.md"))
     if len(ids) > LIMIT:
         raise ValueError("Active L2 exceeds 1000; compress before completing the write")
@@ -250,6 +336,8 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("check")
     p.add_argument("--memory", type=Path, help="Optional proposed MEMORY.md; read-only")
+    p = sub.add_parser("validate")
+    p.add_argument("--memory", type=Path, help="Optional proposed MEMORY.md; read-only")
     p = sub.add_parser("sync")
     p.add_argument("--changes", required=True, type=Path)
     p = sub.add_parser("record-use")
@@ -260,14 +348,16 @@ def main():
     try:
         if not args.root.is_absolute() or not args.root.is_dir():
             raise ValueError("memoryRoot must be an existing absolute directory; no fallback")
-        if args.command == "check":
+        if args.command == "validate":
+            result = validate(args.memory or args.root / "MEMORY.md")
+        elif args.command == "check":
             result = check(args.root, args.memory or args.root / "MEMORY.md")
         elif args.command == "sync":
             result = sync(args.root, read_json(args.changes))
         else:
             result = record_use(args.root, args.run_id, read_json(args.plan), [read_json(p) for p in args.result])
         print(json.dumps(result, ensure_ascii=False))
-        return 2 if result["marker"] == "MEMORY_CAPACITY_EXCEEDED" else 0
+        return 2 if result["marker"] in ("MEMORY_CAPACITY_EXCEEDED", "MEMORY_FORMAT_NEEDS_REVIEW") else 0
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         print(json.dumps({"marker": "MEMORY_STATS_FAILED", "error": str(exc)}, ensure_ascii=False))
         return 1

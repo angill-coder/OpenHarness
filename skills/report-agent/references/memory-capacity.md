@@ -9,13 +9,16 @@
 这是存储上限，不是上下文预算：0.5 MiB 可容纳约 17.5 万个纯中文字；扣除标题、Scope、来源等字段后，粗略按 15 万字正文估算，实际以文件字节数为准。达到 1,000 条时平均每条约 140–150 个中文字，大小限制可能先于条数限制触发。不限制单条固定字数，不允许以巨型 Rubric 或搬到其他生效文件绕过限制。
 
 ```text
+"<Python>" "<脚本>" --root "<memoryRoot>" validate
 "<Python>" "<脚本>" --root "<memoryRoot>" check
 "<Python>" "<脚本>" --root "<memoryRoot>" check --memory "<待写入的MEMORY草稿>"
 ```
 
-统计全库生效 Rubric，不分 Scope 配额。返回条数、超出量及 `memory-stats.json` 的时间/热度，不读取 L0/L1。超过 1,000 条返回 `MEMORY_CAPACITY_EXCEEDED`（退出码 2），不是脚本故障；格式、权限或统计损坏返回 `MEMORY_STATS_FAILED`（退出码 1），不能当作零条继续写。
+`validate` 按 [MEMORY 模板](memory-template.md) 检查章节、设置、ID、Scope、来源字段与正文是否齐全；同样支持 `--memory` 校验草稿。旧格式或字段问题返回 `MEMORY_FORMAT_NEEDS_REVIEW` 和具体问题（退出码 2），保留原文件，交给 Curator 整理，不当作空库。它不判断来源是否真实、内容是否长期有效，也不自动迁移。
 
-生效区使用 `## Active L2`，每条以 `### MR-稳定ID 标题` 开头，其下保留原规则、Scope、来源等内容；空区留空。旧 `Active L2B` / `Active L2B Index` 标题兼容读取。不要在生效区保留失效规则、索引表或代码块；历史移至变更记录。旧格式不能识别时，Memory Agent 在实际写入或 Reflection 中仅规范标题，核对条数与内容未丢失；只读时报告需整理，不猜测数量或重建空库。
+`check` 先做同一结构检查，再统计全库生效 Rubric，不分 Scope 配额。返回条数、超出量及 `memory-stats.json` 的时间/热度，不读取 L0/L1。超过 1,000 条返回 `MEMORY_CAPACITY_EXCEEDED`（退出码 2）；权限、读取或统计损坏返回 `MEMORY_STATS_FAILED`（退出码 1），不能当作零条继续写。
+
+新输出遵循模板；旧 L2B 仍按 L2 理解，但写入前需规范结构。旧内容的移动及语义复核按 [Reflection 指引](memory-reflection.md) 处理，不能只改标题后宣称完成。只读时报告需整理，不重建空库。
 
 检查当前文件与拟写草稿，超过上限按成员 Prompt 的压缩原则整理。草稿通过后重新核对磁盘 revision 和用户修改，再写入并读回检查。首次空库先由 Memory Agent 初始化规范空区。已有超限也可检查，不会被脚本自动删除。
 

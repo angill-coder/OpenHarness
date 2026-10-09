@@ -34,7 +34,7 @@ python3 "<资源目录>/report/memory_access.py" set-root --path "<用户给的�
 
 用户选择本轮不启用记忆时，按 Memory 关闭处理：resolve 不返回候选、capture/reflect 不写入，只用 Base Rubrics 评测，并在交付时说明本轮未使用记忆。不要反复询问，也不要把写入失败当作记忆已更新。
 
-目录包含 `MEMORY.md`（设置、revision 及生效 L2）、`memory-history.md`（实际变更记录）、`L0-episodes/` 和 `L1-atoms/`。不维护全量索引；历史仅按需查阅，不进入常规评测，不提供自动回滚。旧目录不自动删除。
+目录包含 `MEMORY.md`（设置、revision 及生效 L2）、`memory-history.md`（实际变更记录）、`memory-stats.json`（使用统计）、`L0-episodes/` 和 `L1-atoms/`。MEMORY 按 [统一模板](memory-template.md) 保存，新库 revision 从 1 开始，旧版本继续递增。不维护全量索引；历史仅按需查阅，不进入常规评测，不提供自动回滚。旧目录不自动删除。
 
 ## 写作与 Judge
 
@@ -79,6 +79,7 @@ L2 生效标准全库最多 1,000 条；容量、时间及按 Loop 去重的使�
 - 用户明确要求开启、关闭或查询状态时，委派 `operation=settings`；普通反馈不改变当前开关状态。
 - 用户明确要求查看、纠错、重新分类、合并或删除 Memory 本身时，委派 `operation=manage`。
 - 用户要求立即整理时，委派 `operation=reflect`。
+- 自动或主动 Reflection 都由 Curator 按 [独立指引](memory-reflection.md) 检查结构、复核内容并校验保存；主 Agent 不自行迁移用户记忆。
 - Memory Agent 在每天 16:30 后首次被调用时补做当日 Reflection；无需主 Agent另行启动后台任务，同一天不得重复。
 - 即使自动 Memory 已关闭，用户仍可显式查看、纠错或删除已有记忆。
 - 用户明确要求忘记某项写作记忆时，由 Memory Agent 先核验目标及来源，再删除或失效对应项并更新 revision；主 Agent不得直接删除、改写或猜测目标。

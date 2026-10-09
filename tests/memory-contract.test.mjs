@@ -6,6 +6,23 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 
+test('reflection uses a shared template and separates migration from admission',()=>{
+ const prompt=read('agents/report-memory-agent.md');
+ const reflection=read('skills/report-agent/references/memory-reflection.md');
+ assert.match(prompt,/Capture、Manage、Reflection 写入均读取并遵循/);
+ assert.match(prompt,/revision=1/);
+ assert.doesNotMatch(prompt,/revision=0|初始为 0/);
+ assert.match(prompt,/旧版 0 兼容读取/);
+ assert.match(prompt,/执行时读取 \[Reflection 指引\]/);
+ assert.match(reflection,/格式整理不改变规则含义/);
+ assert.match(reflection,/先核验或保存接收位置，再从 MEMORY 移除/);
+ assert.match(reflection,/不把主 Agent|不将主 Agent/);
+ assert.match(reflection,/同义|压缩原则/);
+ assert.match(reflection,/共用一次 revision 递增/);
+ assert.match(reflection,/不宣称全部完成/);
+ assert.match(reflection,/仅更新复盘|只更新复盘/);
+});
+
 test('capacity policy uses freshness and heat without giant rubric packing',()=>{
  const prompt=read('agents/report-memory-agent.md');
  assert.match(prompt,/1,000 条/);
