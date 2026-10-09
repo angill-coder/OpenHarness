@@ -4,6 +4,7 @@
 
 ## 血缘
 
+- **V5 身份**：从 `report-memory-loop-v4` 复制而来，专家 ID 为 `report-agent-v5`；成员 ID、模型和记忆目录保持不变，仍使用 `~/ReportAgentMemory/`。V4 的功能沿革保留如下。
 - **基线底座**：OpenHarness PR #56 合并后的 `report-agent-v2-expert-team`（V2 分支 HEAD `c5dc9cc`）。expert-team 目录由 `fd3abc9` 引入，随后 8 个提交（角色名替代人格化命名、旧记忆格式归一化、报告目录选址优先级、大改路由到新 Loop 并给两小时预算、数据更新后确认修订等）同属该 PR。
 - **继承的不变量**：评分公式、采纳 Gate、停止条件、Base Rubrics 与写作指令沿用 PR #51（`fefcef3`）。`tests/pr51-baseline.json` 用 SHA-256 钉住其中 14 个文件，防止这些规则被静默改动；本分支对受保护文件的改动在测试里显式登记为已批准。
 - **本分支新增**：见下方「V4 相对基线的增量」。

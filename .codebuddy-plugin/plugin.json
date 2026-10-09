@@ -1,10 +1,10 @@
 {
-  "name": "report-agent-v4",
+  "name": "report-agent-v5",
   "version": "1.0.0",
   "author": {
     "name": "angill-coder/OpenHarness"
   },
-  "homepage": "https://github.com/angill-coder/OpenHarness/tree/report-memory-loop-v4",
+  "homepage": "https://github.com/angill-coder/OpenHarness/tree/report-memory-loop-v5",
   "description": "A native WorkBuddy team for evidence preparation, persistent report writing, dynamic rubric evaluation and writing memory.",
   "expertType": "team",
   "agentName": "report-team-lead",
@@ -47,7 +47,7 @@
     "en": "Write a research report on \"XX\" using materials in the XX folder, within X pages.",
     "zh": "基于XX文件夹的素材，写一篇“XX”主题的研究报告，篇幅X页"
   },
-  "plugin": "report-agent-v4",
+  "plugin": "report-agent-v5",
   "tags": [
     {
       "en": "Research Reports",
