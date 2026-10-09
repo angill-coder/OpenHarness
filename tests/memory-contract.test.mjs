@@ -6,6 +6,22 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 
+test('capture emits L2 fields; legacy aliases remain read-compatible only',()=>{
+ const prompt=read('agents/report-memory-agent.md');
+ const blocks=[...prompt.matchAll(/```json\n([\s\S]*?)\n```/g)].map(m=>JSON.parse(m[1]));
+ const capture=blocks.find(b=>b.marker==='MEMORY_CAPTURE_COMPLETED');
+ assert.ok(Array.isArray(capture.l2Changes));
+ assert.equal(Object.hasOwn(capture,'l2bChanges'),false);
+ const cases=JSON.parse(read('tests/memory-cases.json'));
+ for(const c of cases)if(c.memory){
+  assert.equal(Object.hasOwn(c.memory,'activeL2B'),false);
+  if(c.memory.activeL2)assert.ok(Array.isArray(c.memory.activeL2));
+ }
+ assert.match(prompt,/L2B 与 L2 是同一层级/);
+ assert.match(prompt,/只读操作、无变更操作及记忆关闭时，不为改名额外写入/);
+ assert.match(prompt,/不回写 L0 原话、L1 历史证据或已有变更记录/);
+});
+
 test('memory explains structure and admission before persistence contracts',()=>{
  const p=read('agents/report-memory-agent.md');
  const sections=['## 记忆结构','## 如何决定保存','## 存储','## 操作契约'];
