@@ -96,6 +96,10 @@
     "resources/evidence/scripts/source_inventory.py": {
       "reason": "登记清洗规则版本；旧规则必须重新核验，只有论据变化才升级数据版本。",
       "sha256": "9a6a951900e25a128fc91ac366fed668d0e75a7a3b7b54d14fb26d1a3ef1bbd4"
+    },
+    "agents/report-resolution-judge-v2.md": {
+      "reason": "用户要求 Resolution 在冻结确认后更新 MEMORY.md ID 中的使用次数，保留评测标准解释逻辑。",
+      "sha256": "defa38518b85d2d854bf6914658c8bb6e3a7688b9e7d0ac86d0595acbb3a433f"
     }
   }
 }

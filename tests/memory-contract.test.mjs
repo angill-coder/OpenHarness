@@ -26,14 +26,31 @@ test('reflection uses a shared template and separates migration from admission',
 test('capacity policy uses freshness and heat without giant rubric packing',()=>{
  const prompt=read('agents/report-memory-agent.md');
  assert.match(prompt,/1,000 条/);
- assert.match(prompt,/memory-stats.json.*新鲜度.*updatedAt.*热度.*useCount.*lastUsedAt/);
- assert.match(prompt,/不要通过把多条规则塞进一个巨型 Rubric/);
- assert.match(prompt,/新要求先留 L1/);
+ assert.match(prompt,/memory-compression.md/);
+ assert.match(prompt,/不需要压缩时不读取/);
+ assert.doesNotMatch(prompt,/不要通过把多条规则塞进一个巨型 Rubric/);
+ const compression=read('skills/report-agent/references/memory-compression.md');
+ assert.match(compression,/ID 中的日期和使用次数/);
+ assert.match(compression,/不要通过把多条规则塞进一个巨型 Rubric/);
+ assert.match(compression,/新要求先留 L1/);
  const ref=read('skills/report-agent/references/memory-capacity.md');
- assert.match(ref,/runId \+ rubricId/);
- assert.match(ref,/统计更新不推进 MEMORY revision/);
- assert.match(ref,/不能传历史或失败结果/);
- assert.match(read('skills/report-agent/references/loop-orchestration.md'),/每批单维结果核验有效后/);
+ assert.match(ref,/同 Loop.*只计一次/);
+ assert.match(ref,/不改规则、日期、编号或 revision/);
+ assert.match(ref,/失败或仍待溯源的 Plan 不计/);
+ assert.match(read('skills/report-agent/references/loop-orchestration.md'),/Resolution Plan 校验通过并冻结后/);
+});
+
+test('usage acknowledgement precedes dimension judging and stays separate from Plan',()=>{
+ const loop=read('skills/report-agent/references/loop-orchestration.md');
+ const judge=read('agents/report-resolution-judge.md');
+ assert.ok(loop.indexOf('MEMORY_USAGE_COMPLETED')<loop.indexOf('## 5. 按动态维度 Judge'));
+ for(const marker of ['MEMORY_USAGE_COMPLETED','MEMORY_USAGE_PENDING']){
+  assert.ok(loop.includes(marker));
+  assert.ok(judge.includes(marker));
+ }
+ assert.match(judge,/不再次返回 Plan/);
+ assert.match(loop,/Base-only 或无激活规则时跳过/);
+ assert.match(read('skills/report-agent/references/memory-compression.md'),/\[容量与统计\]\(memory-capacity.md\) 记录改号/);
 });
 
 test('capture emits L2 fields; legacy aliases remain read-compatible only',()=>{
