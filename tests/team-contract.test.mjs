@@ -114,7 +114,7 @@ test('PR51 writing, evidence, judging and scoring invariants unchanged', () => {
   }
 });
 
-test('feedback routing follows report impact; budget is two hours', () => {
+test('feedback routing follows report impact; budget is 60 minutes', () => {
   const refs='skills/report-agent/references/';
   const writer=read(refs+'writer-orchestration.md');
   assert.match(writer,/根据修改对报告核心观点、分析方向和整体结构的影响选择路径/u);
@@ -123,8 +123,8 @@ test('feedback routing follows report impact; budget is two hours', () => {
   assert.match(writer,/重新评测或“只修改、不评测”时按其要求/u);
   assert.match(writer,/直接建立新 Loop，不先另做一次 feedback 改写/u);
   assert.match(writer,/通过 SendMessage 向 team.writerName/u);
-  assert.match(read(refs+'state-and-scoring.md'),/deadlineAt 为 120 分钟后/u);
-  assert.match(read(refs+'loop-orchestration.md'),/从进入 resolving 起 120 分钟/u);
+  assert.match(read(refs+'state-and-scoring.md'),/deadlineAt 为 60 分钟后/u);
+  assert.match(read(refs+'loop-orchestration.md'),/从进入 resolving 起 60 分钟/u);
   const flow=[
     read('skills/report-agent/SKILL.md'),
     read('agents/report-team-lead.md'),
