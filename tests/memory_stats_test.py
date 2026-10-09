@@ -45,6 +45,7 @@ class MemoryStatsTest(unittest.TestCase):
             m.sync(self.root, {"revision": 1})
 
     def test_size_boundary_and_single_giant_rubric(self):
+        self.assertEqual(m.MAX_MEMORY_BYTES, 524288)
         base = self.memory.read_bytes()
         self.memory.write_bytes(base + b"x" * (m.MAX_MEMORY_BYTES - len(base)))
         self.assertEqual(m.check(self.root, self.memory)["marker"], "MEMORY_CAPACITY_OK")
@@ -55,7 +56,7 @@ class MemoryStatsTest(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["excess"], 0)
         self.assertEqual(result["excessBytes"], 3)
-        with self.assertRaisesRegex(ValueError, "1 MiB"):
+        with self.assertRaisesRegex(ValueError, "0.5 MiB"):
             m.sync(self.root, {"revision": 1})
         self.assertFalse((self.root / "memory-stats.json").exists())
 
