@@ -24,7 +24,7 @@
 
 同一 Loop 按冻结 Plan 的 `dimensions[]` 为每个维度保留一个独立 Judge，R0 创建，R1/R2 用 SendMessage 向原成员续评。最多 6 个同时执行评测，8 维分成 6+2；空闲成员保留，全部 N 维有效返回后才聚合，不跨维度复用。
 
-每次 Agent 调用仍用 `name=subagent_type=report-dimension-judge`，模型请求为 `gpt-5.6-sol`。宿主对同名新实例可能自动附加后缀，**以返回的实际 name 为准**，分别绑定到当前 runId、RN、dimensionId、assignmentId、报告路径和数据指纹。在现有 run-state.json 的 `team.assignments` 中保存这份对应关系和 pending/completed/failed 状态，不另建一套调度服务。
+每次 Agent 调用仍用 `name=subagent_type=report-dimension-judge`，模型请求为 `deepseek-v4.1-flash`。宿主对同名新实例可能自动附加后缀，**以返回的实际 name 为准**，分别绑定到当前 runId、RN、dimensionId、assignmentId、报告路径和数据指纹。在现有 run-state.json 的 `team.assignments` 中保存这份对应关系和 pending/completed/failed 状态，不另建一套调度服务。
 
 每份分配同时记录唯一 resultPath，由 Judge 写入单维结果，主理人只读取校验并保存聚合评分。是否完成以当前分配的有效结果文件为准，消息只作通知；准备等待或恢复时核对全部路径，齐全即继续聚合与改写，不等待重复通知。
 
@@ -42,6 +42,6 @@ Resolution 的可选溯源仍最多一轮：通过主理人调用 Memory inspect
 
 ## 模型与收尾
 
-两类 Judge 的 Agent frontmatter 使用 `model: gpt-5.6-sol`、`effort: medium`，派发时也指定该 model；其余成员继承宿主模型。实际模型以宿主可用性和调度结果为准，若显示回退则记录并告知，不能把请求值当作已验证运行值。不修改用户全局模型设置。
+两类 Judge 的 Agent frontmatter 使用 `model: deepseek-v4.1-flash`、`effort: medium`，派发时也指定该 model；其余成员继承宿主模型。实际模型以宿主可用性和调度结果为准，若显示回退则记录并告知，不能把请求值当作已验证运行值。不修改用户全局模型设置。
 
 Judge 在整个 Loop 结束后才按宿主支持的团队关闭协议退出，不在每轮评测后关闭；取消、数据变化或时间预算到期时停止后续派发并通知在途成员停止，保留已落文件、不覆盖报告。Writer 可留待同一会话的反馈续写；新会话按文件恢复。成员工具权限由 WorkBuddy 分配，Prompt 中的读写边界仍必须遵守，不能视为沙箱权限控制。

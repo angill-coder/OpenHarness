@@ -60,7 +60,7 @@ test('team manifest, settings and six role definitions agree', () => {
     assert.doesNotMatch(header,/^(?:tools|disallowedTools):/m);
     if(member.role==='member')assert.match(content,/SendMessage/);
     if(member.id.includes('judge')){
-      assert.match(header,/^model: gpt-5.6-sol$/m);
+      assert.match(header,/^model: deepseek-v4\.1-flash$/m);
       assert.match(header,/^effort: medium$/m);
     }
   }

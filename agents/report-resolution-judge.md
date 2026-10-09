@@ -7,7 +7,7 @@ displayName:
 profession:
   en: "Rubric Resolution Editor"
   zh: "评测标准修订员"
-model: gpt-5.6-sol
+model: deepseek-v4.1-flash
 effort: medium
 maxTurns: 20
 ---

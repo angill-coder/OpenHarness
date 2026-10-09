@@ -11,7 +11,7 @@ frontmatter、契约文档两处、README 一处。平台下线或升级模型�
 两个 Judge 就会用不同模型打分，而这种偏差不会报错，只会让分数悄悄不可比。
 
 所以这里是唯一定义处，`scripts/check_judge_model.py` 校验其余位置与它一致，
-`build.py` 在打包前调用该校验。平台升级只改这个文件。
+`build.py` 在打包前调用该校验。更换模型时同步更新登记文件与测试断言。
 
 注意：V4 是纯原生编排，Agent 读不到 Python 模块，模型仍必须写在各自的
 frontmatter 里。因此这里采用"单一定义 + 构建期一致性校验"，而不是运行期注入。
@@ -19,8 +19,8 @@ frontmatter 里。因此这里采用"单一定义 + 构建期一致性校验"，
 
 from __future__ import annotations
 
-# 平台升级时只改这两行
-JUDGE_MODEL = "gpt-5.6-sol"
+# 更换模型后同步 CONSISTENCY_TARGETS 与测试断言，并运行一致性校验。
+JUDGE_MODEL = "deepseek-v4.1-flash"
 JUDGE_EFFORT = "medium"
 
 # 两类 Judge 都使用上面的模型；其余成员继承宿主模型。
