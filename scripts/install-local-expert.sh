@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install the report-agent-v4 research report team into the local WorkBuddy my-experts
+# Install the report-agent-v5 research report team into the local WorkBuddy my-experts
 # marketplace so it can be summoned from the WorkBuddy UI.
 #
 # Usage:

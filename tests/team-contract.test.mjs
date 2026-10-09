@@ -29,6 +29,9 @@ function filesAt(dir) {
 }
 
 test('team manifest, settings and six role definitions agree', () => {
+  assert.equal(manifest.name,'report-agent-v5');
+  assert.equal(JSON.parse(read('package.json')).name,manifest.name);
+  assert.equal(manifest.homepage,'https://github.com/angill-coder/OpenHarness/tree/report-memory-loop-v5');
   assert.equal(manifest.expertType,'team');
   assert.equal(manifest.plugin,manifest.name);
   assert.equal(JSON.parse(read('package.json')).version,manifest.version);
