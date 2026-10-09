@@ -94,8 +94,8 @@
       "sha256": "eafde982678b5b6f176d8e390d4490db30ba07a0f9af00a40604d45ab2acc360"
     },
     "resources/evidence/scripts/source_inventory.py": {
-      "reason": "登记清洗规则版本；旧规则必须重新核验，只有论据变化才升级数据版本。",
-      "sha256": "9a6a951900e25a128fc91ac366fed668d0e75a7a3b7b54d14fb26d1a3ef1bbd4"
+      "reason": "登记清洗规则版本；旧规则必须重新核验，只有论据变化才升级数据版本。经用户确认直接保存版本说明，避免临时文件重命名/删除审批；忽略旧临时文件。",
+      "sha256": "3d640be8b74675d5103b8f7080a0dad190dac9d88e4fbdd0eb3f1e87f599bb42"
     },
     "agents/report-resolution-judge-v2.md": {
       "reason": "用户要求 Resolution 在冻结确认后更新 MEMORY.md ID 中的使用次数，保留评测标准解释逻辑。",
