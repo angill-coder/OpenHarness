@@ -55,7 +55,7 @@ class MemoryStatsTest(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["excess"], 0)
         self.assertEqual(result["excessBytes"], 3)
-        with self.assertRaisesRegex(ValueError, "2 MiB"):
+        with self.assertRaisesRegex(ValueError, "1 MiB"):
             m.sync(self.root, {"revision": 1})
         self.assertFalse((self.root / "memory-stats.json").exists())
 
