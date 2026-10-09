@@ -13,6 +13,9 @@ import tempfile
 
 MANIFEST = "数据版本说明.md"
 SCHEMA = "report-agent-source-inventory/v1"
+# Bump when extraction requirements change, even if source bytes/schema do not.
+# This is recorded in the inventory, not in the structured evidence v1 payload.
+CLEANING_POLICY_VERSION = "usage-cases/v1"
 SKIP_DIRS = {"报告", ".git", ".workbuddy", ".report-agent", "Agent运行记录", "__pycache__", "__MACOSX"}
 
 
@@ -87,6 +90,8 @@ def baseline_status(previous, root, exclusions, evidence_hash):
         and all(c in "0123456789abcdef" for c in v) for k, v in files.items()
     ):
         raise ValueError("Invalid source manifest; do not overwrite it automatically")
+    if previous.get("cleaningPolicyVersion") != CLEANING_POLICY_VERSION:
+        return "cleaning_policy_changed"
     return "valid"
 
 
@@ -117,6 +122,7 @@ def scan(root, output, exclude):
     }
     result = {
         "schema": SCHEMA, "root": str(root), "excluded": exclusions,
+        "cleaningPolicyVersion": CLEANING_POLICY_VERSION,
         "baselineStatus": status, "baselineSha256": manifest_hash,
         "structuredDataSha256": evidence_hash, "files": current, "changes": delta,
     }
@@ -133,6 +139,8 @@ def confirm(scan_path, evidence_hash, summary):
     candidate = load(scan_path)
     if not isinstance(candidate, dict) or candidate.get("schema") != SCHEMA:
         raise ValueError("Invalid scan schema")
+    if candidate.get("cleaningPolicyVersion") != CLEANING_POLICY_VERSION:
+        raise ValueError("Cleaning policy changed; scan again and review usage cases before confirming")
     root = Path(candidate["root"]).resolve(strict=True)
     manifest = root / MANIFEST
     if optional_digest(manifest) != candidate["baselineSha256"]:
@@ -146,7 +154,7 @@ def confirm(scan_path, evidence_hash, summary):
     evidence = load(shared)
     if not isinstance(evidence, dict) or evidence.get("schema") != "openharness-structured-data/v1" or not evidence.get("items"):
         raise ValueError("No valid structured evidence to associate with inventory")
-    published = {k: candidate[k] for k in ("schema", "root", "excluded", "files")}
+    published = {k: candidate[k] for k in ("schema", "root", "excluded", "files", "cleaningPolicyVersion")}
     published["structuredDataSha256"] = evidence_hash
     old_text = manifest.read_text(encoding="utf-8-sig") if manifest.exists() else ""
     old = load(manifest) if old_text else None
@@ -191,6 +199,8 @@ def check(root, version=None, expected_hash=None):
             or (version is not None and metadata.get("dataVersion") != version)
             or (expected_hash is not None and actual != expected_hash)):
         raise ValueError("DATA_VERSION_CHANGED: do not use stale evidence or scores")
+    if metadata.get("cleaningPolicyVersion") != CLEANING_POLICY_VERSION:
+        raise ValueError("DATA_VERSION_CHANGED: cleaning policy changed; review usage cases and confirm again")
     if inventory(root, metadata["excluded"]) != metadata["files"]:
         raise ValueError("DATA_VERSION_CHANGED: sources differ from the registered evidence")
     return {"dataVersion": metadata["dataVersion"], "dataSha256": actual, "status": "ok"}

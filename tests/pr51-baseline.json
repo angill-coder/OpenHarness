@@ -71,5 +71,31 @@
       "start": null,
       "sha256": "c1a4adfc105ffc74d99499396c518f7a80cb56e6e4254524483243f6eac821b6"
     }
-  ]
+  ],
+  "approvedChanges": {
+    "agents/report-writer-v2.md": {
+      "reason": "用户要求正文能够完整还原使用案例：读取完整场景并保留过程和来源边界。",
+      "sha256": "37ade09ea39120851ab40975aaa340d045234c0273f0edc4900bf4ebb63615f3"
+    },
+    "agents/report-evidence-agent-v2.md": {
+      "reason": "用户要求清洗保留完整使用案例，并回查补全旧摘要。",
+      "sha256": "7f0498cbaa4bea2900340a2e0b7f33461f74615f538d2a527a1d8d6a9779aa15"
+    },
+    "resources/evidence/references/cleaning-rules.md": {
+      "reason": "用户要求案例不受普通事实的句数限制，保留场景、过程、结果、原话和限制。",
+      "sha256": "8d99e7e0bb2d0249ecf7603df8811dbffd2d95975a71425ce4d5faa39113e542"
+    },
+    "resources/evidence/references/output-contract.md": {
+      "reason": "沿用 v1 四字段格式，以 usage_case 和完整 content 承载案例，增加格式示例。",
+      "sha256": "8c2c89668b56daf19ddf2e03c2bfae632c7c77745bae891a845fa8684989a4c2"
+    },
+    "resources/evidence/references/source-changes.md": {
+      "reason": "清洗规则升级和明确补全请求触发未变素材回查，防止复用旧摘要。",
+      "sha256": "eafde982678b5b6f176d8e390d4490db30ba07a0f9af00a40604d45ab2acc360"
+    },
+    "resources/evidence/scripts/source_inventory.py": {
+      "reason": "登记清洗规则版本；旧规则必须重新核验，只有论据变化才升级数据版本。",
+      "sha256": "9a6a951900e25a128fc91ac366fed668d0e75a7a3b7b54d14fb26d1a3ef1bbd4"
+    }
+  }
 }
