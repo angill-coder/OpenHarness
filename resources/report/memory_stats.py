@@ -14,7 +14,7 @@ import sys
 import tempfile
 
 LIMIT = 1000
-MAX_MEMORY_BYTES = 512 * 1024
+MAX_MEMORY_BYTES = 300_000
 ID = re.compile(r"MR-[A-Za-z0-9_-]+")
 
 
@@ -224,7 +224,7 @@ def sync(root, changes):
     if len(ids) > LIMIT:
         raise ValueError("Active L2 exceeds 1000; compress before completing the write")
     if (root / "MEMORY.md").stat().st_size > MAX_MEMORY_BYTES:
-        raise ValueError("MEMORY.md exceeds 0.5 MiB; compress before completing the write")
+        raise ValueError("MEMORY.md exceeds 300,000 bytes; compress before completing the write")
     revision = str(changes["revision"])
     memory = (root / "MEMORY.md").read_text(encoding="utf-8-sig")
     if not re.search(r"^revision:\s*" + re.escape(revision) + r"\s*$", memory, re.M):
