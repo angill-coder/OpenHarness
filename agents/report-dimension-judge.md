@@ -7,7 +7,7 @@ displayName:
 profession:
   en: "Report Reviewer"
   zh: "报告评测员"
-model: gpt-5.6-sol
+model: deepseek-v4.1-flash
 effort: medium
 maxTurns: 20
 ---

@@ -39,6 +39,99 @@ class InventoryTests(unittest.TestCase):
         self.run_scan()
         self.publish()
 
+    def set_policy_version(self, filename, version):
+        payload = MODULE["load"](filename)
+        if version is None:
+            payload.pop("cleaningPolicyVersion", None)
+        else:
+            payload["cleaningPolicyVersion"] = version
+        serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+        if filename.name == MODULE["MANIFEST"]:
+            history = filename.read_text(encoding="utf-8").split("```json\n", 1)[0]
+            serialized = history + "```json\n" + serialized + "\n```\n"
+        filename.write_text(serialized, encoding="utf-8")
+
+    def test_legacy_or_outdated_policy_requires_review_despite_unchanged_sources(self):
+        self.baseline()
+        manifest = self.root / MODULE["MANIFEST"]
+        original_source = self.source.read_bytes()
+        original_evidence = self.evidence.read_bytes()
+        for version in (None, "old-cleaning-policy"):
+            with self.subTest(version=version):
+                self.set_policy_version(manifest, version)
+                with self.assertRaisesRegex(ValueError, "DATA_VERSION_CHANGED.*cleaning policy"):
+                    check(self.root)
+                result = self.run_scan()
+                self.assertEqual(result["baselineStatus"], "cleaning_policy_changed")
+                self.assertTrue(result["fullReviewRequired"])
+                self.assertEqual(result["changes"]["added"], ["访谈.md"])
+                self.assertEqual(self.source.read_bytes(), original_source)
+                self.assertEqual(self.evidence.read_bytes(), original_evidence)
+
+    def test_policy_review_without_evidence_changes_keeps_data_version(self):
+        self.baseline()
+        manifest = self.root / MODULE["MANIFEST"]
+        self.set_policy_version(manifest, None)
+        original_evidence = self.evidence.read_bytes()
+        self.run_scan()
+        # Simulate completed semantic review: existing evidence needs no additions.
+        published = self.publish()
+        self.assertEqual(published["dataVersion"], "D1")
+        self.assertFalse(published["versionChanged"])
+        self.assertEqual(self.evidence.read_bytes(), original_evidence)
+        self.assertEqual(MODULE["load"](manifest)["cleaningPolicyVersion"], MODULE["CLEANING_POLICY_VERSION"])
+        self.assertEqual(check(self.root)["status"], "ok")
+        self.assertFalse(self.run_scan()["fullReviewRequired"])
+
+    def test_case_backfill_keeps_full_content_and_id_then_returns_to_incremental(self):
+        # Rich cases use the existing v1 payload; inventory must never rewrite it.
+        contract = (Path(__file__).resolve().parents[1]
+                    / "resources/evidence/references/output-contract.md").read_text(encoding="utf-8")
+        case_example = json.loads(contract.split("```json\n")[2].split("\n```", 1)[0])
+        self.source.write_text(case_example["content"], encoding="utf-8")
+        self.baseline()
+        manifest = self.root / MODULE["MANIFEST"]
+        self.set_policy_version(manifest, None)
+        self.assertTrue(self.run_scan()["fullReviewRequired"])
+        evidence = json.loads(self.evidence.read_text(encoding="utf-8"))
+        # Simulate the Evidence Agent expanding the original summary after review.
+        case_example["id"] = evidence["items"][0]["id"]
+        case_example["source_ref"] = "访谈.md / 全文（测试案例）"
+        evidence["items"][0] = case_example
+        self.evidence.write_text(json.dumps(evidence, ensure_ascii=False), encoding="utf-8")
+        expanded_bytes = self.evidence.read_bytes()
+        self.assertEqual(self.publish()["dataVersion"], "D2")
+        self.assertEqual(self.evidence.read_bytes(), expanded_bytes)
+        current = json.loads(expanded_bytes)
+        self.assertEqual(current["items"][0]["id"], "EV-001")
+        self.assertEqual(current["items"][0]["content"], self.source.read_text(encoding="utf-8"))
+        self.assertEqual(check(self.root, "D2", digest(self.evidence))["status"], "ok")
+        self.assertFalse(self.run_scan()["fullReviewRequired"])
+        self.assertFalse(self.publish()["versionChanged"])
+
+    def test_unconfirmed_policy_review_stays_pending(self):
+        self.baseline()
+        manifest = self.root / MODULE["MANIFEST"]
+        self.set_policy_version(manifest, None)
+        before = manifest.read_bytes()
+        for _ in range(2):
+            self.assertTrue(self.run_scan()["fullReviewRequired"])
+        self.assertEqual(manifest.read_bytes(), before)
+        with self.assertRaisesRegex(ValueError, "cleaning policy"):
+            check(self.root)
+
+    def test_confirm_rejects_scans_created_under_old_policy(self):
+        self.baseline()
+        manifest = self.root / MODULE["MANIFEST"]
+        before = manifest.read_bytes()
+        for version in (None, "old-cleaning-policy"):
+            with self.subTest(version=version):
+                self.run_scan()
+                self.set_policy_version(self.scanned, version)
+                with self.assertRaisesRegex(ValueError, "Cleaning policy changed"):
+                    self.publish()
+                self.assertEqual(manifest.read_bytes(), before)
+
     def test_first_scan_and_unchanged(self):
         result = self.run_scan()
         self.assertTrue(result["fullReviewRequired"])

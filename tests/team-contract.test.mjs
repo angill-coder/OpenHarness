@@ -60,17 +60,25 @@ test('team manifest, settings and six role definitions agree', () => {
     assert.doesNotMatch(header,/^(?:tools|disallowedTools):/m);
     if(member.role==='member')assert.match(content,/SendMessage/);
     if(member.id.includes('judge')){
-      assert.match(header,/^model: gpt-5.6-sol$/m);
+      assert.match(header,/^model: deepseek-v4\.1-flash$/m);
       assert.match(header,/^effort: medium$/m);
     }
   }
 });
 
-// Memory and major-feedback routing intentionally diverge from PR51.
+// Memory, major-feedback routing and usage-case preservation intentionally diverge from PR51.
 // Behavioral acceptance cases live in team-scenarios.md; other baseline assets stay fixed.
-test('PR51 writing, evidence, judging and scoring invariants unchanged', () => {
-  for(const entry of JSON.parse(read('tests/pr51-baseline.json')).entries){
-    let body=original(read(translate(entry.file)));
+test('PR51 invariants and explicitly approved V4 evidence changes stay pinned', () => {
+  const baseline=JSON.parse(read('tests/pr51-baseline.json'));
+  for(const entry of baseline.entries){
+    const current=read(translate(entry.file));
+    const approved=baseline.approvedChanges?.[entry.file];
+    if(approved){
+      assert.ok(approved.reason?.trim(),entry.file+': approved change needs a reason');
+      assert.equal(createHash('sha256').update(current).digest('hex'),approved.sha256,entry.file);
+      continue;
+    }
+    let body=original(current);
     if(entry.file==='agents/report-writer-v2.md'){
       assert.match(body,/重大修改或重新评测.*本轮用户要求及有效论据.*必要时整体重写/u);
       // Allow only the approved draft-input change; verify the remaining PR51 prompt.

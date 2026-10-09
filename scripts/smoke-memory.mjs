@@ -10,7 +10,7 @@ if(fs.existsSync(root))throw Error('Use a new directory; never overwrite an exis
 fs.mkdirSync(root,{recursive:true});
 const memory=path.join(root,'fixture-memory');fs.mkdirSync(memory);
 const today=new Date().toLocaleDateString('en-CA');
-fs.writeFileSync(path.join(memory,'MEMORY.md'),`revision: 0\nenabled: true\nlastReflectionAt: ${today}\n\n# Active L2B\n\n无。\n`);
+fs.writeFileSync(path.join(memory,'MEMORY.md'),`revision: 0\nenabled: true\nlastReflectionAt: ${today}\n\n# Active L2\n\n无。\n`);
 const prompt=fs.readFileSync(path.join(repo,'agents/report-memory-agent.md'),'utf8').replace(/^---\n[\s\S]*?\n---\n/,'')+
  '\n\n本次在独立CLI进行真实文件测试，不具备团队SendMessage，请直接返回真实完成/失败结果。唯一允许读写的目录是 '+memory+'；不得访问其他记忆或用户文件。除此之外按上述指令完成操作，不能只描述计划。';
 const cases=[

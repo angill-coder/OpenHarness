@@ -15,7 +15,7 @@
 - 使用 WorkBuddy 原生 TeamCreate / Agent / SendMessage；**不需要 MCP、Hook、外部模型 CLI 或后台服务**。
 - 一种 Dimension Judge 定义按 N 个维度创建独立实例，同维度跨轮通过 SendMessage 续评，最多 6 个同时评测；第 7、8 个维度分批完成。**维度数量不固定为六**，是否新增由 Resolution Judge 结合当前任务决定。
 - Writer 通过 SendMessage 延续同一成员上下文。跨会话不可恢复时，用文件中的需求、基线和修改记录重建。
-- 两类 Judge 请求 `gpt-5.6-sol` / `medium`。实际能否使用取决于 WorkBuddy 账号与宿主调度；请求配置不是运行证明，显示回退时记录并告知。
+- 两类 Judge 请求 `deepseek-v4.1-flash` / `medium`。实际能否使用取决于 WorkBuddy 账号与宿主调度；请求配置不是运行证明，显示回退时记录并告知。
 - 记忆来自用户写作反馈、明确采纳或提炼委托，不从 Agent 分析反推用户要求；先保留证据，再判断是否形成长期标准。用户后续反馈默认直接改写；明确要求重新评测时才启动新 Loop，此时沿用同一报告标识并给 60 分钟预算。
 - 成员不可用时报告失败，不由主理人替代其专业工作。
 
@@ -31,6 +31,14 @@
 | `resources/report/judge_model.py` | Judge 模型唯一数据源。模型字面量原先散落在两个 Judge 的 frontmatter、契约文档与 README 中共 5 处，升级漏改一处会让两个 Judge 用不同模型打分且不报错 |
 
 配套 `scripts/check_judge_model.py` 校验 4 个登记文件与数据源一致，并拒绝未登记文件里出现模型字面量、拒绝非 Judge 成员钉死模型；`scripts/build.py` 打包前必过该校验。
+
+## 原始素材与用户使用案例
+
+资料整理员通过宿主工具实际读取访谈、表格、文档等材料，按清洗规则去噪、去重并整理为可回查的 Evidence；清洗由 Agent 执行，素材脚本只负责指纹和版本核验。普通事实通常压缩为 1–3 句，用户使用案例默认保留完整场景，以 `usage_case` 写入现有 v1 JSON 的 `content`：用户背景、任务动机、使用前做法、具体输入与操作、产品输出、人工修正、结果、关键原话和限制，有材料就保留，缺失不编造。失败案例与不同用户的同类案例同样保留；转述或用户补充保留其来源性质。
+
+案例允许多段，不受普通论据句数限制。用户要求正文展开案例时，Writer 据此还原具体经历；没有该要求时按报告目的与篇幅选择，不强制堆砌全部案例。格式示例见 [输出契约](resources/evidence/references/output-contract.md)。
+
+旧项目升级后，即使素材未变，缺少当前 `cleaningPolicyVersion` 的清单也会触发一次全量回查，补回旧摘要丢失的案例细节并尽量沿用 ID。完成核验后恢复增量处理；只有 JSON 实际变化才增加数据版本。无法读取的原文须报告缺口，不能凭旧摘要重建故事。该版本标记只存在于素材指纹清单，不改变 `structured_data.json` 的 v1 格式。
 
 ## 产物与数据位置
 
@@ -64,7 +72,7 @@ Reflection 是调用时检查并补做，不提供无人使用时也运行的后
 ## 安装与验证
 
 ```bash
-npm test                              # 10 JS + 55 Python，含模型一致性校验
+npm test                              # 契约、脚本回归与模型一致性校验
 npm run build                         # 打包为 dist/<name>-<version>.zip
 sh scripts/install-local-expert.sh    # 构建并安装到本地 WorkBuddy
 ```

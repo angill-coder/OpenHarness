@@ -32,7 +32,7 @@
 - 已确认的汇报背景、摘要观点假设和重点素材；
 - Base Rubrics 的版本与维度摘要。
 
-Memory Agent 会先处理到期的 Reflection，再返回与当前任务相关的 L2B 候选、可选 `dimensionCandidate` 和对应的 `sourceL1Ids`。不要把这些内容交给主 Agent改写 R0。
+Memory Agent 会先处理到期的 Reflection，再返回与当前任务相关的 L2 候选、可选 `dimensionCandidate` 和对应的 `sourceL1Ids`。不要把这些内容交给主 Agent改写 R0。
 
 Memory 关闭、无候选或 Resolve 失败时，不调用 Resolution Judge；直接把 Base Rubrics 原样规范化为 Base-only Plan，记录 `resolutionStatus=skipped_no_memory|memory_unavailable` 后进入 Judge。
 

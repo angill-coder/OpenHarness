@@ -8,6 +8,8 @@
 
 按 [团队调用契约](native-agent-contracts.md) 用 Agent 创建 Writer，记录工具返回的真实 agent_id 到现有 run-state.json 的 writerAgentId，并保存实际消息地址到 team.writerName；task_id 不得冒充 agent_id。等待 Writer 的 SendMessage，核验 REPORT_WRITE_COMPLETED、mode 和输出文件后才进入 Loop。工具没有返回的字段保留 null，不编造；后续按下述恢复方式处理。
 
+用户要求正文呈现完整使用案例时，将该要求原文传给 Writer，初稿和后续改写均保留这项需求。共享论据中的完整案例应直接用于还原场景，不先由主 Agent 压成短摘要；案例细节不足则先按 [资料更新流程](evidence-orchestration.md) 补全。
+
 ## 后续修改
 
 ### 反馈分流
