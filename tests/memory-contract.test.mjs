@@ -6,6 +6,19 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=p=>fs.readFileSync(path.join(root,p),'utf8');
 
+test('capacity policy uses freshness and heat without giant rubric packing',()=>{
+ const prompt=read('agents/report-memory-agent.md');
+ assert.match(prompt,/1,000 条/);
+ assert.match(prompt,/memory-stats.json.*新鲜度.*updatedAt.*热度.*useCount.*lastUsedAt/);
+ assert.match(prompt,/不要通过把多条规则塞进一个巨型 Rubric/);
+ assert.match(prompt,/新要求先留 L1/);
+ const ref=read('skills/report-agent/references/memory-capacity.md');
+ assert.match(ref,/runId \+ rubricId/);
+ assert.match(ref,/统计更新不推进 MEMORY revision/);
+ assert.match(ref,/不能传历史或失败结果/);
+ assert.match(read('skills/report-agent/references/loop-orchestration.md'),/每批单维结果核验有效后/);
+});
+
 test('capture emits L2 fields; legacy aliases remain read-compatible only',()=>{
  const prompt=read('agents/report-memory-agent.md');
  const blocks=[...prompt.matchAll(/```json\n([\s\S]*?)\n```/g)].map(m=>JSON.parse(m[1]));

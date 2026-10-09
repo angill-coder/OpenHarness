@@ -73,6 +73,8 @@ Resolution Judge 返回失败、重复溯源或未通过上述检查时，记录
 
 Dimension Judge 自行保存各 Check 的 `met / partial / miss` 判断，再通知文件路径，不拥有分数决定权。主 Agent 按冻结维度清单读取当前分配的 resultPath，校验 dimensionId、Check 完整性及报告/数据绑定，通过后标记 completed；不再代写单维结果。收到通知、恢复会话或准备等待时，先核对全部结果文件，不因漏看消息就判定 Judge 未完成。全部有效结果齐全后立即按 [state-and-scoring.md](state-and-scoring.md) 计算维度分和 overall、保存聚合 Judgment，并继续第 6 步，不停在进度汇报。Judge 缺失、重复或增加 Check，或返回无法解析的结果时最多重试 3 次；仍失败则停止循环，交付完成 Judge 的历史最佳版本并说明评测不完整，不由主 Agent补造判断。
 
+每批单维结果核验有效后，Memory 开启时按 [容量与使用统计](memory-capacity.md#主-agent记录实际使用) 记录实际使用的 Memory Rubric；同 Loop 只计一次。统计失败只登记待补，不重跑评测、不触发 Capture，不影响继续 Rewrite 或交付。
+
 ## 6. Rewrite 与停止
 
 R0 首次完成有效 Judge 后自动成为历史最佳。达到总分 `5.0`、所有维度为 `5` 且没有 redline/hard floor 失败时结束。否则先按 [state-and-scoring.md](state-and-scoring.md) 生成当前历史最佳版本的 Revision Brief，再按 [Writer 调用与续写](writer-orchestration.md) 用 SendMessage 向原 Writer 发送 `mode=revise`，传入：

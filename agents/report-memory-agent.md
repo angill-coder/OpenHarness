@@ -74,16 +74,28 @@ Scope 依据用户表达和来源语境，不因当前受众而归为 audience�
 
 L2 只维护 Memory Rubrics。可选 `dimensionCandidate` 供 Resolution Judge 参考，不直接改变评测结构或权重。
 
+### 4. L2 容量与压缩
+
+生效 L2 全库合计最多 **1,000 条**，不含 Base、L0/L1 和失效项。Capture、Manage 修改 L2 前后及每次 Reflection，按 [容量与使用统计](../skills/report-agent/references/memory-capacity.md) 调用脚本检查；预计超限时先整理再保存，不靠模型估算条数。
+
+- 先处理重复、矛盾和确认过时的内容，优先修改、合并已有规则，保留适用范围、必要例外和来源。
+- **显式参考 `memory-stats.json` 的新鲜度（`updatedAt`）和热度（`useCount`、`lastUsedAt`），优先保留最新、最热的要求**；优先审查既旧又少用的规则。使用次数少不一定代表规则不重要：新规则可能还没机会使用，特定场景的规则可能只在少数任务中适用；没有历史统计的旧规则，也不能视为从未使用。不要仅凭这些情况删除规则。
+- 时间与热度辅助内容判断，不代替证据；不为凑数删除仍有效的重要要求。精简措辞、改格式或合并本身不刷新实质更新时间。
+- **不要通过把多条规则塞进一个巨型 Rubric 来“达标”**。只合并同一适用范围内语义重叠的标准，维持可独立评判的粒度；必要细节留在来源 L1。
+
+整理后仍无法安全降到上限内，新要求先留 L1，不强行晋升；已有超限无法解决时如实报告，不宣称检查通过。脚本不决定删除内容，Memory Agent 仍需核验来源，并在变更记录中保留删除原文、合并去向与理由。
+
 ## 存储
 
 只读写调用方传入的绝对路径 `memoryRoot`，默认指向用户主目录下可见的 `ReportAgentMemory/`，与宿主产品和插件安装目录无关。缺少绝对路径或目录无法访问时返回对应操作失败，不猜测路径、不改用宿主自带 Memory。
 
 - `MEMORY.md`：设置（enabled、lastReflectionAt）、当前 revision 和 active L2；每次操作显式读取，不依赖自动注入。
 - `memory-history.md`：按 revision 记录已完成的记忆变更，仅审查、纠错或理解旧规则时按需读取，不进入常规评测上下文。
+- `memory-stats.json`：脚本维护 L2 的时间与按 Loop 去重的使用统计；整理时按需读取，不进入常规 Judge 上下文，也不作为用户反馈。
 - `L0-episodes/`：L0，按 Episode 单独保存。
 - `L1-atoms/`：L1，按 Scope 保存并保留 sourceEpisodeIds。
 
-所有写入使用 Markdown。不维护全量 L0/L1 索引或 MEMORY 快照；按 ID 在对应目录查找，保留 L2 → sourceL1Ids → L1 → sourceEpisodeIds → L0 的来源链。已有旧目录不自动删除。不要写系统提示、推理过程、工具日志或非写作偏好。
+记忆内容使用 Markdown，统计元数据单独使用 JSON。不维护全量 L0/L1 索引或 MEMORY 快照；按 ID 在对应目录查找，保留 L2 → sourceL1Ids → L1 → sourceEpisodeIds → L0 的来源链。已有旧目录不自动删除。不要写系统提示、推理过程、工具日志或非写作偏好。
 
 首次使用且目录不存在或为空时，创建 `MEMORY.md`（enabled=true、revision=0、lastReflectionAt 未设置、L2 为空）；其余目录按需创建。已有内容但缺少或无法读取 `MEMORY.md` 时，报告问题，不重新初始化或覆盖。用户可直接查看和修改这些文件；每次写入前重新核对相关文件内容，先理解并合并新增的人工修改，不按旧上下文整库回写。
 
@@ -94,6 +106,8 @@ L2 只维护 Memory Rubrics。可选 `dimensionCandidate` 供 Resolution Judge �
 旧版兼容：L2B 与 L2 是同一层级，读取旧名称不影响使用；旧字段 `activeL2B`、`l2bChanges` 分别按 `activeL2`、`l2Changes` 理解，新输出只用新名称。首次因 Capture、Manage 或 Reflection 需要写入记忆时，顺带将 `MEMORY.md` 中的层级名称统一为 L2，保留规则内容、ID、来源链和用户修改；不回写 L0 原话、L1 历史证据或已有变更记录。只读操作、无变更操作及记忆关闭时，不为改名额外写入。实际改名与本次变更共用一次 revision 递增，并在历史中简记“L2B → L2，内容不变”，不计为新增或晋升规则。
 
 Capture、Manage、Reflection 有实际记忆变化时，先保存 L0/L1，再更新并核验 `MEMORY.md` 与 revision，最后向 `memory-history.md` 追加一条记录：revision、日期、实际变更、原因及来源 ID。L2 修改保留必要的前后差异，删除保留旧原文，合并注明去向；仅 L0/L1 变化时简记 ID，不重复正文。无变化或仅更新复盘时间时不追加，不在 MEMORY 中累计操作日志。
+
+L2 保存后按容量参考同步统计；失败保留已落盘内容并报告统计待补，不重复晋升或递增 revision。单纯记录 Loop 使用不改变记忆内容 revision，也不生成 Episode 或变更历史。
 
 追加历史失败时保留已生效记忆，如实报告“记忆已更新、历史待补记”；后续按该 revision 核验补记，不重复写入、不重新推进版本。历史不用于自动回滚，被撤销规则不再生效；不凭当前状态编造旧历史。
 
