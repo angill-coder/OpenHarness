@@ -1,7 +1,7 @@
 [
   {"id":"article","baseline":true,"conversation":[["user","请从下面这篇文章节选提炼我以后写研究报告的准则，并记入写作记忆。"],["user","节选：文章不要空话连篇，言之无物；不要不看对象，无的放矢；要用具体事实说明主张。"]],"route":true,"layers":[true,true,true]},
   {"id":"adopt-option","baseline":true,"conversation":[["assistant","拟作为今后写作准则：标题直接表达判断；图表注明单位和统计期。保存选项：全部固化（推荐）/仅本次使用。"],["user","全部固化（推荐）"]],"route":true,"layers":[true,true,true]},
-  {"id":"old-veto","baseline":true,"memory":{"activeL2B":[{"id":"MR-old","statement":"点击推荐选项不算用户主动表达，不可写入记忆。"}]},"conversation":[["assistant","以后摘要先给结论再给依据。是否保存为长期要求？全部保存（推荐）/不保存。"],["user","全部保存（推荐）"]],"route":true,"layers":[true,true,true]},
+  {"id":"old-veto","baseline":true,"memory":{"activeL2":[{"id":"MR-old","statement":"点击推荐选项不算用户主动表达，不可写入记忆。"}]},"conversation":[["assistant","以后摘要先给结论再给依据。是否保存为长期要求？全部保存（推荐）/不保存。"],["user","全部保存（推荐）"]],"route":true,"layers":[true,true,true]},
   {"id":"local-feedback","baseline":true,"conversation":[["assistant","已交付报告。"],["user","这一段太长了，分成两段，其他段落别动。"]],"route":true,"layers":[true,null,false]},
   {"id":"vague-feedback","baseline":true,"conversation":[["assistant","已交付报告。"],["user","读起来不顺，但我暂时说不清具体哪儿。"]],"route":true,"layers":[true,false,false]},
   {"id":"version-choice","baseline":true,"conversation":[["assistant","R2改善了证据归属，并添加了开头总领判断。"],["user","用R2作为最佳版本吧。"]],"route":false,"layers":[false,false,false]},
@@ -15,7 +15,7 @@
   {"id":"mixed","conversation":[["assistant","报告已交付。"],["user","Q2应该是Q3，把数据改掉。另外以后所有报告的图都要注明单位。"]],"route":true,"layers":[true,true,true],"forbid":"Q3","scope":"core"},
   {"id":"disabled","memory":{"enabled":false},"conversation":[["assistant","自动写作记忆已关闭。"],["user","这段话太长，删掉重复表述。"]],"route":false,"layers":[false,false,false]},
   {"id":"facts-only","conversation":[["assistant","报告已交付。"],["user","数据写错了，营收应是120万元，不是1200万元，马上改正！"]],"route":false,"layers":[false,false,false]},
-  {"id":"local-exception","memory":{"activeL2B":[{"id":"MR-001","statement":"正式报告应删除重复文字，表达精简。","sourceL1Ids":["L1-001"]}]},"conversation":[["assistant","报告已交付。"],["user","这次补了资料，可以扩到五页，保留受访者原话。"]],"route":true,"layers":[true,null,false]},
+  {"id":"local-exception","memory":{"activeL2":[{"id":"MR-001","statement":"正式报告应删除重复文字，表达精简。","sourceL1Ids":["L1-001"]}]},"conversation":[["assistant","报告已交付。"],["user","这次补了资料，可以扩到五页，保留受访者原话。"]],"route":true,"layers":[true,null,false]},
   {"id":"plan-acceptance","conversation":[["assistant","本次任务建议三页，假设选这三条，素材以问卷为主。确认采用（推荐）/调整。"],["user","确认采用（推荐）"]],"route":false,"layers":[false,false,false]},
   {"id":"holdout-adopt-sample","holdout":true,"conversation":[["assistant","样稿共同写法是小标题先讲判断，再用数字支撑。可仅作本次参考或设为未来标准。"],["user","就按你提炼的这两点，设成我以后的写作标准。"]],"route":true,"layers":[true,true,true]},
   {"id":"holdout-approval","holdout":true,"conversation":[["assistant","这版换了小标题，也重排了图表。"],["user","这版不错，就发这个。"]],"route":false,"layers":[false,false,false]},

@@ -4,7 +4,7 @@
 
 ## 系统身份
 
-- 本契约中的 Memory 专指 `report-memory-agent` 管理的 L0 Writing Episode、L1 Atom Memory 和 L2B Memory Rubrics。
+- 本契约中的 Memory 专指 `report-memory-agent` 管理的 L0 Writing Episode、L1 Atom Memory 和 L2 Memory Rubrics。
 - Memory 是持久化用户级功能，默认启用。用户明确要求查询、关闭或重新开启时，主 Agent 委派 `report-memory-agent operation=settings`；关闭不会删除已有记忆。
 - WorkBuddy 的通用用户 Memory、项目 Memory 和工作日志不属于本 Expert，也不能替代 Capture。
 - Memory 已开启时，用户对已写报告提出写作反馈即应交给 Capture，无需另说“记住”，也不由主 Agent 预判是否值得长期保存。
@@ -34,13 +34,13 @@ python3 "<资源目录>/report/memory_access.py" set-root --path "<用户给的�
 
 用户选择本轮不启用记忆时，按 Memory 关闭处理：resolve 不返回候选、capture/reflect 不写入，只用 Base Rubrics 评测，并在交付时说明本轮未使用记忆。不要反复询问，也不要把写入失败当作记忆已更新。
 
-目录包含 `MEMORY.md`（设置、revision 及生效 L2B）、`memory-history.md`（实际变更记录）、`L0-episodes/` 和 `L1-atoms/`。不维护全量索引；历史仅按需查阅，不进入常规评测，不提供自动回滚。旧目录不自动删除。
+目录包含 `MEMORY.md`（设置、revision 及生效 L2）、`memory-history.md`（实际变更记录）、`L0-episodes/` 和 `L1-atoms/`。不维护全量索引；历史仅按需查阅，不进入常规评测，不提供自动回滚。旧目录不自动删除。
 
 ## 写作与 Judge
 
 - 写作前不执行面向主 Agent 的 Memory Recall。Writer 只按本轮用户要求和写作规则完成 R0。
-- Memory 关闭时，Resolution 只使用 Base Rubrics；开启后才读取 L2B 候选。
-- L2B 只维护独立 Memory Rubrics，不修改 Base，也不预先决定 Dimension。
+- Memory 关闭时，Resolution 只使用 Base Rubrics；开启后才读取 L2 候选。
+- L2 只维护独立 Memory Rubrics，不修改 Base，也不预先决定 Dimension。
 - Resolution Judge 根据当前任务判断激活、合并或新增哪些维度；只有它明确请求时，才由 Memory Agent 按准确 `sourceL1Ids` 返回 L1 来源，然后冻结本轮标准。
 - 同一 Loop 中 Memory 即使发生变化，也不改变已经冻结的 Resolution Plan；下一次新建 Loop 才读取新 revision。
 
@@ -59,9 +59,9 @@ python3 "<资源目录>/report/memory_access.py" set-root --path "<用户给的�
 - 固定顺序：按 [Writer 反馈分流](writer-orchestration.md#反馈分流) 完成直接 Rewrite 或新 Loop → 主 Agent 核验报告 → 委派 `report-memory-agent operation=capture` → 再交付或总结。重大修改也只针对本次用户反馈 Capture 一次，不把 Loop 的自动改写或 Judge 意见当成新反馈。
 - 单独的记忆委托直接交给 Memory Agent，不必先写或改报告；只有写法评价、没有要求改稿时也可直接 Capture。保存意图或材料范围不清时只确认缺失信息，不要求用户逐条重新输入。
 - 为本次反馈生成一个稳定 `captureId`，重试时必须复用；提供该 ID、task、audience/project、必要的修改前后内容，以及足以理解本次反馈和授权范围的相关原始对话。标明用户与 Assistant，不限制消息条数，不截断用户原话或关键确认语境。用户通过选项回答时，附原问题、选项及实际选择；委托提炼时，附材料/路径和授权范围。
-- 主 Agent 负责转交证据，不负责提炼偏好，不用总结替代原话，不预先指定 Layer、Scope。Memory Agent 根据原始对话判断，不把主 Agent 的总结当作用户表达；关键语境缺失时先向主 Agent 索取，原对话未说明时再由主 Agent 向用户确认。按实际结果汇报，区分用户原话与受托提炼，不把 L0/L1 保存说成 L2B 已更新。
+- 主 Agent 负责转交证据，不负责提炼偏好，不用总结替代原话，不预先指定 Layer、Scope。Memory Agent 根据原始对话判断，不把主 Agent 的总结当作用户表达；关键语境缺失时先向主 Agent 索取，原对话未说明时再由主 Agent 向用户确认。按实际结果汇报，区分用户原话与受托提炼，不把 L0/L1 保存说成 L2 已更新。
 - 普通报告写作反馈一律走 Capture。即使与已有记忆冲突，也由 Memory Agent 在同一次 Capture 中更新、合并或保持不变；Capture 期间不得改走 Manage，也不得先删除旧记忆。
-- 成功结束标记为 `MEMORY_CAPTURE_COMPLETED`；相同 `captureId` 的幂等返回也视为同一次成功。失败标记为 `MEMORY_CAPTURE_FAILED: <reason>`。失败时如实说明，不得把 L0 保存描述成 L2B 已更新，也不得更换 `captureId` 反复提交。
+- 成功结束标记为 `MEMORY_CAPTURE_COMPLETED`；相同 `captureId` 的幂等返回也视为同一次成功。失败标记为 `MEMORY_CAPTURE_FAILED: <reason>`。失败时如实说明，不得把 L0 保存描述成 L2 已更新，也不得更换 `captureId` 反复提交。
 
 ## 不可变资产
 
@@ -71,6 +71,8 @@ python3 "<资源目录>/report/memory_access.py" set-root --path "<用户给的�
 - 只有用户明确提出开发或调试 Expert 时，才允许在源码仓库修复；不得热改安装副本。
 
 ## Memory 管理
+
+- 旧文件中的 L2B 按 L2 使用，旧回执 `l2bChanges` 按 `l2Changes` 理解；新输出用 L2。名称整理交给 Memory Agent 按兼容约定随正常写入完成，主 Agent 不直接迁移文件。
 
 - 用户明确要求开启、关闭或查询状态时，委派 `operation=settings`；普通反馈不改变当前开关状态。
 - 用户明确要求查看、纠错、重新分类、合并或删除 Memory 本身时，委派 `operation=manage`。

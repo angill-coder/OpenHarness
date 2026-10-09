@@ -19,7 +19,7 @@ function prompt(variant,role){
 }
 const contract={
  lead:'这是隔离的调度决策测试，不执行写作或文件操作。输入给出了完整对话与虚拟状态，若涉及改稿则视为已经完成并核验。只输出JSON：{"capture":true或false,"handoff":"若委派会传递哪些来源与语境","reason":"依据"}。判断是否因该用户输入委派Capture；不要评价测试预期。',
- curator:'这是隔离的记忆决策测试，视为虚拟状态已读取，不访问真实记忆、不实际写文件，不需SendMessage。lastReflectionAt为今天，不需复盘。只输出JSON：{"l0Changes":[],"l1Changes":[],"l2bChanges":[],"reason":"依据"}。每项写action、content、scope（适用时）、sourceIds和来源性质。列出本次会做的实际增量；无变更用空数组。不要因测试改变判断。'
+ curator:'这是隔离的记忆决策测试，视为虚拟状态已读取，不访问真实记忆、不实际写文件，不需SendMessage。lastReflectionAt为今天，不需复盘。只输出JSON：{"l0Changes":[],"l1Changes":[],"l2Changes":[],"reason":"依据"}。每项写action、content、scope（适用时）、sourceIds和来源性质。列出本次会做的实际增量；无变更用空数组。不要因测试改变判断。'
 };
 const roles=process.env.ROLES?.split(',')||['lead','curator'];
 if(roles.some(r=>!contract[r]))throw Error('ROLES must contain lead or curator');
@@ -29,7 +29,7 @@ async function run({c,v,role}){
  const dir=path.join(output,`eval-${c.id}`,v+'-'+role);fs.mkdirSync(dir,{recursive:true});
  if(fs.existsSync(path.join(dir,'run.json'))){if(!JSON.parse(fs.readFileSync(path.join(dir,'run.json'))).passed)failed=true;return;}
  const sys=prompt(v,role)+'\n\n'+contract[role];
- const input={operation:role==='curator'?'capture':undefined,captureId:c.id,memoryRoot:path.join(dir,'virtual-memory'),task:'研究报告',audience:'董事会',project:'研究项目',conversation:c.conversation,memory:{enabled:true,revision:0,lastReflectionAt:'today',activeL2B:[],...c.memory}};
+ const input={operation:role==='curator'?'capture':undefined,captureId:c.id,memoryRoot:path.join(dir,'virtual-memory'),task:'研究报告',audience:'董事会',project:'研究项目',conversation:c.conversation,memory:{enabled:true,revision:0,lastReflectionAt:'today',activeL2:[],...c.memory}};
  fs.writeFileSync(path.join(dir,'prompt.md'),sys);fs.writeFileSync(path.join(dir,'input.json'),JSON.stringify(input,null,2));
  const args=[cli,'-p','--model','hy4-preview-ioa','--effort','medium','--tools','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--setting-sources','','--settings','{"autoMemoryEnabled":false}','--no-session-persistence','--max-turns','1','--output-format','json','--system-prompt',sys,JSON.stringify(input)];
  const start=Date.now(),child=spawn(process.execPath,args,{cwd:dir,env:process.env,stdio:['ignore','pipe','pipe']});let stdout='',stderr='';
@@ -46,12 +46,12 @@ async function run({c,v,role}){
  if(decision){
   if(role==='lead')check('Capture routing',decision.capture===c.route,decision.reason);
   else {
-   for(const [i,k] of ['l0Changes','l1Changes','l2bChanges'].entries()){
+   for(const [i,k] of ['l0Changes','l1Changes','l2Changes'].entries()){
     check(k+' valid array',Array.isArray(decision[k]),JSON.stringify(decision[k]));
     if(c.layers[i]!==null)check(k+' expected presence',Array.isArray(decision[k])&&(decision[k].length>0)===c.layers[i],JSON.stringify(decision[k]));
    }
-   if(c.scope)check('L2B scope',decision.l2bChanges?.length>0&&decision.l2bChanges.every(x=>x.scope===c.scope),JSON.stringify(decision.l2bChanges));
-   if(c.forbid)check('unendorsed content not in L2B',!JSON.stringify(decision.l2bChanges).includes(c.forbid),JSON.stringify(decision.l2bChanges));
+   if(c.scope)check('L2 scope',decision.l2Changes?.length>0&&decision.l2Changes.every(x=>x.scope===c.scope),JSON.stringify(decision.l2Changes));
+   if(c.forbid)check('unendorsed content not in L2',!JSON.stringify(decision.l2Changes).includes(c.forbid),JSON.stringify(decision.l2Changes));
   }
  }
  const passed=expectations.filter(x=>x.passed).length;
