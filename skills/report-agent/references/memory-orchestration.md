@@ -34,11 +34,11 @@ python3 "<资源目录>/report/memory_access.py" set-root --path "<用户给的�
 
 用户选择本轮不启用记忆时，按 Memory 关闭处理：resolve 不返回候选、capture/reflect 不写入，只用 Base Rubrics 评测，并在交付时说明本轮未使用记忆。不要反复询问，也不要把写入失败当作记忆已更新。
 
-目录包含 `MEMORY.md`（设置、revision 及生效 L2）、`memory-history.md`（实际变更记录）、`memory-stats.json`（使用统计）、`L0-episodes/` 和 `L1-atoms/`。MEMORY 按 [统一模板](memory-template.md) 保存，新库 revision 从 1 开始，旧版本继续递增。不维护全量索引；历史仅按需查阅，不进入常规评测，不提供自动回滚。旧目录不自动删除。
+目录包含 `MEMORY.md`（设置、revision 及生效 L2）、`memory-history.md`（实际变更记录）、`L0-episodes/` 和 `L1-atoms/`。MEMORY 按 [统一模板](memory-template.md) 保存，新库 revision 从 1 开始，旧版本继续递增。不维护全量索引；历史仅按需查阅，不进入常规评测，不提供自动回滚。旧目录不自动删除。
 
 ## 写作与 Judge
 
-L2 生效标准全库最多 1,000 条；容量、时间及按 Loop 去重的使用统计见 [容量与使用统计](memory-capacity.md)。`memory-stats.json` 只供整理参考，不传入常规 Judge，也不当作 L0 反馈。
+L2 生效标准全库最多 1,000 条；容量、时间及按 Loop 去重的使用统计见 [容量与使用统计](memory-capacity.md)。时间和使用次数保存在 L2 条目内，仅供整理参考，不作为评分标准或 L0 反馈。
 
 - 写作前不执行面向主 Agent 的 Memory Recall。Writer 只按本轮用户要求和写作规则完成 R0。
 - Memory 关闭时，Resolution 只使用 Base Rubrics；开启后才读取 L2 候选。

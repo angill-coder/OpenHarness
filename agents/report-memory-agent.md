@@ -76,14 +76,7 @@ L2 只维护 Memory Rubrics。可选 `dimensionCandidate` 供 Resolution Judge �
 
 ### 4. L2 容量与压缩
 
-生效 L2 全库合计最多 **1,000 条**，不含 Base、L0/L1 和失效项；整个 `MEMORY.md` 文件另有 **300,000 字节（约 0.286 MiB）**上限，防止少数巨型规则撑大文件。任一超限都需整理。Capture、Manage 修改 L2 前后及每次 Reflection，按 [容量与使用统计](../skills/report-agent/references/memory-capacity.md) 调用脚本检查；预计超限时先整理再保存，不靠模型估算条数或文件大小。
-
-- 先处理重复、矛盾和确认过时的内容，优先修改、合并已有规则，保留适用范围、必要例外和来源。
-- **可以参考 `memory-stats.json` 的新鲜度（`updatedAt`）和热度（`useCount`、`lastUsedAt`），优先保留最新、最热的要求**；优先审查既旧又少用的规则。使用次数少不一定代表规则不重要：新规则可能还没机会使用，特定场景的规则可能只在少数任务中适用；没有历史统计的旧规则，也不能视为从未使用。不要仅凭这些情况删除规则。
-- 时间与热度辅助内容判断，不代替证据；不为凑数删除仍有效的重要要求。精简措辞、改格式或合并本身不刷新实质更新时间。
-- **不要通过把多条规则塞进一个巨型 Rubric 来“达标”**。只合并同一适用范围内语义重叠的标准，维持可独立评判的粒度；必要细节留在来源 L1。
-
-整理后仍无法安全降到上限内，新要求先留 L1，不强行晋升；已有超限无法解决时如实报告，不宣称检查通过。脚本不决定删除内容，Memory Agent 仍需核验来源，并在变更记录中保留删除原文、合并去向与理由。
+生效 L2 全库最多 **1,000 条**，整个 `MEMORY.md` 最大 **0.3 MB（300,000 字节）**。Capture、Manage 修改 L2 前后及每次 Reflection，按 [容量检查](../skills/report-agent/references/memory-capacity.md) 检查。任一超限或拟写内容将超限时，读取 [记忆压缩](../skills/report-agent/references/memory-compression.md) 后处理；不需要压缩时不读取。
 
 ## 存储
 
@@ -91,11 +84,12 @@ L2 只维护 Memory Rubrics。可选 `dimensionCandidate` 供 Resolution Judge �
 
 - `MEMORY.md`：设置（enabled、lastReflectionAt）、当前 revision 和 active L2；每次操作显式读取，不依赖自动注入。
 - `memory-history.md`：按 revision 记录已完成的记忆变更，仅审查、纠错或理解旧规则时按需读取，不进入常规评测上下文。
-- `memory-stats.json`：脚本维护 L2 的时间与按 Loop 去重的使用统计；整理时按需读取，不进入常规 Judge 上下文，也不作为用户反馈。
 - `L0-episodes/`：L0，按 Episode 单独保存。
 - `L1-atoms/`：L1，按 Scope 保存并保留 sourceEpisodeIds。
 
-记忆内容使用 Markdown，统计元数据单独使用 JSON。不维护全量 L0/L1 索引或 MEMORY 快照；按 ID 在对应目录查找，保留 L2 → sourceL1Ids → L1 → sourceEpisodeIds → L0 的来源链。已有旧目录不自动删除。不要写系统提示、推理过程、工具日志或非写作偏好。
+每条 L2 的标题 ID 为 `M-YYYYMMDD-NNN-[x]`：日期是最近实质更新日，NNN 是该日编号，x 是被 Resolution 激活的 Loop 次数；如 `M-20261009-001-[3]`。不另写 `updatedAt`、`useCount` 字段。日期由 Curator 维护，次数由 Resolution 更新；格式见 [MEMORY 模板](../skills/report-agent/references/memory-template.md)，改号见 [容量与统计](../skills/report-agent/references/memory-capacity.md)，遇到旧格式才读取 [Reflection 的结构整理](../skills/report-agent/references/memory-reflection.md#1-检查并整理结构)。
+
+不维护全量 L0/L1 索引或 MEMORY 快照；按 ID 在对应目录查找，保留 L2 → sourceL1Ids → L1 → sourceEpisodeIds → L0 的来源链。已有旧目录不自动删除。不要写系统提示、推理过程、工具日志或非写作偏好。
 
 初始化及 Capture、Manage、Reflection 写入均读取并遵循 [MEMORY 模板](../skills/report-agent/references/memory-template.md)，用现有脚本校验拟写文件和保存结果。MEMORY 只放设置、版本和生效标准，不写任务日志、复盘总结或未晋升要求；格式检查不能代替来源与长期适用性判断。
 
@@ -109,7 +103,7 @@ L2 只维护 Memory Rubrics。可选 `dimensionCandidate` 供 Resolution Judge �
 
 Capture、Manage、Reflection 有实际记忆变化时，先保存 L0/L1，再更新并核验 `MEMORY.md` 与 revision，最后向 `memory-history.md` 追加一条记录：revision、日期、实际变更、原因及来源 ID。L2 修改保留必要的前后差异，删除保留旧原文，合并注明去向；仅 L0/L1 变化时简记 ID，不重复正文。无变化或仅更新复盘时间时不追加，不在 MEMORY 中累计操作日志。
 
-L2 保存后按容量参考同步统计；失败保留已落盘内容并报告统计待补，不重复晋升或递增 revision。单纯记录 Loop 使用不改变记忆内容 revision，也不生成 Episode 或变更历史。
+L2 新增或实质更新时按模板更新 ID 中的日期，保留同一规则的已有使用次数；不再调用统计写入脚本。单纯增加 ID 中的次数不改变记忆内容 revision，也不生成 Episode 或变更历史。
 
 追加历史失败时保留已生效记忆，如实报告“记忆已更新、历史待补记”；后续按该 revision 核验补记，不重复写入、不重新推进版本。历史不用于自动回滚，被撤销规则不再生效；不凭当前状态编造旧历史。
 
@@ -133,7 +127,7 @@ Capture 先按上述原则核验反馈或委托；不符合则直接返回不写
   "enabled": true,
   "revision": "<current revision>",
   "candidates": [{
-    "id": "MR-...",
+    "id": "M-YYYYMMDD-NNN-[x]",
     "statement": "可直接评判的标准",
     "scope": "core|audience|project",
     "scopeValue": "audience/project 才填写",
@@ -152,7 +146,7 @@ Memory 关闭或没有候选时仍返回成功，`candidates=[]`。
 只返回请求 ID 对应的 L1 内容、Scope、sourceEpisodeIds，以及缺失 ID；不得顺带返回其他 Atom：
 
 ```json
-{"marker":"MEMORY_SOURCE_INSPECTION_COMPLETED","revision":"...","evidence":[{"memoryId":"MR-...","sources":[{"id":"L1-...","content":"...","scope":"core","sourceEpisodeIds":["EP-..."]}],"missingSourceL1Ids":[]}]}
+{"marker":"MEMORY_SOURCE_INSPECTION_COMPLETED","revision":"...","evidence":[{"memoryId":"M-YYYYMMDD-NNN-[x]","sources":[{"id":"L1-...","content":"...","scope":"core","sourceEpisodeIds":["EP-..."]}],"missingSourceL1Ids":[]}]}
 ```
 
 ### `operation=capture`

@@ -89,8 +89,7 @@ class StructureTests(unittest.TestCase):
                                  "--root", str(self.root), "validate"], capture_output=True)
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stdout)["marker"], "MEMORY_FORMAT_NEEDS_REVIEW")
-        with self.assertRaises(ValueError):
-            m.sync(self.root, {"revision": 1})
+        self.assertEqual(m.check(self.root, self.file)["marker"], "MEMORY_FORMAT_NEEDS_REVIEW")
         self.assertFalse((self.root / "memory-stats.json").exists())
 
 
