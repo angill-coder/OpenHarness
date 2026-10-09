@@ -68,6 +68,8 @@
 
 统计另存 `memory-stats.json`，不进入常规 Judge 上下文；Memory Agent 参考新鲜度和热度优先保留最新、最热的要求，不能将多条规则塞进巨型 Rubric 规避上限。Reflection 是调用时检查并补做，不提供无人使用时也运行的后台定时任务。
 
+`MEMORY.md` 遵循 [统一模板](skills/report-agent/references/memory-template.md)，只保存设置、revision 与生效 L2；新库 revision 从 1 开始，旧库继续递增。Reflection 按需读取 [独立指引](skills/report-agent/references/memory-reflection.md)，先整理结构，再复核来源与内容。脚本只检查格式，不自动迁移或决定规则是否值得保留。
+
 不要让旧版专家与本专家团同时修改同一份报告或记忆。测试需要干净记忆时应明确隔离路径，不自动清空用户内容。
 
 ## 安装与验证

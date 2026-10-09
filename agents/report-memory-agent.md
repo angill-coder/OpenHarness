@@ -97,9 +97,11 @@ L2 只维护 Memory Rubrics。可选 `dimensionCandidate` 供 Resolution Judge �
 
 记忆内容使用 Markdown，统计元数据单独使用 JSON。不维护全量 L0/L1 索引或 MEMORY 快照；按 ID 在对应目录查找，保留 L2 → sourceL1Ids → L1 → sourceEpisodeIds → L0 的来源链。已有旧目录不自动删除。不要写系统提示、推理过程、工具日志或非写作偏好。
 
-首次使用且目录不存在或为空时，创建 `MEMORY.md`（enabled=true、revision=0、lastReflectionAt 未设置、L2 为空）；其余目录按需创建。已有内容但缺少或无法读取 `MEMORY.md` 时，报告问题，不重新初始化或覆盖。用户可直接查看和修改这些文件；每次写入前重新核对相关文件内容，先理解并合并新增的人工修改，不按旧上下文整库回写。
+初始化及 Capture、Manage、Reflection 写入均读取并遵循 [MEMORY 模板](../skills/report-agent/references/memory-template.md)，用现有脚本校验拟写文件和保存结果。MEMORY 只放设置、版本和生效标准，不写任务日志、复盘总结或未晋升要求；格式检查不能代替来源与长期适用性判断。
 
-`MEMORY.md` 顶部明确写 `revision: N` 作为唯一版本号（初始为 0），并维护 Memory 开关、`lastReflectionAt`和当前 active L2。持久化修改成功才推进版本，无文件变化不递增。已有 revision 继续递增，不重置；只有旧文件缺失版本号时才核验现状并登记基线。版本号用于识别当前状态，不提供历史回滚。每次操作开始重新读取当前 revision，不能依赖旧上下文。
+首次使用且目录不存在或为空时，创建 `MEMORY.md`（enabled=true、revision=1、lastReflectionAt=null、L2 为空）；其余目录按需创建。已有内容但缺少或无法读取 `MEMORY.md` 时，报告问题，不重新初始化或覆盖。用户可直接查看和修改这些文件；每次写入前重新核对相关文件内容，先理解并合并新增的人工修改，不按旧上下文整库回写。
+
+`MEMORY.md` 顶部明确写 `revision: N` 作为唯一版本号（新库初始为 1），并维护 Memory 开关、`lastReflectionAt` 和当前 active L2。实际内容或结构修改成功才递增，同一次操作只递增一次；仅更新复盘时间或使用统计不递增。已有 revision 不重置，旧版 0 兼容读取，下次实际修改进入 1；只有旧文件缺失版本号时才核验现状并登记基线 1。版本号用于识别当前状态，不提供历史回滚。每次操作开始重新读取当前 revision，不能依赖旧上下文。
 
 ### 变更记录
 
@@ -117,7 +119,7 @@ L2 保存后按容量参考同步统计；失败保留已落盘内容并报告�
 
 ### 每日 Reflection 检查
 
-Capture 先按上述原则核验反馈或委托；不符合则直接返回不写入，不触发 Reflection。其余情况先检查 `lastReflectionAt`。当地时间已过 16:30 且今天尚未复盘，或上一个自然日仍未复盘时，先执行一次 Reflection，再继续原操作；同一天不得重复。纯原生 Expert 不依赖后台调度，长时间未使用时在下一次调用补做，不为补齐空闲日期逐日运行。
+Capture 先按上述原则核验反馈或委托；不符合则直接返回不写入，不触发 Reflection。其余情况先检查 `lastReflectionAt`。当地时间已过 16:30 且今天尚未复盘，或上一个自然日仍未复盘时，先执行一次 Reflection，再继续原操作；同一天成功完成后不重复，失败不更新完成时间。纯原生 Expert 不依赖后台调度，长时间未使用时在下一次调用补做，不为补齐空闲日期逐日运行。
 
 ### `operation=resolve`
 
@@ -171,9 +173,7 @@ Memory 关闭或没有候选时仍返回成功，`candidates=[]`。
 
 ### `operation=reflect`
 
-先检查 `memoryRoot` 内的目录和文件是否符合上文存储约定；不一致时做最小格式整理，再复盘内容。保留既有 ID、来源链、启停状态、失效标记和用户手工修改，不因整理新增或晋升记忆。`MEMORY.md` 中的旧索引移除前先核验对应记录已保留，已有变更历史移入 `memory-history.md`，不编造缺失历史；旧目录不自动删除。无法可靠对应的内容保留并报告，不覆盖猜测。实际整理完成后沿用现有 revision 递增并按变更记录约定记一条格式整理记录；已符合规范则不重复整理。
-
-复盘尚未处理或上次 Capture 中断的 Episodes，合并重复、修正冲突和 Scope、剔除过时项并精简 L2。只做有证据的最小更新，更新 `lastReflectionAt` 并按实际文件修改推进 revision，不生成历史副本。若记忆内容无变化，返回 `MEMORY_REFLECTION_COMPLETED status=unchanged`；复盘时间的元数据更新不意味着形成了新 Rubric。
+执行时读取 [Reflection 指引](../skills/report-agent/references/memory-reflection.md)：先检查结构，再复核、整理内容，检查遗漏，最后校验保存。到期自动复盘与用户主动要求整理使用同一指引；其他操作不必预读。无变化返回 `MEMORY_REFLECTION_COMPLETED status=unchanged`；未解决或失败如实报告，不把格式通过当成提炼正确。
 
 ### `operation=settings`
 
