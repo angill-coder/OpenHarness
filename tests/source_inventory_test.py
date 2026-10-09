@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 MODULE = runpy.run_path(str(Path(__file__).resolve().parents[1] / "resources/evidence/scripts/source_inventory.py"))
@@ -38,6 +39,32 @@ class InventoryTests(unittest.TestCase):
     def baseline(self):
         self.run_scan()
         self.publish()
+
+    def test_publish_needs_no_temp_rename_or_delete(self):
+        self.run_scan()
+        with patch("tempfile.mkstemp", side_effect=AssertionError("temp creation")), \
+                patch("os.replace", side_effect=AssertionError("rename")), \
+                patch("os.unlink", side_effect=AssertionError("delete")):
+            self.assertEqual(self.publish()["dataVersion"], "D1")
+        self.assertEqual(list(self.root.glob(".source-inventory-*.tmp")), [])
+        self.assertEqual(check(self.root)["status"], "ok")
+
+    def test_legacy_temp_is_ignored_not_deleted(self):
+        self.run_scan()
+        leftover = self.root / ".source-inventory-old.tmp"
+        leftover.write_text("partial manifest", encoding="utf-8")
+        self.publish()
+        self.assertEqual(check(self.root)["status"], "ok")
+        self.assertEqual(leftover.read_text(encoding="utf-8"), "partial manifest")
+        ordinary = self.root / "实际素材.tmp"
+        ordinary.write_text("source", encoding="utf-8")
+        self.assertIn(ordinary.name, self.run_scan()["changes"]["added"])
+
+    def test_unchanged_confirm_does_not_rewrite(self):
+        self.baseline()
+        self.run_scan()
+        with patch.object(Path, "write_text", side_effect=AssertionError("unneeded write")):
+            self.assertFalse(self.publish()["versionChanged"])
 
     def set_policy_version(self, filename, version):
         payload = MODULE["load"](filename)
